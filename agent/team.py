@@ -13,6 +13,7 @@ from agno.agent import Agent
 from agno.db.base import BaseDb
 from agno.models.base import Model
 from agno.team import Team
+from agno.utils.log import log_info
 
 from agent.factory import build_model
 from agent.tools import DEFAULT_TOOLS
@@ -52,11 +53,18 @@ def build_team(
     db: BaseDb | None = None,
 ) -> Team:
     model = model or build_model()
+    members = [_general_assistant(model), _researcher(model)]
+    lead_instructions = load_prompt("team/lead.md", config.system_prompt)
+    log_info(
+        f"building team 'ChatbotTeam': members={[m.name for m in members]}, "
+        f"lead_prompt={len(lead_instructions)} chars, db={'injected' if db else 'default'}, "
+        f"history=True (n=10), memory={config.tools_enabled}"
+    )
     return Team(
         name="ChatbotTeam",
         model=model,  # lead / router brain
-        members=[_general_assistant(model), _researcher(model)],
-        instructions=load_prompt("team/lead.md", config.system_prompt),
+        members=members,
+        instructions=lead_instructions,
         db=db or get_db(),
         add_history_to_context=True,
         num_history_runs=10,

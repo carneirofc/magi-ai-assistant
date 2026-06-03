@@ -11,6 +11,8 @@ overridable via env while making local editing a matter of touching markdown.
 
 from pathlib import Path
 
+from agno.utils.log import log_info, log_warning
+
 # Repo-root/prompts. core/ is one level down, so parent.parent is the root.
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
@@ -26,5 +28,10 @@ def load_prompt(name: str, default: str = "") -> str:
     try:
         text = path.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
+        log_warning(f"prompt '{name}' not found at {path}; using default ({len(default)} chars)")
         return default
-    return text or default
+    if not text:
+        log_warning(f"prompt '{name}' at {path} is empty; using default ({len(default)} chars)")
+        return default
+    log_info(f"prompt '{name}' loaded from {path} ({len(text)} chars)")
+    return text

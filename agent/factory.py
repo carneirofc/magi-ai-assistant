@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from agno.agent import Agent
 from agno.db.base import BaseDb
 from agno.models.base import Model
+from agno.utils.log import log_info
 
 from agent.tools import DEFAULT_TOOLS
 from core.config import config
@@ -21,6 +22,10 @@ def build_model(provider: str | None = None, model_id: str | None = None) -> Mod
     """Provider-agnostic model factory. Defaults from config; override per call."""
     provider = (provider or config.model_provider).lower()
     model_id = model_id or config.model_id
+    log_info(
+        f"building model: provider={provider}, id={model_id}, "
+        f"anthropic_base_url={'custom' if config.anthropic_base_url else 'default'}"
+    )
     if provider == "anthropic":
         from agno.models.anthropic import Claude
 
@@ -58,9 +63,17 @@ def build_agent(
     """
     if tools is None:
         tools = DEFAULT_TOOLS if config.tools_enabled else []
+    resolved_model = model or build_model()
+    resolved_system = system_message or config.system_prompt
+    tool_names = [getattr(t, "name", getattr(t, "__name__", type(t).__name__)) for t in tools]
+    log_info(
+        f"building agent: system_prompt={len(resolved_system)} chars, tools={tool_names or 'none'}, "
+        f"db={'on' if db else 'off'}, history={add_history_to_context} (n={num_history_runs}), "
+        f"memory={enable_user_memories}"
+    )
     return Agent(
-        model=model or build_model(),
-        system_message=system_message or config.system_prompt,
+        model=resolved_model,
+        system_message=resolved_system,
         tools=list(tools),
         db=db,
         add_history_to_context=add_history_to_context,
@@ -82,6 +95,7 @@ def build_discord_agent(db: BaseDb | None = None, **overrides) -> Agent:
     Long-term user memory needs tool calling; it's auto-disabled when the model
     lacks tool support (config.tools_enabled). Short-term history works regardless.
     """
+    log_info("preset: building discord agent (persisted history + user memory)")
     return build_agent(
         db=db or get_db(),
         add_history_to_context=True,

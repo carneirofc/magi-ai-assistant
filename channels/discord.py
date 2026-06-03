@@ -1,15 +1,18 @@
-"""Discord channel — wraps agno DiscordClient around the project agent (or team).
+"""Discord channel — wraps the project's custom DiscordClient (clients.mydiscord)
+around the project agent (or team).
 
-DiscordClient already forwards per-user `user_id` (Discord author id) and
-per-thread `session_id`, so long-term memory and short-term history are scoped
-correctly out of the box. `db` is injectable for tests / alternate stores.
+DiscordClient forwards per-user `user_id` (Discord author id) and a per-chat
+`session_id` (channel id by default, or thread id once a thread is created on
+request), so long-term memory and short-term history are scoped correctly out of
+the box. `db` is injectable for tests / alternate stores.
 """
 
 from agno.db.base import BaseDb
-from agno.integrations.discord import DiscordClient
+from agno.utils.log import log_info
 
 from agent.factory import build_discord_agent
 from agent.team import build_team
+from clients.mydiscord import DiscordClient
 from core.config import config
 
 
@@ -18,6 +21,10 @@ def build_discord_client(
 ) -> DiscordClient:
     if not config.DISCORD_BOT_TOKEN:
         raise RuntimeError("DISCORD_BOT_TOKEN not set in environment")
+    log_info(
+        f"building discord client: mode={'team' if use_team else 'agent'}, "
+        f"db={'injected' if db else 'default'}"
+    )
     if use_team:
         return DiscordClient(team=build_team(db=db))
     return DiscordClient(agent=build_discord_agent(db=db))
