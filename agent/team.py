@@ -18,6 +18,7 @@ from agent.factory import build_model
 from agent.tools import DEFAULT_TOOLS
 from core.config import config
 from core.db import get_db
+from core.prompts import load_prompt
 
 # Honor model tool-calling capability (see config.tools_enabled).
 _TOOLS = DEFAULT_TOOLS if config.tools_enabled else []
@@ -26,7 +27,9 @@ _TOOLS = DEFAULT_TOOLS if config.tools_enabled else []
 def _general_assistant(model: Model) -> Agent:
     return Agent(
         name="Assistant",
-        role="Handle general conversation and everyday questions.",
+        role=load_prompt(
+            "team/assistant.md", "Handle general conversation and everyday questions."
+        ),
         model=model,
         tools=_TOOLS,
     )
@@ -35,7 +38,9 @@ def _general_assistant(model: Model) -> Agent:
 def _researcher(model: Model) -> Agent:
     return Agent(
         name="Researcher",
-        role="Look up facts and answer knowledge questions precisely.",
+        role=load_prompt(
+            "team/researcher.md", "Look up facts and answer knowledge questions precisely."
+        ),
         model=model,
         tools=_TOOLS,
     )
@@ -51,7 +56,7 @@ def build_team(
         name="ChatbotTeam",
         model=model,  # lead / router brain
         members=[_general_assistant(model), _researcher(model)],
-        instructions=config.system_prompt,
+        instructions=load_prompt("team/lead.md", config.system_prompt),
         db=db or get_db(),
         add_history_to_context=True,
         num_history_runs=10,

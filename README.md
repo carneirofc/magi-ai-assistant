@@ -9,9 +9,16 @@ One shared agent brain, many channel adapters. Model-agnostic (Claude default, O
 core/agent_service.py   shared brain: messages -> agent.run() -> reply
 agent/factory.py        builds the Agno Agent (provider from config)
 core/config.py          env-driven settings (single source of truth)
+core/prompts.py         loads editable markdown prompts from prompts/
 channels/openai_api.py  OpenAI-compatible HTTP shim (M1 client: OpenWebUI)
 main.py                 entrypoint (serves the API)
 ```
+
+## Edit prompts
+
+Agent instructions live as markdown in [`prompts/`](prompts/README.md) — edit
+`prompts/system.md` (single-agent brain) or `prompts/team/*.md` (team roles), no
+code change. `SYSTEM_PROMPT` env var overrides the file when set.
 
 Channels normalize their inbound payload into OpenAI-style messages and call
 `AgentService`. Discord, Telegram, and email monitoring are later milestones.

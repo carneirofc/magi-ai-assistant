@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
+from core.prompts import load_prompt
+
 load_dotenv()
 
 
@@ -18,9 +20,10 @@ class Config:
     anthropic_base_url: str | None = os.getenv("ANTHROPIC_BASE_URL")
     ollama_host: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
-    # Agent behavior.
-    system_prompt: str = os.getenv(
-        "SYSTEM_PROMPT", "You are a helpful personal AI assistant."
+    # Agent behavior. Edit prompts/system.md to change the default brain; the
+    # SYSTEM_PROMPT env var overrides the file for per-deploy customization.
+    system_prompt: str = os.getenv("SYSTEM_PROMPT") or load_prompt(
+        "system.md", "You are a helpful personal AI assistant."
     )
 
     # Persistence (sessions + long-term user memories).
