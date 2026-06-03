@@ -27,5 +27,5 @@ def enabled_tools(tools: Sequence | None = None) -> list:
     explicit list to override the default entirely.
     """
     if tools is None:
-        tools = DEFAULT_TOOLS if config.tools_enabled else []
+        tools = DEFAULT_TOOLS
     return list(tools)

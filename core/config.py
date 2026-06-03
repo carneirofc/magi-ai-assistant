@@ -31,7 +31,7 @@ class Config:
 
     # Whether the selected model supports tool/function calling. Some local
     # Ollama models (e.g. gpt-oss) reject tools with HTTP 400 — set false there.
-    tools_enabled: bool = os.getenv("MODEL_SUPPORTS_TOOLS", "true").lower() == "true"
+    # tools_enabled: bool = os.getenv("MODEL_SUPPORTS_TOOLS", "true").lower() == "true"
 
     # Discord bot.
     DISCORD_BOT_TOKEN: str | None = os.getenv("DISCORD_BOT_TOKEN")

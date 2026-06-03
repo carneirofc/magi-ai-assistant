@@ -27,24 +27,45 @@ def build_team(
     db: BaseDb | None = None,
 ) -> Team:
 
-    model_ollama = build_model(model_id=ModelsEnum.OLLAMA_GEMMA_4_26B)
-    members = [builder(model_ollama) for builder in [build_assistant, build_researcher]]
-    
+    model_lead = build_model(model_id=ModelsEnum.DATABRICKS_CLAUDE_SONNET_4_6)
+    model_members = build_model(model_id=ModelsEnum.OLLAMA_GEMMA_4_26B)
+
+    members = [builder(model_members) for builder in [build_assistant, build_researcher]]
+
     lead_instructions = load_prompt("team/lead.md", config.system_prompt)
     log_info(
         f"building team 'ChatbotTeam': members={[m.name for m in members]}, "
         f"lead_prompt={len(lead_instructions)} chars, db={'injected' if db else 'default'}, "
         f"history=True (n=10)"
     )
+    
+    from agno.tools import tool
+    @tool(
+        name="agent_introspection",
+        description="Introspect self and the team's own members and tools. Use to decide WHO to call for WHAT.",
+    )
+    def introspect_tools() ->str:
+        """Return a list of team members and tools, with descriptions."""
+        introspection = "Self-introspection:\n"
+        introspection += f"Model lead: {model_lead}\n"
+        introspection += "Team members:\n"
+        for member in members:
+            introspection += f"- {member.name}: {member.role}\n"
+        return introspection
+
     return Team(
         name="ChatbotTeam",
-        model=model_ollama,  # lead / router brain
+        model=model_lead,  # lead / router brain — must support tools
         members=members,
         instructions=lead_instructions,
         db=db or get_db(),
+
         add_history_to_context=True,
         num_history_runs=10,
-        update_memory_on_run=True,
+
+        update_memory_on_run=True, # only if model support tools
         markdown=True,
         telemetry=False,
+        tools=[introspect_tools],
+
     )
