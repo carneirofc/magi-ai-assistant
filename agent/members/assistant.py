@@ -15,9 +15,7 @@ from core.prompts import load_prompt
 def build_assistant(model: Model) -> Agent:
     return Agent(
         name="Assistant",
-        role=load_prompt(
-            "team/assistant.md", "Handle general conversation and everyday questions."
-        ),
+        role=load_prompt("team/assistant.md"),
         model=model,
         tools=enabled_tools(),
     )
