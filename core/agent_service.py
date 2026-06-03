@@ -6,12 +6,12 @@ from collections.abc import AsyncIterator
 from agno.models.message import Message
 from agno.run.agent import RunContentEvent
 
-from agent.factory import build_agent
+from agent.factory import build_stateless_agent
 
 
 class AgentService:
     def __init__(self) -> None:
-        self._agent = build_agent()
+        self._agent = build_stateless_agent()
 
     @staticmethod
     def _to_messages(messages: list[dict]) -> list[Message]:

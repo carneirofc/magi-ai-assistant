@@ -1,15 +1,26 @@
-"""Build the Agno Agent. Provider is config-driven so the model swaps without
-touching the rest of the stack (Claude default, Ollama for local)."""
+"""Agent construction.
+
+`build_model` and `build_agent` are the injectable primitives — every argument
+defaults from config but can be overridden, so behavior is parameterized rather
+than hard-coded. The named presets below (stateless / discord) just pick sensible
+defaults for each channel by calling `build_agent`.
+"""
+
+from collections.abc import Sequence
 
 from agno.agent import Agent
+from agno.db.base import BaseDb
+from agno.models.base import Model
 
 from agent.tools import DEFAULT_TOOLS
 from core.config import config
-from core.db import db
+from core.db import get_db
 
 
-def _build_model():
-    provider = config.model_provider.lower()
+def build_model(provider: str | None = None, model_id: str | None = None) -> Model:
+    """Provider-agnostic model factory. Defaults from config; override per call."""
+    provider = (provider or config.model_provider).lower()
+    model_id = model_id or config.model_id
     if provider == "anthropic":
         from agno.models.anthropic import Claude
 
@@ -17,7 +28,7 @@ def _build_model():
         if config.anthropic_base_url:
             client_params["base_url"] = config.anthropic_base_url
         return Claude(
-            id=config.model_id,
+            id=model_id,
             api_key=config.anthropic_api_key,
             auth_token=config.anthropic_auth_token,
             client_params=client_params or None,
@@ -25,33 +36,49 @@ def _build_model():
     if provider == "ollama":
         from agno.models.ollama import Ollama
 
-        return Ollama(id=config.model_id, host=config.ollama_host)
-    raise ValueError(f"Unknown MODEL_PROVIDER: {config.model_provider!r}")
+        return Ollama(id=model_id, host=config.ollama_host)
+    raise ValueError(f"Unknown MODEL_PROVIDER: {provider!r}")
 
 
-def build_agent() -> Agent:
+def build_agent(
+    *,
+    model: Model | None = None,
+    system_message: str | None = None,
+    tools: Sequence | None = None,
+    db: BaseDb | None = None,
+    add_history_to_context: bool = False,
+    num_history_runs: int = 10,
+    enable_user_memories: bool = False,
+    markdown: bool = True,
+) -> Agent:
+    """Generic, fully-injectable agent builder.
+
+    Every arg defaults from config / off, so callers opt into exactly what they
+    need. Memory (`enable_user_memories`) and history both require a `db`.
+    """
     return Agent(
-        model=_build_model(),
-        system_message=config.system_prompt,
-        # OpenWebUI sends full history each request, so agent stays stateless.
-        markdown=True,
+        model=model or build_model(),
+        system_message=system_message or config.system_prompt,
+        tools=list(tools) if tools is not None else list(DEFAULT_TOOLS),
+        db=db,
+        add_history_to_context=add_history_to_context,
+        num_history_runs=num_history_runs,
+        enable_user_memories=enable_user_memories,
+        markdown=markdown,
         telemetry=False,
     )
 
 
-def build_discord_agent() -> Agent:
-    return Agent(
-        model=_build_model(),
-        system_message=config.system_prompt,
-        tools=DEFAULT_TOOLS,
-        # Persistence: db stores sessions + user memories (see core/db.py).
-        db=db,
-        # Short-term memory: replay recent turns of THIS session (per Discord thread).
+def build_stateless_agent(**overrides) -> Agent:
+    """OpenWebUI preset: caller supplies full history each request, so no db."""
+    return build_agent(**overrides)
+
+
+def build_discord_agent(db: BaseDb | None = None, **overrides) -> Agent:
+    """Discord preset: agent owns the session, so persist history + user memory."""
+    return build_agent(
+        db=db or get_db(),
         add_history_to_context=True,
-        num_history_runs=10,
-        # Long-term memory: auto-extract durable facts per user (keyed by user_id,
-        # which DiscordClient forwards as the Discord author id).
         enable_user_memories=True,
-        markdown=True,
-        telemetry=False,
+        **overrides,
     )
