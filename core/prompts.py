@@ -11,27 +11,21 @@ overridable via env while making local editing a matter of touching markdown.
 
 from pathlib import Path
 
-from agno.utils.log import log_info, log_warning
+from agno.utils.log import log_info
 
 # Repo-root/prompts. core/ is one level down, so parent.parent is the root.
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 
-def load_prompt(name: str, default: str = "") -> str:
-    """Read `prompts/<name>` (e.g. "system.md" or "team/lead.md").
+def load_prompt(name: str) -> str:
+    """Read `prompts/<name>` (e.g. "team/lead.md").
 
     Returns the file's text (stripped). Falls back to `default` if the file is
     absent or blank. Markdown is passed through verbatim — the whole file is the
     prompt, so write it as you want the model to read it.
     """
     path = PROMPTS_DIR / name
-    try:
-        text = path.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        log_warning(f"prompt '{name}' not found at {path}; using default ({len(default)} chars)")
-        return default
-    if not text:
-        log_warning(f"prompt '{name}' at {path} is empty; using default ({len(default)} chars)")
-        return default
+    text = path.read_text(encoding="utf-8").strip()
+
     log_info(f"prompt '{name}' loaded from {path} ({len(text)} chars)")
     return text

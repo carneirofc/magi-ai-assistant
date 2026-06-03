@@ -15,9 +15,7 @@ from core.prompts import load_prompt
 def build_researcher(model: Model) -> Agent:
     return Agent(
         name="Researcher",
-        role=load_prompt(
-            "team/researcher.md", "Look up facts and answer knowledge questions precisely."
-        ),
+        role=load_prompt("team/researcher.md"),
         model=model,
         tools=enabled_tools(),
     )
