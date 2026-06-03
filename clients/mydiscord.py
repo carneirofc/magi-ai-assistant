@@ -1,4 +1,6 @@
+import asyncio
 import re
+from contextlib import asynccontextmanager
 from os import getenv
 from textwrap import dedent
 from typing import Optional, Union
@@ -155,7 +157,7 @@ class DiscordClient:
                 return
             log_info(f"routing to session_id={session_id} (target={type(target).__name__})")
 
-            async with target.typing():
+            async with self._safe_typing(target):
                 # TODO Unhappy with the duplication here but it keeps MyPy from complaining
                 additional_context = dedent(f"""
                     Discord username: {message_user}
@@ -209,6 +211,19 @@ class DiscordClient:
                     await self._handle_response_in_thread(team_response, target)
                 else:
                     log_warning("no agent or team configured; dropping message")
+
+    @asynccontextmanager
+    async def _safe_typing(self, target):
+        """Typing is cosmetic; timeouts here should not abort the reply."""
+        try:
+            async with target.typing():
+                yield
+        except (asyncio.TimeoutError, discord.HTTPException) as exc:
+            log_warning(
+                f"typing indicator failed for target id={getattr(target, 'id', '?')}: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            yield
 
     async def _resolve_target(self, message, channel, message_text: str, message_user: str):
         """Pick the reply target and its session id.
