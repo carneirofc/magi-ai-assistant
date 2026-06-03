@@ -1,0 +1,140 @@
+services:
+  litellm:
+    image: docker.litellm.ai/berriai/litellm:main-latest
+    container_name: chatbot-litellm
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-dev-key}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-litellm}:${POSTGRES_PASSWORD:-litellm}@postgres:5432/${POSTGRES_DB:-litellm}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        cat >/app/config.yaml <<EOF
+        model_list:
+          - model_name: ${LITELLM_MODEL_NAME:-claude-sonnet-4-5-20250929}
+            litellm_params:
+              model: ${LITELLM_PROVIDER_MODEL:-anthropic/claude-sonnet-4-5-20250929}
+              api_key: os.environ/ANTHROPIC_API_KEY
+          - model_name: gemma4:e4b
+            litellm_params:
+              model: ollama/gemma4:e4b
+              api_base: os.environ/OLLAMA_HOST
+          - model_name: second_constantine/gpt-oss-u:20b
+            litellm_params:
+              model: ollama/second_constantine/gpt-oss-u:20b
+              api_base: os.environ/OLLAMA_HOST
+        litellm_settings:
+          cache: true
+          cache_params:
+            type: qdrant-semantic
+            host: qdrant
+            port: 6333
+            qdrant_semantic_cache_embedding_model: ollama/nomic-embed-text
+            qdrant_collection_name: litellm_semantic_cache
+            similarity_threshold: "0.8"
+          success_callback:
+            - s3
+          s3_callback_params:
+            s3_bucket_name: ${MINIO_BUCKET_NAME:-litellm-logs}
+            s3_region_name: us-east-1
+            s3_aws_access_key_id: os.environ/MINIO_ROOT_USER
+            s3_aws_secret_access_key: os.environ/MINIO_ROOT_PASSWORD
+            s3_endpoint_url: http://minio:9000
+        general_settings:
+          master_key: ${LITELLM_MASTER_KEY:-sk-litellm-dev-key}
+          database_url: os.environ/DATABASE_URL
+        EOF
+        exec litellm --config /app/config.yaml --host 0.0.0.0 --port 4000
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: chatbot-litellm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-litellm}
+      POSTGRES_USER: ${POSTGRES_USER:-litellm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-litellm}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER:-litellm} -d ${POSTGRES_DB:-litellm}
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: chatbot-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: 6333
+      QDRANT__SERVICE__GRPC_PORT: 6334
+
+  minio:
+    image: minio/minio:latest
+    container_name: chatbot-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: chatbot-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $${MINIO_ROOT_USER:-minioadmin} $${MINIO_ROOT_PASSWORD:-minioadmin} &&
+      mc mb --ignore-existing local/$${MINIO_BUCKET_NAME:-litellm-logs} &&
+      exit 0
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-litellm-logs}
+
+volumes:
+  postgres_data:
+  qdrant_storage:
+  minio_data:
