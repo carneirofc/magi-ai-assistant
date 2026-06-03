@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from agno.models.message import Message
 from agno.run.agent import RunContentEvent
 
-from agent.factory import build_stateless_agent
+from agent import build_stateless_agent
 
 
 class AgentService:

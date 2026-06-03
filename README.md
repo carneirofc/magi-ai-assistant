@@ -7,7 +7,11 @@ One shared agent brain, many channel adapters. Model-agnostic (Claude default, O
 
 ```
 core/agent_service.py   shared brain: messages -> agent.run() -> reply
-agent/factory.py        builds the Agno Agent (provider from config)
+agent/model.py          provider-agnostic model factory (provider from config)
+agent/agents.py         single-agent builders (generic + channel presets)
+agent/tools/            callable skills (one per file) + tool-gating helper
+agent/members/          team specialists (one per file) + TEAM_MEMBERS registry
+agent/team.py           assembles members into a routing Team
 core/config.py          env-driven settings (single source of truth)
 core/prompts.py         loads editable markdown prompts from prompts/
 channels/openai_api.py  OpenAI-compatible HTTP shim (M1 client: OpenWebUI)

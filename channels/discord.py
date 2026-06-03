@@ -10,8 +10,7 @@ the box. `db` is injectable for tests / alternate stores.
 from agno.db.base import BaseDb
 from agno.utils.log import log_info
 
-from agent.factory import build_discord_agent
-from agent.team import build_team
+from agent import build_discord_agent, build_team
 from clients.mydiscord import DiscordClient
 from core.config import config
 
@@ -26,5 +25,6 @@ def build_discord_client(
         f"db={'injected' if db else 'default'}"
     )
     if use_team:
-        return DiscordClient(team=build_team(db=db))
+        team = build_team(db=db)
+        return DiscordClient(team=team)
     return DiscordClient(agent=build_discord_agent(db=db))

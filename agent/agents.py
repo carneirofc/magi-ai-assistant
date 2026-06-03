@@ -1,9 +1,9 @@
-"""Agent construction.
+"""Single-agent builders.
 
-`build_model` and `build_agent` are the injectable primitives — every argument
-defaults from config but can be overridden, so behavior is parameterized rather
-than hard-coded. The named presets below (stateless / discord) just pick sensible
-defaults for each channel by calling `build_agent`.
+`build_agent` is the generic, fully-injectable primitive — every argument
+defaults from config but can be overridden. The named presets below
+(stateless / discord) just pick sensible defaults for each channel by calling
+`build_agent`.
 """
 
 from collections.abc import Sequence
@@ -13,36 +13,10 @@ from agno.db.base import BaseDb
 from agno.models.base import Model
 from agno.utils.log import log_info
 
-from agent.tools import DEFAULT_TOOLS
+from agent.model import build_model
+from agent.tools import enabled_tools
 from core.config import config
 from core.db import get_db
-
-
-def build_model(provider: str | None = None, model_id: str | None = None) -> Model:
-    """Provider-agnostic model factory. Defaults from config; override per call."""
-    provider = (provider or config.model_provider).lower()
-    model_id = model_id or config.model_id
-    log_info(
-        f"building model: provider={provider}, id={model_id}, "
-        f"anthropic_base_url={'custom' if config.anthropic_base_url else 'default'}"
-    )
-    if provider == "anthropic":
-        from agno.models.anthropic import Claude
-
-        client_params = {}
-        if config.anthropic_base_url:
-            client_params["base_url"] = config.anthropic_base_url
-        return Claude(
-            id=model_id,
-            api_key=config.anthropic_api_key,
-            auth_token=config.anthropic_auth_token,
-            client_params=client_params or None,
-        )
-    if provider == "ollama":
-        from agno.models.ollama import Ollama
-
-        return Ollama(id=model_id, host=config.ollama_host)
-    raise ValueError(f"Unknown MODEL_PROVIDER: {provider!r}")
 
 
 def build_agent(
@@ -61,11 +35,12 @@ def build_agent(
     Every arg defaults from config / off, so callers opt into exactly what they
     need. Memory (`enable_user_memories`) and history both require a `db`.
     """
-    if tools is None:
-        tools = DEFAULT_TOOLS if config.tools_enabled else []
+    resolved_tools = enabled_tools(tools)
     resolved_model = model or build_model()
     resolved_system = system_message or config.system_prompt
-    tool_names = [getattr(t, "name", getattr(t, "__name__", type(t).__name__)) for t in tools]
+    tool_names = [
+        getattr(t, "name", getattr(t, "__name__", type(t).__name__)) for t in resolved_tools
+    ]
     log_info(
         f"building agent: system_prompt={len(resolved_system)} chars, tools={tool_names or 'none'}, "
         f"db={'on' if db else 'off'}, history={add_history_to_context} (n={num_history_runs}), "
@@ -74,7 +49,7 @@ def build_agent(
     return Agent(
         model=resolved_model,
         system_message=resolved_system,
-        tools=list(tools),
+        tools=resolved_tools,
         db=db,
         add_history_to_context=add_history_to_context,
         num_history_runs=num_history_runs,
