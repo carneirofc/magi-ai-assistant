@@ -56,10 +56,12 @@ def build_agent(
     Every arg defaults from config / off, so callers opt into exactly what they
     need. Memory (`enable_user_memories`) and history both require a `db`.
     """
+    if tools is None:
+        tools = DEFAULT_TOOLS if config.tools_enabled else []
     return Agent(
         model=model or build_model(),
         system_message=system_message or config.system_prompt,
-        tools=list(tools) if tools is not None else list(DEFAULT_TOOLS),
+        tools=list(tools),
         db=db,
         add_history_to_context=add_history_to_context,
         num_history_runs=num_history_runs,
@@ -75,10 +77,14 @@ def build_stateless_agent(**overrides) -> Agent:
 
 
 def build_discord_agent(db: BaseDb | None = None, **overrides) -> Agent:
-    """Discord preset: agent owns the session, so persist history + user memory."""
+    """Discord preset: agent owns the session, so persist history + user memory.
+
+    Long-term user memory needs tool calling; it's auto-disabled when the model
+    lacks tool support (config.tools_enabled). Short-term history works regardless.
+    """
     return build_agent(
         db=db or get_db(),
         add_history_to_context=True,
-        enable_user_memories=True,
+        enable_user_memories=config.tools_enabled,
         **overrides,
     )

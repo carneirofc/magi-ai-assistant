@@ -19,13 +19,16 @@ from agent.tools import DEFAULT_TOOLS
 from core.config import config
 from core.db import get_db
 
+# Honor model tool-calling capability (see config.tools_enabled).
+_TOOLS = DEFAULT_TOOLS if config.tools_enabled else []
+
 
 def _general_assistant(model: Model) -> Agent:
     return Agent(
         name="Assistant",
         role="Handle general conversation and everyday questions.",
         model=model,
-        tools=DEFAULT_TOOLS,
+        tools=_TOOLS,
     )
 
 
@@ -34,7 +37,7 @@ def _researcher(model: Model) -> Agent:
         name="Researcher",
         role="Look up facts and answer knowledge questions precisely.",
         model=model,
-        tools=DEFAULT_TOOLS,
+        tools=_TOOLS,
     )
 
 
@@ -52,7 +55,7 @@ def build_team(
         db=db or get_db(),
         add_history_to_context=True,
         num_history_runs=10,
-        enable_user_memories=True,
+        enable_user_memories=config.tools_enabled,
         markdown=True,
         telemetry=False,
     )
