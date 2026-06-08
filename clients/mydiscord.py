@@ -10,6 +10,11 @@ from agno.media import Audio, File, Image, Video
 from agno.team.team import Team, TeamRunOutput
 from agno.utils.log import log_error, log_info, log_warning
 from agno.utils.message import get_text_from_message
+from core.discord_context import (
+    DiscordRunContext,
+    reset_current_discord_context,
+    set_current_discord_context,
+)
 
 try:
     import discord
@@ -159,11 +164,14 @@ class DiscordClient:
             )
 
             async with self._safe_typing(target):
-                additional_context = dedent(f"""
-                    Discord username: {message_user}
-                    Discord userid: {message_user_id}
-                    Discord url: {message_url}
-                    """)
+                run_context = self._build_run_context(
+                    message=message,
+                    target=target,
+                    message_user=message_user,
+                    message_user_id=message_user_id,
+                    message_url=message_url,
+                )
+                additional_context = self._build_additional_context(run_context)
                 if created_thread:
                     additional_context += (
                         "Note: a new thread was just opened for this user at their "
@@ -171,17 +179,21 @@ class DiscordClient:
                         "already exists — don't try to create another. Greet them "
                         "and carry on here.\n"
                     )
-                response = await self._run(
-                    input=message_text,
-                    user_id=message_user_id,
-                    session_id=session_id,
-                    additional_context=additional_context,
-                    media=media,
-                )
-                if response is None:
-                    log_warning("no agent or team configured; dropping message")
-                    return
-                await self._handle_response_in_thread(response, target)
+                token = set_current_discord_context(run_context)
+                try:
+                    response = await self._run(
+                        input=message_text,
+                        user_id=message_user_id,
+                        session_id=session_id,
+                        additional_context=additional_context,
+                        media=media,
+                    )
+                    if response is None:
+                        log_warning("no agent or team configured; dropping message")
+                        return
+                    await self._handle_response_in_thread(response, target)
+                finally:
+                    reset_current_discord_context(token)
 
     async def _extract_media(self, message) -> dict:
         """Map the first attachment to agno media kwargs for `*.arun(**media)`.
@@ -221,6 +233,46 @@ class DiscordClient:
         else:
             log_warning(f"unhandled attachment content_type: {ctype}")
         return media
+
+    def _build_run_context(
+        self,
+        *,
+        message,
+        target,
+        message_user: str,
+        message_user_id,
+        message_url: str,
+    ) -> DiscordRunContext:
+        guild = getattr(message, "guild", None)
+        return DiscordRunContext(
+            guild_id=str(guild.id) if guild is not None else None,
+            guild_name=getattr(guild, "name", None),
+            channel_id=str(getattr(target, "id", "")),
+            channel_name=getattr(target, "name", None),
+            channel_kind=type(target).__name__,
+            message_id=str(message.id),
+            message_url=message_url,
+            user_id=str(message_user_id),
+            username=message_user,
+            channel=target,
+        )
+
+    def _build_additional_context(self, context: DiscordRunContext) -> str:
+        lines = [
+            f"Discord username: {context.username}",
+            f"Discord userid: {context.user_id}",
+            f"Discord url: {context.message_url}",
+            f"Discord channel kind: {context.channel_kind}",
+            f"Discord channel id: {context.channel_id}",
+        ]
+        if context.channel_name:
+            lines.append(f"Discord channel name: {context.channel_name}")
+        if context.guild_id:
+            lines.append(f"Discord guild id: {context.guild_id}")
+        if context.guild_name:
+            lines.append(f"Discord guild name: {context.guild_name}")
+        lines.append("Never invent Discord ids or placeholder channel names; use only the exact ids above.")
+        return dedent("\n".join(lines))
 
     async def _run(
         self,
