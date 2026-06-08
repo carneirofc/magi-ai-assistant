@@ -1,9 +1,9 @@
-"""Single-agent builders.
+"""Single-agent builder.
 
-`build_agent` is the generic, fully-injectable primitive — every argument
-defaults from config but can be overridden. The named presets below
-(stateless / discord) just pick sensible defaults for each channel by calling
-`build_agent`.
+`build_agent` is the generic, fully-injectable primitive for the non-team path
+(`DiscordClient(agent=build_agent())`). Every argument defaults from config but
+can be overridden, so callers opt into exactly what they need. Memory
+(`enable_user_memories`) and history both require a `db`.
 """
 
 from collections.abc import Sequence
@@ -13,10 +13,9 @@ from agno.db.base import BaseDb
 from agno.models.base import Model
 from agno.utils.log import log_info
 
-from agent.model import build_model
+from agent.model import build_member_model
 from agent.tools import enabled_tools
 from core.config import config
-from core.db import get_db
 
 
 def build_agent(
@@ -30,16 +29,12 @@ def build_agent(
     enable_user_memories: bool = False,
     markdown: bool = True,
 ) -> Agent:
-    """Generic, fully-injectable agent builder.
-
-    Every arg defaults from config / off, so callers opt into exactly what they
-    need. Memory (`enable_user_memories`) and history both require a `db`.
-    """
     resolved_tools = enabled_tools(tools)
-    resolved_model = model or build_model()
+    resolved_model = model or build_member_model()
     resolved_system = system_message or config.system_prompt
     tool_names = [
-        getattr(t, "name", getattr(t, "__name__", type(t).__name__)) for t in resolved_tools
+        getattr(t, "name", getattr(t, "__name__", type(t).__name__))
+        for t in resolved_tools
     ]
     log_info(
         f"building agent: system_prompt={len(resolved_system)} chars, tools={tool_names or 'none'}, "
@@ -56,24 +51,4 @@ def build_agent(
         enable_user_memories=enable_user_memories,
         markdown=markdown,
         telemetry=False,
-    )
-
-
-def build_stateless_agent(**overrides) -> Agent:
-    """OpenWebUI preset: caller supplies full history each request, so no db."""
-    return build_agent(**overrides)
-
-
-def build_discord_agent(db: BaseDb | None = None, **overrides) -> Agent:
-    """Discord preset: agent owns the session, so persist history + user memory.
-
-    Long-term user memory needs tool calling; it's auto-disabled when the model
-    lacks tool support (config.tools_enabled). Short-term history works regardless.
-    """
-    log_info("preset: building discord agent (persisted history + user memory)")
-    return build_agent(
-        db=db or get_db(),
-        add_history_to_context=True,
-        enable_user_memories=config.tools_enabled,
-        **overrides,
     )

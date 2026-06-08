@@ -73,10 +73,23 @@ class RequiresConfirmationView(discord.ui.View):
 
 class DiscordClient:
     def __init__(
-        self, agent: Optional[Agent] = None, team: Optional[Team] = None, client: Optional[discord.Client] = None
+        self,
+        agent: Optional[Agent] = None,
+        team: Optional[Team] = None,
+        client: Optional[discord.Client] = None,
+        memory=None,
+        channel_guidance: str = "",
     ):
         self.agent = agent
         self.team = team
+        # Optional deliberate-memory manager (core.memory.MemoryManager). When
+        # set, each run is scoped to the user/session, the model's persisted
+        # memory is injected as context, and the turns are recorded.
+        self.memory = memory
+        # Channel-specific output rules (e.g. Discord markdown formatting). Kept
+        # out of the base prompt so it stays channel-agnostic; appended to every
+        # run's context here, where we know the channel IS Discord.
+        self.channel_guidance = channel_guidance
         mode = "team" if team else "agent" if agent else "none"
         log_info(f"DiscordClient init: mode={mode}, custom_client={client is not None}")
         if client is None:
@@ -102,46 +115,23 @@ class DiscordClient:
                 log_info(f"sent {message.content}")
                 return
 
-            message_image = None
-            message_video = None
-            message_audio = None
-            message_file = None
-            media_url = None
             message_text = message.content
             message_url = message.jump_url
             message_user = message.author.name
             message_user_id = message.author.id
 
-            if message.attachments:
-                media = message.attachments[0]
-                media_type = media.content_type
-                media_url = media.url
-                log_info(
-                    f"attachment: name={media.filename} type={media_type} "
-                    f"size={media.size} bytes url={media_url}"
-                )
-                if len(message.attachments) > 1:
-                    log_warning(
-                        f"{len(message.attachments)} attachments received; only the first is processed"
-                    )
-                if media_type is None:
-                    log_warning(f"attachment {media.filename} has no content_type; skipping media")
-                elif media_type.startswith("image/"):
-                    message_image = media_url
-                elif media_type.startswith("video/"):
-                    message_video = await media.read()
-                elif media_type.startswith("application/"):
-                    message_file = await media.read()
-                elif media_type.startswith("audio/"):
-                    message_audio = media_url
-                else:
-                    log_warning(f"unhandled attachment content_type: {media_type}")
-
             channel = message.channel
+
+            # Control commands (`!flush`, `!ctx`, `!help`) short-circuit before we
+            # fetch media or run the team. They act on THIS chat's session.
+            if await self._maybe_handle_command(channel, message_text, message_user_id):
+                return
+
+            media = await self._extract_media(message)
             channel_kind = type(channel).__name__
             log_info(
                 f"message from {message_user} (id={message_user_id}) in {channel_kind} "
-                f"(id={getattr(channel, 'id', '?')}): {message_text!r} | media={media_url} | url={message_url}"
+                f"(id={getattr(channel, 'id', '?')}): {message_text!r} | url={message_url}"
             )
 
             # Resolve where to reply (`target`) and the session it belongs to.
@@ -155,75 +145,225 @@ class DiscordClient:
                     f"({channel_kind}); ignoring"
                 )
                 return
-            log_info(f"routing to session_id={session_id} (target={type(target).__name__})")
+
+            # The channel layer (not the team) owns Discord threads. If
+            # _resolve_target just opened a new one, `target` is a Thread distinct
+            # from the channel the message came in on. The original text ("start a
+            # new thread") is then replayed into the team inside that thread, so we
+            # must tell the lead the thread already exists — otherwise it tries to
+            # open ANOTHER (which it can't: no Discord tools) and loops.
+            created_thread = getattr(target, "id", None) != getattr(channel, "id", None)
+            log_info(
+                f"routing to session_id={session_id} (target={type(target).__name__}"
+                f"{', new thread' if created_thread else ''})"
+            )
 
             async with self._safe_typing(target):
-                # TODO Unhappy with the duplication here but it keeps MyPy from complaining
                 additional_context = dedent(f"""
                     Discord username: {message_user}
-                    Discord userid: {message_user_id} 
+                    Discord userid: {message_user_id}
                     Discord url: {message_url}
                     """)
-                if self.agent:
-                    log_info(f"dispatching to agent (session={session_id}, user={message_user_id})")
-                    self.agent.additional_context = additional_context
-                    agent_response: RunOutput = await self.agent.arun(  # type: ignore[misc]
-                        input=message_text,
-                        user_id=message_user_id,
-                        session_id=session_id,
-                        images=[Image(url=message_image)] if message_image else None,
-                        videos=[Video(content=message_video)] if message_video else None,
-                        audio=[Audio(url=message_audio)] if message_audio else None,
-                        files=[File(content=message_file)] if message_file else None,
+                if created_thread:
+                    additional_context += (
+                        "Note: a new thread was just opened for this user at their "
+                        "request and you are now replying inside it. The thread "
+                        "already exists — don't try to create another. Greet them "
+                        "and carry on here.\n"
                     )
-                    log_info(
-                        f"agent response: status={agent_response.status}, "
-                        f"content_len={len(agent_response.content or '')}"
-                    )
-                    if agent_response.status == "ERROR":
-                        log_error(agent_response.content)
-                        agent_response.content = (
-                            "Sorry, there was an error processing your message. Please try again later."
-                        )
-                    await self._handle_response_in_thread(agent_response, target)
-                elif self.team:
-                    log_info(f"dispatching to team (session={session_id}, user={message_user_id})")
-                    self.team.additional_context = additional_context
-                    team_response: TeamRunOutput = await self.team.arun(  # type: ignore[misc]
-                        input=message_text,
-                        user_id=message_user_id,
-                        session_id=session_id,
-                        images=[Image(url=message_image)] if message_image else None,
-                        videos=[Video(content=message_video)] if message_video else None,
-                        audio=[Audio(url=message_audio)] if message_audio else None,
-                        files=[File(content=message_file)] if message_file else None,
-                    )
-                    log_info(
-                        f"team response: status={team_response.status}, "
-                        f"content_len={len(team_response.content or '')}"
-                    )
-                    if team_response.status == "ERROR":
-                        log_error(team_response.content)
-                        team_response.content = (
-                            "Sorry, there was an error processing your message. Please try again later."
-                        )
-
-                    await self._handle_response_in_thread(team_response, target)
-                else:
+                response = await self._run(
+                    input=message_text,
+                    user_id=message_user_id,
+                    session_id=session_id,
+                    additional_context=additional_context,
+                    media=media,
+                )
+                if response is None:
                     log_warning("no agent or team configured; dropping message")
+                    return
+                await self._handle_response_in_thread(response, target)
+
+    async def _extract_media(self, message) -> dict:
+        """Map the first attachment to agno media kwargs for `*.arun(**media)`.
+
+        Images/audio are passed by URL (agno fetches + encodes for the model);
+        video/files are read as bytes since providers want raw content. Only the
+        first attachment is processed — Discord allows many, the model takes one.
+        """
+        media: dict = {"images": None, "videos": None, "audio": None, "files": None}
+        if not message.attachments:
+            return media
+
+        if len(message.attachments) > 1:
+            log_warning(
+                f"{len(message.attachments)} attachments received; only the first is processed"
+            )
+
+        att = message.attachments[0]
+        ctype = att.content_type
+        log_info(
+            f"attachment: name={att.filename} type={ctype} size={att.size} bytes url={att.url}"
+        )
+        if not ctype:
+            log_warning(f"attachment {att.filename} has no content_type; skipping media")
+            return media
+
+        # "image/png; codecs=..." -> "png"
+        subtype = ctype.split("/", 1)[1].split(";", 1)[0].strip() or None
+        if ctype.startswith("image/"):
+            media["images"] = [Image(url=att.url, format=subtype, mime_type=ctype)]
+        elif ctype.startswith("audio/"):
+            media["audio"] = [Audio(url=att.url, format=subtype, mime_type=ctype)]
+        elif ctype.startswith("video/"):
+            media["videos"] = [Video(content=await att.read())]
+        elif ctype.startswith("application/"):
+            media["files"] = [File(content=await att.read())]
+        else:
+            log_warning(f"unhandled attachment content_type: {ctype}")
+        return media
+
+    async def _run(
+        self,
+        *,
+        input: str,
+        user_id,
+        session_id: str,
+        additional_context: str,
+        media: dict,
+    ) -> Optional[Union[RunOutput, TeamRunOutput]]:
+        """Dispatch to the configured agent or team (one path for both)."""
+        runner = self.agent or self.team
+        if runner is None:
+            return None
+
+        kind = "agent" if self.agent else "team"
+        log_info(f"dispatching to {kind} (session={session_id}, user={user_id})")
+
+        # Assemble this run's context, in order: caller-supplied identity/channel
+        # info, the model's persisted memory, then any channel output rules.
+        parts = [additional_context]
+        if self.memory is not None:
+            self.memory.set_scope(user_id, session_id)
+            # Pass the message as the query so semantic memory (when enabled) can
+            # retrieve only the relevant facts/episodes instead of the whole file.
+            parts.append(self.memory.build_context(query=input))
+            self.memory.record_user_turn(input)
+        if self.channel_guidance:
+            parts.append(self.channel_guidance)
+
+        runner.additional_context = "\n\n".join(p for p in parts if p and p.strip())
+        response = await runner.arun(  # type: ignore[misc]
+            input=input,
+            user_id=user_id,
+            session_id=session_id,
+            **media,
+        )
+        log_info(
+            f"{kind} response: status={response.status}, "
+            f"content_len={len(response.content or '')}"
+        )
+
+        if self.memory is not None and response.content:
+            self.memory.record_assistant_turn(get_text_from_message(response.content))
+            # Fold any rolled-off turns into an episode (no-op unless enabled).
+            await self.memory.maybe_summarize()
+        if response.status == "ERROR":
+            log_error(response.content)
+            response.content = (
+                "Sorry, there was an error processing your message. Please try again later."
+            )
+        return response
 
     @asynccontextmanager
     async def _safe_typing(self, target):
         """Typing is cosmetic; timeouts here should not abort the reply."""
+        typing_cm = None
         try:
-            async with target.typing():
-                yield
+            typing_cm = target.typing()
+            await typing_cm.__aenter__()
         except (asyncio.TimeoutError, discord.HTTPException) as exc:
             log_warning(
                 f"typing indicator failed for target id={getattr(target, 'id', '?')}: "
                 f"{type(exc).__name__}: {exc}"
             )
+            typing_cm = None
+
+        try:
             yield
+        except BaseException as exc:
+            if typing_cm is not None:
+                try:
+                    if await typing_cm.__aexit__(type(exc), exc, exc.__traceback__):
+                        return
+                except (asyncio.TimeoutError, discord.HTTPException) as exit_exc:
+                    log_warning(
+                        f"typing indicator cleanup failed for target id={getattr(target, 'id', '?')}: "
+                        f"{type(exit_exc).__name__}: {exit_exc}"
+                    )
+            raise
+        else:
+            if typing_cm is not None:
+                try:
+                    await typing_cm.__aexit__(None, None, None)
+                except (asyncio.TimeoutError, discord.HTTPException) as exc:
+                    log_warning(
+                        f"typing indicator cleanup failed for target id={getattr(target, 'id', '?')}: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+
+    async def _maybe_handle_command(self, channel, text: str, user_id) -> bool:
+        """Handle `!`-prefixed control commands. Returns True if one was handled.
+
+        Commands act on THIS chat's session (`channel.id`) — no new-thread logic —
+        and reply inline. An unknown `!`-leading message is left to flow to the
+        team as a normal message.
+        """
+        raw = (text or "").strip()
+        if not raw.startswith("!"):
+            return False
+        cmd = raw.split()[0].lower().lstrip("!")
+        session_id = str(getattr(channel, "id", "?"))
+
+        if cmd in ("flush", "reset", "clear"):
+            log_info(f"command !{cmd} from user={user_id} session={session_id}")
+            if self.memory is None:
+                await channel.send("Memory isn't enabled — nothing to flush.")
+                return True
+            self.memory.set_scope(user_id, session_id)
+            dropped = self.memory.flush_session()
+            await channel.send(
+                f"🧹 Cleared **{dropped}** turn(s) of short-term history for this chat. "
+                "Long-term memory and past episodes are kept."
+            )
+            return True
+
+        if cmd in ("ctx", "context"):
+            log_info(f"command !{cmd} from user={user_id} session={session_id}")
+            if self.memory is None:
+                await channel.send("Memory isn't enabled — no context to report.")
+                return True
+            self.memory.set_scope(user_id, session_id)
+            st = self.memory.context_stats()
+            sec = st["sections"]
+            await channel.send(
+                f"📊 Context **~{st['est_tokens']} tok** ({st['ratio']:.0%} of {st['budget_tokens']})\n"
+                f"• short-term: {st['short_term_turns']} turns (~{sec['short_term']}t)\n"
+                f"• long-term ~{sec['long_term']}t · episodes ~{sec['episodes']}t · "
+                f"persona ~{sec['persona']}t\n"
+                "Use `!flush` to reset this chat's short-term history."
+            )
+            return True
+
+        if cmd in ("help", "commands"):
+            await channel.send(
+                "**Commands**\n"
+                "• `!flush` — clear this chat's short-term history (keeps long-term)\n"
+                "• `!ctx` — show context size + breakdown\n"
+                "• `!help` — this message"
+            )
+            return True
+
+        return False
 
     async def _resolve_target(self, message, channel, message_text: str, message_user: str):
         """Pick the reply target and its session id.
@@ -303,24 +443,41 @@ class DiscordClient:
         if isinstance(response, RunOutput):
             response = await self.handle_hitl(response, thread)
 
+        sent_any = False
         if response.reasoning_content:
-            await self._send_discord_messages(
+            sent_any = await self._send_discord_messages(
                 thread=thread, message=f"Reasoning: \n{response.reasoning_content}", italics=True
             )
 
         # Handle structured outputs properly
         content_message = get_text_from_message(response.content) if response.content is not None else ""
+        sent_any = await self._send_discord_messages(thread=thread, message=content_message) or sent_any
+        if not sent_any:
+            log_warning(
+                f"response produced no sendable text for target id={getattr(thread, 'id', '?')}; "
+                "sending fallback notice"
+            )
+            await self._send_discord_messages(
+                thread=thread,
+                message="I finished processing that, but there was no text content to send.",
+            )
 
-        await self._send_discord_messages(thread=thread, message=content_message)
+    async def _send_discord_messages(
+        self, thread: discord.channel, message: str, italics: bool = False
+    ) -> bool:  # type: ignore
+        if not message or not message.strip():
+            log_warning(
+                f"skipping empty Discord message for target id={getattr(thread, 'id', '?')}"
+            )
+            return False
 
-    async def _send_discord_messages(self, thread: discord.channel, message: str, italics: bool = False):  # type: ignore
         if len(message) < 1500:
             if italics:
                 formatted_message = "\n".join([f"_{line}_" for line in message.split("\n")])
                 await thread.send(formatted_message)  # type: ignore
             else:
                 await thread.send(message)  # type: ignore
-            return
+            return True
 
         message_batches = [message[i : i + 1500] for i in range(0, len(message), 1500)]
 
@@ -331,6 +488,7 @@ class DiscordClient:
                 await thread.send(formatted_batch)  # type: ignore
             else:
                 await thread.send(batch_message)  # type: ignore
+        return True
 
     def serve(self):
         try:

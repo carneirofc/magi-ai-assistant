@@ -1,6 +1,6 @@
 services:
   litellm:
-    image: docker.litellm.ai/berriai/litellm:main-latest
+    image: ghcr.io/berriai/litellm:v1.87.0
     container_name: chatbot-litellm
     restart: unless-stopped
     depends_on:
@@ -15,19 +15,31 @@ services:
     env_file:
       - .env
     environment:
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-dev-key}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
+      DATABRICKS_TOKEN: ${DATABRICKS_TOKEN:-}
+      DATABRICKS_API_BASE: ${DATABRICKS_API_BASE:-}
       DATABASE_URL: postgresql://${POSTGRES_USER:-litellm}:${POSTGRES_PASSWORD:-litellm}@postgres:5432/${POSTGRES_DB:-litellm}
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      LITELLM_CONTROL_PLANE_URL: ${LITELLM_CONTROL_PLANE_URL:-http://localhost:4000}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-dev-key}
+      LITELLM_PROXY_BASE_URL: ${LITELLM_PROXY_BASE_URL:-http://localhost:4000}
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
+      MICROSOFT_TENANT: ${MICROSOFT_TENANT:-}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-litellm-logs}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      QDRANT_API_BASE: ${QDRANT_API_BASE:-http://qdrant:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./litellm.config.yaml:/app/config.yaml:ro
     command:
      - "--config=/app/config.yaml"
+     - "--port=4000"
 
   postgres:
     image: postgres:17-alpine

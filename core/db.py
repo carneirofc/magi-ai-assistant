@@ -14,6 +14,7 @@ from pathlib import Path
 
 from agno.db.base import BaseDb
 from agno.db.sqlite import SqliteDb
+from agno.utils.log import log_info
 
 from core.config import config
 
@@ -22,6 +23,7 @@ def make_db(db_file: str | None = None) -> BaseDb:
     """Build a new db instance. Pass `db_file` to override the configured path."""
     path = db_file or config.db_file
     Path(path).parent.mkdir(parents=True, exist_ok=True)
+    log_info(f"db: SqliteDb at {Path(path).resolve()}")
     return SqliteDb(db_file=path)
 
 
