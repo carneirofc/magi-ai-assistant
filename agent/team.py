@@ -21,10 +21,11 @@ from agno.utils.log import log_info
 from agent.hooks import tool_call_hook
 from agent.members import MEMBER_BUILDERS
 from agent.model import build_lead_model, build_member_model
-from agent.tools.memory import MEMORY_TOOLS
+from agent.tools.memory import build_memory_tools
 from agent.tools.vision import VISION_TOOLS
 from core.config import config
 from core.db import get_db
+from core.memory import MemoryManager
 from core.prompts import load_prompt
 
 
@@ -48,8 +49,11 @@ def _build_introspection_tool(lead: Model, members):
     return agent_introspection
 
 
-def build_team(db: Optional[BaseDb] = None) -> Team:
-    """Assemble the chatbot team: a multimodal lead routing to specialist members."""
+def build_team(memory: MemoryManager, db: Optional[BaseDb] = None) -> Team:
+    """Assemble the chatbot team: a multimodal lead routing to specialist members.
+
+    `memory` is injected so the lead's memory tools are bound to it (no globals).
+    """
     lead = build_lead_model()
     member_model = build_member_model()
     members = [build(member_model) for build in MEMBER_BUILDERS]
@@ -92,6 +96,6 @@ def build_team(db: Optional[BaseDb] = None) -> Team:
             # Lead is multimodal; this lets it pull an image URL into its own
             # context and actually look, instead of guessing from the link text.
             *VISION_TOOLS,
-            *MEMORY_TOOLS,
+            *build_memory_tools(memory),
         ],
     )

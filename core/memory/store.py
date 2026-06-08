@@ -1,22 +1,25 @@
 """Filesystem-backed memory store — deliberate, inspectable, no magic.
 
-Every memory kind is a plain markdown file under `root`, append-only with ISO
-timestamps, so the whole of the model's memory is greppable and hand-editable.
-Layout:
+Durable memory kinds are plain markdown files; the live short-term window is JSON
+so the raw conversation (role + content per turn) round-trips losslessly. Layout:
 
     <root>/
-      persona.md                       # evolved behavior (base persona: prompts/team/lead.md)
+      persona.md                         # evolved behavior (base: prompts/team/lead.md)
       users/<user>/
-        long_term.md                   # durable facts learned about the user
-        episodic.md                    # summaries of past interactions (episodes)
-        sessions/<session>.md          # short-term: recent turns (capped)
+        long_term.md                     # durable facts learned about the user
+        long_term_summary.md             # LLM-condensed profile of long_term.md
+        episodic.md                      # summaries of past interactions (episodes)
+        sessions/<session>.json          # short-term: recent turns (capped), JSON
+        sessions/<session>.summary.md    # rolling summary of this session so far
+        sessions/<session>.pending.json  # evicted turns awaiting session summary
 
 This class does pure IO and nothing else — no model calls, no scoping policy, no
-context assembly. `MemoryManager` layers scope + assembly on top. Keeping the IO
-dumb is what makes the memory auditable: open the file, read exactly what the
-model will be told.
+context assembly, no presentation formatting. `MemoryManager` layers scope +
+assembly on top. Keeping the IO dumb is what makes the memory auditable: open the
+file, read exactly what was stored.
 """
 
+import json
 import re
 from datetime import datetime
 from pathlib import Path
@@ -34,7 +37,7 @@ def _now() -> str:
 
 
 class FileMemoryStore:
-    """Append-only markdown files, one per (kind, scope). Pure filesystem IO."""
+    """Append-only markdown + JSON files, one per (kind, scope). Pure filesystem IO."""
 
     def __init__(self, root: Path):
         self.root = Path(root)
@@ -49,15 +52,21 @@ class FileMemoryStore:
     def _long_term_path(self, user_id: object) -> Path:
         return self._user_dir(user_id) / "long_term.md"
 
+    def _long_term_summary_path(self, user_id: object) -> Path:
+        return self._user_dir(user_id) / "long_term_summary.md"
+
     def _episodic_path(self, user_id: object) -> Path:
         return self._user_dir(user_id) / "episodic.md"
 
     def _session_path(self, user_id: object, session_id: object) -> Path:
-        return self._user_dir(user_id) / "sessions" / f"{_slug(session_id)}.md"
+        return self._user_dir(user_id) / "sessions" / f"{_slug(session_id)}.json"
+
+    def _session_summary_path(self, user_id: object, session_id: object) -> Path:
+        return self._user_dir(user_id) / "sessions" / f"{_slug(session_id)}.summary.md"
 
     def _pending_path(self, user_id: object, session_id: object) -> Path:
         """Turns evicted from the window, buffered until summarized (see manager)."""
-        return self._user_dir(user_id) / "sessions" / f"{_slug(session_id)}.pending.md"
+        return self._user_dir(user_id) / "sessions" / f"{_slug(session_id)}.pending.json"
 
     # --- primitive read/write ----------------------------------------------
     @staticmethod
@@ -65,6 +74,21 @@ class FileMemoryStore:
         if not path.exists():
             return ""
         return path.read_text(encoding="utf-8").strip()
+
+    @staticmethod
+    def _read_json(path: Path) -> list[dict]:
+        if not path.exists():
+            return []
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data if isinstance(data, list) else []
+        except (json.JSONDecodeError, OSError):
+            return []
+
+    @staticmethod
+    def _write_json(path: Path, turns: list[dict]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(turns, ensure_ascii=False, indent=2), encoding="utf-8")
 
     @staticmethod
     def _ensure_header(path: Path, header: str) -> None:
@@ -79,6 +103,21 @@ class FileMemoryStore:
         line = f"- {_now()} :: {content.strip()}\n"
         with path.open("a", encoding="utf-8") as fh:
             fh.write(line)
+
+    def _write_blob(self, path: Path, header: str, body: str) -> None:
+        """Replace a whole single-blob file (header + body). Used for summaries."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"# {header}\n\n{body.strip()}\n", encoding="utf-8")
+
+    @staticmethod
+    def _bullets(text: str) -> list[str]:
+        """The `- <ts> :: <content>` bullet bodies of a markdown file, in order."""
+        out = []
+        for ln in text.splitlines():
+            if ln.startswith("- "):
+                body = ln[2:]
+                out.append(body.split(" :: ", 1)[1] if " :: " in body else body)
+        return out
 
     # --- persona (global) ---------------------------------------------------
     def read_persona(self) -> str:
@@ -108,6 +147,24 @@ class FileMemoryStore:
             self._long_term_path(user_id), f"Long-term memory — user {user_id}", fact
         )
 
+    def count_long_term(self, user_id: object) -> int:
+        return len(self._bullets(self._read(self._long_term_path(user_id))))
+
+    def recent_long_term(self, user_id: object, limit: int) -> list[str]:
+        """The last `limit` long-term fact bodies (most recent at the end)."""
+        bullets = self._bullets(self._read(self._long_term_path(user_id)))
+        return bullets[-limit:] if limit > 0 else bullets
+
+    def read_long_term_summary(self, user_id: object) -> str:
+        return self._read(self._long_term_summary_path(user_id))
+
+    def write_long_term_summary(self, user_id: object, summary: str) -> None:
+        self._write_blob(
+            self._long_term_summary_path(user_id),
+            f"Long-term summary — user {user_id}",
+            summary,
+        )
+
     # --- episodic (per user) ------------------------------------------------
     def read_episodes(self, user_id: object, limit: int | None = None) -> str:
         text = self._read(self._episodic_path(user_id))
@@ -124,63 +181,73 @@ class FileMemoryStore:
             self._episodic_path(user_id), f"Episodic memory — user {user_id}", summary
         )
 
-    # --- short-term (per user+session, capped) ------------------------------
-    def read_short_term(self, user_id: object, session_id: object) -> str:
-        return self._read(self._session_path(user_id, session_id))
+    # --- short-term window (per user+session, capped, JSON) -----------------
+    def read_turns(self, user_id: object, session_id: object) -> list[dict]:
+        """The live window as a list of `{"role","content","ts"}` dicts."""
+        return self._read_json(self._session_path(user_id, session_id))
 
-    def append_short_term(
-        self, user_id: object, session_id: object, role: str, text: str, max_entries: int
-    ) -> list[str]:
-        """Append a turn, trim to the last `max_entries`, return the evicted bullets.
+    def count_turns(self, user_id: object, session_id: object) -> int:
+        return len(self.read_turns(user_id, session_id))
 
-        The returned bullets are the turns that just fell out of the window — the
-        manager uses them to summarize history before it's lost. Empty list when
-        nothing was evicted.
+    def append_turn(
+        self, user_id: object, session_id: object, role: str, content: str, max_entries: int
+    ) -> list[dict]:
+        """Append a turn, trim to the last `max_entries`, return the evicted turns.
+
+        The returned dicts are the turns that just fell out of the window — the
+        manager buffers them to summarize history before it's lost. Empty list
+        when nothing was evicted.
         """
         path = self._session_path(user_id, session_id)
-        self._append_entry(path, f"Short-term — session {session_id}", f"**{role}**: {text}")
-        return self._trim(path, max_entries)
-
-    def clear_short_term(self, user_id: object, session_id: object) -> int:
-        """Delete the session's short-term window. Returns how many turns were dropped.
-
-        This is the `!flush` path: wipes the live conversation window (and any
-        not-yet-summarized pending buffer) without touching long-term/episodic.
-        """
-        path = self._session_path(user_id, session_id)
-        bullets = [ln for ln in self._read(path).splitlines() if ln.startswith("- ")]
-        path.unlink(missing_ok=True)
-        self._pending_path(user_id, session_id).unlink(missing_ok=True)
-        return len(bullets)
-
-    @staticmethod
-    def _trim(path: Path, max_entries: int) -> list[str]:
-        lines = path.read_text(encoding="utf-8").splitlines()
-        header = [ln for ln in lines if ln.startswith("#")]
-        bullets = [ln for ln in lines if ln.startswith("- ")]
-        if len(bullets) <= max_entries:
+        turns = self.read_turns(user_id, session_id)
+        turns.append({"role": role, "content": content, "ts": _now()})
+        if len(turns) <= max_entries:
+            self._write_json(path, turns)
             return []
-        kept = bullets[-max_entries:]
-        evicted = bullets[:-max_entries]
-        path.write_text("\n".join(header + [""] + kept) + "\n", encoding="utf-8")
+        kept = turns[-max_entries:]
+        evicted = turns[:-max_entries]
+        self._write_json(path, kept)
         return evicted
 
-    # --- pending-summary buffer (per user+session) --------------------------
-    def append_pending(self, user_id: object, session_id: object, bullets: list[str]) -> int:
+    def clear_session(self, user_id: object, session_id: object) -> int:
+        """Delete the session's window, summary and pending buffer. Returns turns dropped.
+
+        This is the `!flush` / close path: wipes the live conversation without
+        touching long-term/episodic.
+        """
+        dropped = self.count_turns(user_id, session_id)
+        self._session_path(user_id, session_id).unlink(missing_ok=True)
+        self._session_summary_path(user_id, session_id).unlink(missing_ok=True)
+        self._pending_path(user_id, session_id).unlink(missing_ok=True)
+        return dropped
+
+    # --- rolling session summary (per user+session) -------------------------
+    def read_session_summary(self, user_id: object, session_id: object) -> str:
+        return self._read(self._session_summary_path(user_id, session_id))
+
+    def write_session_summary(self, user_id: object, session_id: object, summary: str) -> None:
+        self._write_blob(
+            self._session_summary_path(user_id, session_id),
+            f"Session summary — session {session_id}",
+            summary,
+        )
+
+    # --- pending-summary buffer (per user+session, JSON) --------------------
+    def append_pending(
+        self, user_id: object, session_id: object, turns: list[dict]
+    ) -> int:
         """Stash evicted turns to summarize later. Returns the buffer's new size."""
         path = self._pending_path(user_id, session_id)
-        self._ensure_header(path, f"Pending summary — session {session_id}")
-        with path.open("a", encoding="utf-8") as fh:
-            for bullet in bullets:
-                fh.write(bullet.rstrip("\n") + "\n")
-        return self.count_pending(user_id, session_id)
+        buffered = self._read_json(path)
+        buffered.extend(turns)
+        self._write_json(path, buffered)
+        return len(buffered)
 
-    def read_pending(self, user_id: object, session_id: object) -> str:
-        return self._read(self._pending_path(user_id, session_id))
+    def read_pending(self, user_id: object, session_id: object) -> list[dict]:
+        return self._read_json(self._pending_path(user_id, session_id))
 
     def count_pending(self, user_id: object, session_id: object) -> int:
-        text = self._read(self._pending_path(user_id, session_id))
-        return sum(1 for ln in text.splitlines() if ln.startswith("- "))
+        return len(self.read_pending(user_id, session_id))
 
     def clear_pending(self, user_id: object, session_id: object) -> None:
         self._pending_path(user_id, session_id).unlink(missing_ok=True)

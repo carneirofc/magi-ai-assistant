@@ -1,0 +1,93 @@
+"""Channel-agnostic conversation orchestration.
+
+Owns the run + memory flow for one inbound message, free of any channel concern
+(no `discord` import, no formatting): scope the memory, assemble context, record
+the turn, run the agent/team, record the reply, and fold summaries. Channels feed
+plain inputs in and render the plain `ConversationReply` out.
+
+`runner` is an agno `Agent` or `Team`; `memory` is a `MemoryManager`. Both are
+injected — nothing is constructed here.
+"""
+
+from dataclasses import dataclass
+from typing import Optional
+
+from agno.utils.log import log_error, log_info
+from agno.utils.message import get_text_from_message
+
+from core.memory import MemoryManager
+
+_ERROR_REPLY = "Sorry, there was an error processing your message. Please try again later."
+
+
+@dataclass(frozen=True)
+class ConversationReply:
+    """The result of handling one message, in channel-neutral terms."""
+
+    text: str
+    reasoning: Optional[str] = None
+    is_error: bool = False
+
+
+class ConversationService:
+    def __init__(self, runner, memory: MemoryManager, channel_guidance: str = ""):
+        self.runner = runner
+        self.memory = memory
+        # Channel-specific output rules (e.g. Discord markdown). Appended to the
+        # run context so the base prompt stays channel-agnostic.
+        self.channel_guidance = channel_guidance
+
+    async def handle(
+        self,
+        *,
+        user_id,
+        session_id: str,
+        text: str,
+        media: Optional[dict] = None,
+        extra_context: str = "",
+    ) -> ConversationReply:
+        """Run one turn end to end and return a channel-neutral reply."""
+        media = media or {}
+        log_info(f"conversation: handling (session={session_id}, user={user_id})")
+
+        self.memory.set_scope(user_id, session_id)
+        # Assemble context in order: caller identity/channel info, persisted memory,
+        # then channel output rules. The message is the retrieval query.
+        parts = [extra_context, self.memory.build_context(query=text), self.channel_guidance]
+        self.runner.additional_context = "\n\n".join(p for p in parts if p and p.strip())
+        self.memory.record_user_turn(text)
+
+        response = await self.runner.arun(
+            input=text, user_id=user_id, session_id=session_id, **media
+        )
+        log_info(
+            f"conversation: status={response.status}, "
+            f"content_len={len(response.content or '')}"
+        )
+
+        if response.status == "ERROR":
+            log_error(response.content)
+            return ConversationReply(text=_ERROR_REPLY, is_error=True)
+
+        reply = get_text_from_message(response.content) if response.content else ""
+        if reply:
+            self.memory.record_assistant_turn(reply)
+            # Fold rolled-off turns + accumulated facts (no-ops unless enabled).
+            await self.memory.maybe_summarize_session()
+            await self.memory.maybe_summarize_long_term()
+
+        return ConversationReply(
+            text=reply,
+            reasoning=getattr(response, "reasoning_content", None),
+            is_error=False,
+        )
+
+    # --- control commands (channel formats the reply text) ------------------
+    def flush(self, user_id, session_id: str) -> int:
+        """Close the session (fold summary → episode, wipe live turns). Returns dropped."""
+        self.memory.set_scope(user_id, session_id)
+        return self.memory.flush_session()
+
+    def context_stats(self, user_id, session_id: str) -> dict:
+        self.memory.set_scope(user_id, session_id)
+        return self.memory.context_stats()
