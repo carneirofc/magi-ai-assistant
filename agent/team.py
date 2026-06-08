@@ -22,6 +22,7 @@ from agent.hooks import tool_call_hook
 from agent.members import MEMBER_BUILDERS
 from agent.model import build_lead_model, build_member_model
 from agent.tools.memory import MEMORY_TOOLS
+from agent.tools.vision import VISION_TOOLS
 from core.config import config
 from core.db import get_db
 from core.prompts import load_prompt
@@ -88,6 +89,9 @@ def build_team(db: Optional[BaseDb] = None) -> Team:
         tools=[
             _build_introspection_tool(lead, members),
             WebSearchTools(backend="duckduckgo"),
+            # Lead is multimodal; this lets it pull an image URL into its own
+            # context and actually look, instead of guessing from the link text.
+            *VISION_TOOLS,
             *MEMORY_TOOLS,
         ],
     )
