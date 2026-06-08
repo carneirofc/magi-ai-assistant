@@ -1,15 +1,25 @@
+"""Discord presentation layer.
+
+This module owns ONLY Discord concerns: parsing inbound messages + attachments,
+resolving where to reply (channel / thread / DM), thread creation with a
+confirmation prompt, control commands, and chunked sending. The conversation
+itself — running the agent/team and managing memory — lives behind the injected
+`ConversationService` (core.conversation), which knows nothing about Discord.
+
+Both the `ConversationService` and the `discord.Client` are injected by the
+composition root (channels/discord.py); nothing is constructed here.
+"""
+
 import asyncio
 import re
 from contextlib import asynccontextmanager
 from os import getenv
 from textwrap import dedent
-from typing import Optional, Union
 
-from agno.agent.agent import Agent, RunOutput
 from agno.media import Audio, File, Image, Video
-from agno.team.team import Team, TeamRunOutput
-from agno.utils.log import log_error, log_info, log_warning
-from agno.utils.message import get_text_from_message
+from agno.utils.log import log_info, log_warning
+
+from core.conversation import ConversationReply, ConversationService
 from core.discord_context import (
     DiscordRunContext,
     reset_current_discord_context,
@@ -79,29 +89,12 @@ class RequiresConfirmationView(discord.ui.View):
 class DiscordClient:
     def __init__(
         self,
-        agent: Optional[Agent] = None,
-        team: Optional[Team] = None,
-        client: Optional[discord.Client] = None,
-        memory=None,
-        channel_guidance: str = "",
+        conversation: ConversationService,
+        client: discord.Client,
     ):
-        self.agent = agent
-        self.team = team
-        # Optional deliberate-memory manager (core.memory.MemoryManager). When
-        # set, each run is scoped to the user/session, the model's persisted
-        # memory is injected as context, and the turns are recorded.
-        self.memory = memory
-        # Channel-specific output rules (e.g. Discord markdown formatting). Kept
-        # out of the base prompt so it stays channel-agnostic; appended to every
-        # run's context here, where we know the channel IS Discord.
-        self.channel_guidance = channel_guidance
-        mode = "team" if team else "agent" if agent else "none"
-        log_info(f"DiscordClient init: mode={mode}, custom_client={client is not None}")
-        if client is None:
-            self.intents = discord.Intents.all()
-            self.client = discord.Client(intents=self.intents)
-        else:
-            self.client = client
+        self.conversation = conversation
+        self.client = client
+        log_info("DiscordClient init")
         self._setup_events()
 
     def _setup_events(self):
@@ -171,27 +164,24 @@ class DiscordClient:
                     message_user_id=message_user_id,
                     message_url=message_url,
                 )
-                additional_context = self._build_additional_context(run_context)
+                extra_context = self._build_additional_context(run_context)
                 if created_thread:
-                    additional_context += (
-                        "Note: a new thread was just opened for this user at their "
+                    extra_context += (
+                        "\nNote: a new thread was just opened for this user at their "
                         "request and you are now replying inside it. The thread "
                         "already exists — don't try to create another. Greet them "
                         "and carry on here.\n"
                     )
                 token = set_current_discord_context(run_context)
                 try:
-                    response = await self._run(
-                        input=message_text,
+                    reply = await self.conversation.handle(
                         user_id=message_user_id,
                         session_id=session_id,
-                        additional_context=additional_context,
+                        text=message_text,
                         media=media,
+                        extra_context=extra_context,
                     )
-                    if response is None:
-                        log_warning("no agent or team configured; dropping message")
-                        return
-                    await self._handle_response_in_thread(response, target)
+                    await self._send_reply(reply, target)
                 finally:
                     reset_current_discord_context(token)
 
@@ -274,58 +264,6 @@ class DiscordClient:
         lines.append("Never invent Discord ids or placeholder channel names; use only the exact ids above.")
         return dedent("\n".join(lines))
 
-    async def _run(
-        self,
-        *,
-        input: str,
-        user_id,
-        session_id: str,
-        additional_context: str,
-        media: dict,
-    ) -> Optional[Union[RunOutput, TeamRunOutput]]:
-        """Dispatch to the configured agent or team (one path for both)."""
-        runner = self.agent or self.team
-        if runner is None:
-            return None
-
-        kind = "agent" if self.agent else "team"
-        log_info(f"dispatching to {kind} (session={session_id}, user={user_id})")
-
-        # Assemble this run's context, in order: caller-supplied identity/channel
-        # info, the model's persisted memory, then any channel output rules.
-        parts = [additional_context]
-        if self.memory is not None:
-            self.memory.set_scope(user_id, session_id)
-            # Pass the message as the query so semantic memory (when enabled) can
-            # retrieve only the relevant facts/episodes instead of the whole file.
-            parts.append(self.memory.build_context(query=input))
-            self.memory.record_user_turn(input)
-        if self.channel_guidance:
-            parts.append(self.channel_guidance)
-
-        runner.additional_context = "\n\n".join(p for p in parts if p and p.strip())
-        response = await runner.arun(  # type: ignore[misc]
-            input=input,
-            user_id=user_id,
-            session_id=session_id,
-            **media,
-        )
-        log_info(
-            f"{kind} response: status={response.status}, "
-            f"content_len={len(response.content or '')}"
-        )
-
-        if self.memory is not None and response.content:
-            self.memory.record_assistant_turn(get_text_from_message(response.content))
-            # Fold any rolled-off turns into an episode (no-op unless enabled).
-            await self.memory.maybe_summarize()
-        if response.status == "ERROR":
-            log_error(response.content)
-            response.content = (
-                "Sorry, there was an error processing your message. Please try again later."
-            )
-        return response
-
     @asynccontextmanager
     async def _safe_typing(self, target):
         """Typing is cosmetic; timeouts here should not abort the reply."""
@@ -378,11 +316,7 @@ class DiscordClient:
 
         if cmd in ("flush", "reset", "clear"):
             log_info(f"command !{cmd} from user={user_id} session={session_id}")
-            if self.memory is None:
-                await channel.send("Memory isn't enabled — nothing to flush.")
-                return True
-            self.memory.set_scope(user_id, session_id)
-            dropped = self.memory.flush_session()
+            dropped = self.conversation.flush(user_id, session_id)
             await channel.send(
                 f"🧹 Cleared **{dropped}** turn(s) of short-term history for this chat. "
                 "Long-term memory and past episodes are kept."
@@ -391,11 +325,7 @@ class DiscordClient:
 
         if cmd in ("ctx", "context"):
             log_info(f"command !{cmd} from user={user_id} session={session_id}")
-            if self.memory is None:
-                await channel.send("Memory isn't enabled — no context to report.")
-                return True
-            self.memory.set_scope(user_id, session_id)
-            st = self.memory.context_stats()
+            st = self.conversation.context_stats(user_id, session_id)
             sec = st["sections"]
             await channel.send(
                 f"📊 Context **~{st['est_tokens']} tok** ({st['ratio']:.0%} of {st['budget_tokens']})\n"
@@ -465,52 +395,21 @@ class DiscordClient:
         snippet = " ".join(text.split())[:40].strip()
         return f"{user}: {snippet}" if snippet else f"{user}'s thread"
 
-    async def handle_hitl(
-        self, run_response: RunOutput, thread: Union[discord.Thread, discord.TextChannel]
-    ) -> RunOutput:
-        """Handles optional Human-In-The-Loop interaction."""
-        if run_response.is_paused:
-            log_info(
-                f"run paused for HITL: {len(run_response.tools_requiring_confirmation)} "
-                "tool(s) need confirmation"
-            )
-            for tool in run_response.tools_requiring_confirmation:
-                view = RequiresConfirmationView()
-                await thread.send(f"Tool requiring confirmation: {tool.tool_name}", view=view)
-                await view.wait()
-                tool.confirmed = view.value if view.value is not None else False
-                log_info(f"tool '{tool.tool_name}' confirmation: {tool.confirmed}")
-
-            if self.agent:
-                log_info("continuing agent run after HITL")
-                run_response = await self.agent.acontinue_run(  # type: ignore[misc]
-                    run_response=run_response,
-                )
-
-        return run_response
-
-    async def _handle_response_in_thread(
-        self, response: Union[RunOutput, TeamRunOutput], thread: Union[discord.TextChannel, discord.Thread]
-    ):
-        if isinstance(response, RunOutput):
-            response = await self.handle_hitl(response, thread)
-
+    async def _send_reply(self, reply: ConversationReply, target) -> None:
+        """Render a channel-neutral reply onto the Discord target."""
         sent_any = False
-        if response.reasoning_content:
+        if reply.reasoning:
             sent_any = await self._send_discord_messages(
-                thread=thread, message=f"Reasoning: \n{response.reasoning_content}", italics=True
+                thread=target, message=f"Reasoning: \n{reply.reasoning}", italics=True
             )
-
-        # Handle structured outputs properly
-        content_message = get_text_from_message(response.content) if response.content is not None else ""
-        sent_any = await self._send_discord_messages(thread=thread, message=content_message) or sent_any
+        sent_any = await self._send_discord_messages(thread=target, message=reply.text) or sent_any
         if not sent_any:
             log_warning(
-                f"response produced no sendable text for target id={getattr(thread, 'id', '?')}; "
+                f"response produced no sendable text for target id={getattr(target, 'id', '?')}; "
                 "sending fallback notice"
             )
             await self._send_discord_messages(
-                thread=thread,
+                thread=target,
                 message="I finished processing that, but there was no text content to send.",
             )
 

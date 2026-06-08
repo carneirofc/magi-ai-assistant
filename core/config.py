@@ -85,11 +85,19 @@ class Config:
     # fraction of the lead's window. Purely a guardrail/log — never truncates. ---
     ctx_warn_ratio: float = float(os.getenv("CTX_WARN_RATIO", "0.75"))
 
-    # --- Auto-summarize on evict. When turns roll out of the short-term window,
-    # batch them and fold a one-line episode into episodic memory instead of
-    # losing them. Off by default so behavior/tests are unchanged unless enabled. ---
-    summarize_on_evict: bool = _bool_env("SUMMARIZE_ON_EVICT", False)
+    # --- Short-term session summarization. When turns roll out of the live
+    # window, batch them and fold a rolling "session so far" summary that's kept
+    # in context; on session close (!flush) that summary is also recorded as a
+    # global episode. Off by default. ---
+    session_summary: bool = _bool_env("SESSION_SUMMARY", False)
     summarize_every: int = _int_env("SUMMARIZE_EVERY", 10)  # evicted turns per summary
+
+    # --- Long-term summarization. Once enough durable facts pile up, condense
+    # long_term.md with an LLM into long_term_summary.md and inject the summary
+    # plus the most recent raw facts (instead of the whole file). Off by default. ---
+    long_term_summary: bool = _bool_env("LONG_TERM_SUMMARY", False)
+    long_term_summarize_every: int = _int_env("LONG_TERM_SUMMARIZE_EVERY", 20)  # facts per re-summary
+    long_term_recent_raw: int = _int_env("LONG_TERM_RECENT_RAW", 5)  # raw facts kept alongside summary
 
     # --- Semantic memory search (Qdrant + an embedding model via the proxy).
     # When off, build_context injects long-term/episodic whole (current behavior);

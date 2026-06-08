@@ -11,13 +11,13 @@ the default set is never duplicated across builders.
 
 from collections.abc import Sequence
 
-from agent.tools.memory import MEMORY_TOOLS
 from agent.tools.time import get_current_time
 
 # Tools every agent gets by default. Extend this list as you add skills.
-# Memory tools let the model read/write its own memory deliberately (see
-# core/memory) instead of leaving it to the framework's auto-extraction.
-DEFAULT_TOOLS = [get_current_time, *MEMORY_TOOLS]
+# The deliberate memory tools are NOT here: they're bound to an injected
+# MemoryManager (see agent.tools.memory.build_memory_tools) and attached to the
+# lead in agent/team.py, so memory writes stay centralized — no globals.
+DEFAULT_TOOLS = [get_current_time]
 
 
 def enabled_tools(tools: Sequence | None = None) -> list:

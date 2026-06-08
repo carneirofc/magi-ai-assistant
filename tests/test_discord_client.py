@@ -1,8 +1,7 @@
-from types import SimpleNamespace
-
 import pytest
 
 from clients.mydiscord import DiscordClient
+from core.conversation import ConversationReply
 
 
 class DummyTyping:
@@ -43,11 +42,11 @@ async def test_safe_typing_preserves_inner_exception():
 
 
 @pytest.mark.asyncio
-async def test_handle_response_in_thread_sends_fallback_for_empty_content():
+async def test_send_reply_sends_fallback_for_empty_content():
     client = DiscordClient.__new__(DiscordClient)
     thread = DummyTarget()
-    response = SimpleNamespace(reasoning_content=None, content="   ")
+    reply = ConversationReply(text="   ", reasoning=None)
 
-    await client._handle_response_in_thread(response, thread)
+    await client._send_reply(reply, thread)
 
     assert thread.sent == ["I finished processing that, but there was no text content to send."]

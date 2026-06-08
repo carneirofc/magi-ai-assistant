@@ -54,10 +54,10 @@ def test_short_term_window_is_capped(manager):
     for i in range(5):
         manager.record_user_turn(f"msg {i}")
     s = manager.scope()
-    short_term = manager.store.read_short_term(s.user_id, s.session_id)
-    bullets = [ln for ln in short_term.splitlines() if ln.startswith("- ")]
-    assert len(bullets) == 3  # short_term_max
-    assert "msg 4" in short_term and "msg 1" not in short_term
+    turns = manager.store.read_turns(s.user_id, s.session_id)
+    contents = [t["content"] for t in turns]
+    assert len(turns) == 3  # short_term_max
+    assert "msg 4" in contents and "msg 1" not in contents
 
 
 def test_evolve_persona_appends_and_persists(manager):
@@ -100,7 +100,7 @@ def test_flush_clears_short_term_keeps_long_term(manager):
     dropped = manager.flush_session()
     assert dropped == 3
     s = manager.scope()
-    assert manager.store.read_short_term(s.user_id, s.session_id) == ""
+    assert manager.store.read_turns(s.user_id, s.session_id) == []
     # Long-term survives the flush.
     assert "durable fact" in manager.recall_long_term()
 
@@ -115,51 +115,54 @@ def test_context_stats_reports_sections_and_tokens(manager):
     assert 0 <= stats["ratio"] <= 1
 
 
-# --- auto-summarize on evict ------------------------------------------------
+# --- session + long-term summarization --------------------------------------
 
 
-async def test_evicted_turns_summarized_into_episode(tmp_path):
+async def test_session_summary_rolls_up_and_folds_into_episode(tmp_path):
     calls = []
 
     async def fake_summarize(text: str) -> str:
         calls.append(text)
-        return "summary of old turns"
+        return "rolling session summary"
 
     mgr = MemoryManager(
         store=FileMemoryStore(tmp_path / "mem"),
         short_term_max=3,
-        summarize_fn=fake_summarize,
+        summarize_session_fn=fake_summarize,
         summarize_every=2,
     )
     mgr.set_scope(user_id="u1", session_id="s1")
 
-    # 5 turns with a window of 3 => 2 evicted and buffered.
+    # 5 turns with a window of 3 => 2 evicted and buffered (>= summarize_every).
     for i in range(5):
         mgr.record_user_turn(f"msg {i}")
 
-    summary = await mgr.maybe_summarize()
-    assert summary == "summary of old turns"
+    summary = await mgr.maybe_summarize_session()
+    assert summary == "rolling session summary"
     assert calls, "summarizer should have been called"
-    assert "summary of old turns" in mgr.recall_episodes()
-    # Buffer is drained after summarizing.
     s = mgr.scope()
-    assert mgr.store.count_pending(s.user_id, s.session_id) == 0
+    assert "rolling session summary" in mgr.store.read_session_summary(s.user_id, s.session_id)
+    assert mgr.store.count_pending(s.user_id, s.session_id) == 0  # buffer drained
+
+    # Closing the session folds the rolling summary into a global episode.
+    mgr.flush_session()
+    assert "rolling session summary" in mgr.recall_episodes()
 
 
-async def test_no_summary_below_threshold(tmp_path):
+async def test_no_session_summary_below_threshold(tmp_path):
     async def fake_summarize(text: str) -> str:  # pragma: no cover - must not run
         raise AssertionError("should not summarize below threshold")
 
     mgr = MemoryManager(
         store=FileMemoryStore(tmp_path / "mem"),
         short_term_max=3,
-        summarize_fn=fake_summarize,
+        summarize_session_fn=fake_summarize,
         summarize_every=5,
     )
     mgr.set_scope(user_id="u1", session_id="s1")
     for i in range(4):  # only 1 evicted, below summarize_every=5
         mgr.record_user_turn(f"msg {i}")
-    assert await mgr.maybe_summarize() is None
+    assert await mgr.maybe_summarize_session() is None
 
 
 def test_eviction_without_summarizer_just_drops(manager):
@@ -169,6 +172,33 @@ def test_eviction_without_summarizer_just_drops(manager):
     s = manager.scope()
     assert manager.store.count_pending(s.user_id, s.session_id) == 0
     assert manager.recall_episodes() == "(no episodes recorded yet)"
+
+
+async def test_long_term_summary_written_and_injected(tmp_path):
+    async def fake_summarize(text: str) -> str:
+        return "condensed profile"
+
+    mgr = MemoryManager(
+        store=FileMemoryStore(tmp_path / "mem"),
+        short_term_max=5,
+        summarize_long_term_fn=fake_summarize,
+        long_term_summarize_every=3,
+        long_term_recent_raw=2,
+    )
+    mgr.set_scope(user_id="u1", session_id="s1")
+    for i in range(3):
+        mgr.remember(f"fact {i}")
+
+    out = await mgr.maybe_summarize_long_term()
+    assert out == "condensed profile"
+    s = mgr.scope()
+    assert "condensed profile" in mgr.store.read_long_term_summary(s.user_id)
+
+    # Context injects the summary plus only the most-recent raw facts.
+    ctx = mgr.build_context()
+    assert "condensed profile" in ctx
+    assert "fact 2" in ctx  # within recent-raw tail (last 2)
+    assert "fact 0" not in ctx  # older facts live only in the summary now
 
 
 # --- semantic retrieval (fake retriever) ------------------------------------
