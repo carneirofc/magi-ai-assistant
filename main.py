@@ -1,12 +1,10 @@
-"""Entrypoint. M1: serve the OpenAI-compatible API for OpenWebUI."""
+"""Entrypoint — run the Discord bot backed by the multimodal agent team."""
 
-import uvicorn
-
-from core.config import config
+from channels.discord import build_discord_client
 
 
 def main() -> None:
-    uvicorn.run("channels.openai_api:app", host=config.host, port=config.port)
+    build_discord_client().serve()
 
 
 if __name__ == "__main__":

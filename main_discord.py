@@ -28,7 +28,7 @@ def serve() -> None:
     from channels.discord import build_discord_client
 
     print("[serve] Building agno Discord client...")
-    discord_client = build_discord_client(use_team=True)
+    discord_client = build_discord_client()
     print("[serve] Starting bot. Press Ctrl+C to stop.")
     discord_client.serve()
 

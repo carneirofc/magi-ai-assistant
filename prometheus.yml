@@ -4,5 +4,8 @@ global:
 
 scrape_configs:
   - job_name: "litellm"
+    authorization:
+      credentials: admin
     static_configs:
       - targets: ["litellm:4000"]
+    metrics_path: /metrics

@@ -1,96 +1,190 @@
 """Provider-agnostic model factory.
 
-`build_model` is the one place that knows how to instantiate each provider's
-model. Defaults come from config; every argument can be overridden per call so
-behavior is parameterized rather than hard-coded.
+A `ModelDefinition` is a declarative spec — id, capabilities, context window.
+`build_model` is the single place that turns one into a concrete agno `Model`,
+dispatching per provider. Role helpers (`build_lead_model` / `build_member_model`)
+read the spec from config, so all model wiring lives in one place and the team
+code stays declarative.
+
+Add a provider: extend `ModelProviderEnum`, write a `_build_<provider>` function,
+and register it in `_BUILDERS`.
 """
 
 import enum
-import pydantic
+from collections.abc import Callable
+from functools import lru_cache
 
+import pydantic
 from agno.models.base import Model
 from agno.utils.log import log_info
 
 from core.config import config
 
+
 class ModelProviderEnum(enum.StrEnum):
-    ANTHROPIC = "anthropic"
     OLLAMA = "ollama"
+    LITELLM = "litellm"
+
+
+# Prefix that tells the litellm SDK "this id is served by a litellm proxy at
+# api_base", instead of inferring a provider from the bare name (which fails with
+# "LLM Provider NOT provided").
+LITELLM_PROXY_PREFIX = "litellm_proxy/"
+
 
 class ModelDefinition(pydantic.BaseModel):
+    """Declarative model spec — everything `build_model` needs, nothing it doesn't."""
+
     provider: ModelProviderEnum
     model_id: str
     has_tools: bool = False
 
+    # Multimodal capabilities. The model formats whatever media it is handed;
+    # these flags document what it can actually use, for routing / introspection.
+    supports_image: bool = False
+    supports_audio: bool = False
 
-# Models:
-# class ModelsEnum(enum.StrEnum):
-#     OLLAMA_SECOND_CONSTANTINE_GPT_OSS_U_20B = "second_constantine/gpt-oss-u:20b"
-#     OLLAMA_GEMMA_4_26B = "gemma4:26b"
-#     # lfm2.5:latest
-#     OLLAMA_LFM_25_LATEST = "lfm2.5:latest"
-#     OLLAMA_DOLPHIN_MIXTRAL_8X7B = "dolphin-mixtral:8x7b"
-#     OLLAMA_GEMMA_4_E4B = "gemma4:e4b"
+    # Generation + context controls. `num_ctx` is the context window in tokens;
+    # for Ollama it maps to the `num_ctx` runtime option (see the builders).
+    num_ctx: int | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
 
-#     # lfm2.5:latest
-#     # ollama run gemma4:26b
+    # Escape hatch for provider-specific request-body params.
+    extra_body: dict = pydantic.Field(default_factory=dict)
 
-#     # DATABRICKS_GPT_OSS_120B = "databricks-gpt-oss-120b"
-#     DATABRICKS_CLAUDE_SONNET_4_6 = "databricks-claude-sonnet-4-6"
-# # export ANTHROPIC_BASE_URL="https://adb-7405604689971905.5.azuredatabricks.net/serving-endpoints/anthropic"
-# # export ANTHROPIC_AUTH_TOKEN="dapi0f286df21853217c58d5829c77cb3945-3"
-# # export ANTHROPIC_MODEL="databricks-claude-sonnet-4-6"
-# # export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
+
+@lru_cache(maxsize=1)
+def _proxy_litellm_cls():
+    """A LiteLLM subclass that tolerates no-argument tool calls (built once).
+
+    Some proxied backends (Databricks-served Claude) emit tool_use blocks with no
+    input. Those get persisted as a tool_call whose `function` dict has no
+    `arguments` key, and agno's stock `_format_messages` indexes `["arguments"]`
+    directly — raising `KeyError: 'arguments'` on the *next* call (the
+    `Error in Team run: 'arguments'` the Discord bot hit). We normalize so
+    `arguments` is always present: on parse (fresh calls stored clean) and on
+    format (already-poisoned history loads without crashing).
+    """
+    from agno.models.litellm import LiteLLM
+
+    def _normalize(tool_calls):
+        for tc in tool_calls or []:
+            fn = tc.get("function")
+            if isinstance(fn, dict):
+                fn.setdefault("name", "")
+                if not fn.get("arguments"):
+                    fn["arguments"] = "{}"
+        return tool_calls
+
+    class ProxyLiteLLM(LiteLLM):
+        def _parse_provider_response(self, response, **kwargs):
+            mr = super()._parse_provider_response(response, **kwargs)
+            _normalize(mr.tool_calls)
+            return mr
+
+        def _format_messages(self, messages, compress_tool_results: bool = False):
+            for m in messages:
+                if getattr(m, "role", None) == "assistant" and m.tool_calls:
+                    _normalize(m.tool_calls)
+            return super()._format_messages(messages, compress_tool_results)
+
+    return ProxyLiteLLM
+
+
+def _build_litellm(model: ModelDefinition) -> Model:
+    # agno's LiteLLM uses the litellm *SDK*. The `litellm_proxy/` prefix routes
+    # the call through our proxy; without it the SDK tries to guess a provider.
+    model_id = model.model_id
+    if not model_id.startswith(LITELLM_PROXY_PREFIX):
+        model_id = f"{LITELLM_PROXY_PREFIX}{model_id}"
+
+    llm = _proxy_litellm_cls()(
+        id=model_id,
+        api_key=config.litellm_api_key,
+        api_base=config.litellm_base_url,
+    )
+
+    # Databricks-served Claude rejects `temperature` and `top_p` together; agno
+    # always sends both, so drop top_p and keep temperature.
+    llm.top_p = None
+    if model.temperature is not None:
+        llm.temperature = model.temperature
+    if model.max_tokens is not None:
+        llm.max_tokens = model.max_tokens
+
+    # Body params that ride through the proxy to the backend. `num_ctx` is an
+    # Ollama runtime option; sending it via extra_body guarantees it lands in the
+    # HTTP body to the proxy, which forwards it to Ollama's `options.num_ctx`.
+    extra_body = dict(model.extra_body)
+    if model.num_ctx is not None:
+        extra_body.setdefault("num_ctx", model.num_ctx)
+    if extra_body:
+        llm.extra_body = extra_body
+
+    return llm
+
+
+def _build_ollama(model: ModelDefinition) -> Model:
+    """Direct Ollama, bypassing the proxy. Handy for local dev / offline tests."""
+    from agno.models.ollama import Ollama
+
+    options = {"num_ctx": model.num_ctx} if model.num_ctx is not None else None
+    if model.temperature is not None:
+        options = {**(options or {}), "temperature": model.temperature}
+    return Ollama(id=model.model_id, host=config.ollama_host, options=options)
+
+
+_BUILDERS: dict[ModelProviderEnum, Callable[[ModelDefinition], Model]] = {
+    ModelProviderEnum.LITELLM: _build_litellm,
+    ModelProviderEnum.OLLAMA: _build_ollama,
+}
 
 
 def build_model(model: ModelDefinition) -> Model:
-    log_info(
-        f"building model: {model}, "
+    """Turn a `ModelDefinition` into a concrete agno `Model`."""
+    log_info(f"building model: {model.model_dump()}")
+    builder = _BUILDERS.get(model.provider)
+    if builder is None:
+        raise ValueError(f"unsupported model provider: {model.provider!r}")
+    return builder(model)
+
+
+# --- Role specs -------------------------------------------------------------
+# One spec per functional role, sourced from config. This is the place to retune
+# a role (model id, context window, capabilities) without touching team code.
+
+
+def lead_model_def() -> ModelDefinition:
+    """The lead/router brain: tools + multimodal + a 128k context window."""
+    return ModelDefinition(
+        # provider=ModelProviderEnum.LITELLM,
+        provider=ModelProviderEnum.OLLAMA,
+        model_id=config.lead_model_id,
+        has_tools=True,
+        supports_image=True,
+        supports_audio=True,
+        num_ctx=config.lead_num_ctx,
+        temperature=config.model_temperature,
     )
-    if model.provider == ModelProviderEnum.ANTHROPIC:
-        from agno.models.anthropic import Claude
-
-        client_params = {}
-        if config.anthropic_base_url:
-            client_params["base_url"] = config.anthropic_base_url
-        return Claude(
-            id=model.model_id,
-            api_key=config.anthropic_api_key,
-            auth_token=config.anthropic_auth_token,
-            client_params=client_params or None,
-        )
-
-    if model.provider == ModelProviderEnum.OLLAMA:
-        from agno.models.ollama import Ollama
-
-        return Ollama(id=model.model_id, host=config.ollama_host)
-
-    raise ValueError(f"unsupported model provider: {model.provider!r}")
-    
 
 
-# def build_model(provider: str | None = None, model_id: str | None = None) -> Model:
-#     """Build a model. Defaults from config; override per call."""
-#     provider = (provider or config.model_provider).lower()
-#     model_id = model_id or config.model_id
-#     log_info(
-#         f"building model: provider={provider}, id={model_id}, "
-#         f"anthropic_base_url={'custom' if config.anthropic_base_url else 'default'}"
-#     )
-#     if provider == "anthropic":
-#         from agno.models.anthropic import Claude
+def member_model_def() -> ModelDefinition:
+    """A specialist member: tools + multimodal, smaller context window."""
+    return ModelDefinition(
+        provider=ModelProviderEnum.OLLAMA,
+        model_id=config.member_model_id,
+        has_tools=True,
+        supports_image=True,
+        supports_audio=True,
+        num_ctx=config.member_num_ctx,
+        temperature=config.model_temperature,
+    )
 
-#         client_params = {}
-#         if config.anthropic_base_url:
-#             client_params["base_url"] = config.anthropic_base_url
-#         return Claude(
-#             id=model_id,
-#             api_key=config.anthropic_api_key,
-#             auth_token=config.anthropic_auth_token,
-#             client_params=client_params or None,
-#         )
-#     if provider == "ollama":
-#         from agno.models.ollama import Ollama
 
-#         return Ollama(id=model_id, host=config.ollama_host)
-#     raise ValueError(f"Unknown MODEL_PROVIDER: {provider!r}")
+def build_lead_model() -> Model:
+    return build_model(lead_model_def())
+
+
+def build_member_model() -> Model:
+    return build_model(member_model_def())
