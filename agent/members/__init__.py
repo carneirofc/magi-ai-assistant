@@ -15,28 +15,18 @@ from agent.members.assistant import build_assistant
 from agent.members.litellm import build_litellm_specialist
 from agent.members.ollama import build_ollama_specialist
 from agent.members.researcher import build_researcher
+from agent.tools.discord import DISCORD_TOOLS
+from core.prompts import load_prompt
 
 
 def build_discord_agent(model: Model) -> Agent:
-    """Discord REST specialist — UNWIRED by default (not in MEMBER_BUILDERS).
-
-    Thread/channel routing is the channel layer's job: clients/mydiscord.py owns
-    thread creation, the confirmation prompt and session routing. This member only
-    ever sees the user's name/id/url in context — never the guild/channel/thread
-    ids — so when the lead delegated "start a new thread" here, agno's DiscordTools
-    filled the ids with the *user id* and every REST call 404'd. Leaving it out of
-    the roster stops the lead from routing Discord plumbing it cannot do.
-
-    Wire it back only if you also feed it the real guild/channel/thread ids and a
-    bot token, and scope it to actions the channel layer does NOT already own.
-    """
-    from agno.tools.discord import DiscordTools
+    """Discord specialist for actions inside the current live conversation only."""
 
     return Agent(
         name="Discord Bot",
-        role="Discord specialist, the team's expert on all things Discord.",
+        role=load_prompt("team/discord.md"),
         model=model,
-        tools=[DiscordTools()],
+        tools=DISCORD_TOOLS,
     )
 
 
@@ -54,14 +44,12 @@ def build_docker(model: Model) -> Agent:
     )
 
 
-# Ordered set of members the team is built from. `build_discord_agent` and
-# `build_docker` are intentionally omitted — opt-in only (see their docstrings).
-# The Discord member in particular MUST stay out: thread/channel routing is the
-# channel layer's job, and the member has no conversation metadata so its
-# DiscordTools 404 on hallucinated ids.
+# Ordered set of members the team is built from. `build_docker` is intentionally
+# omitted — opt-in only (see its docstring).
 MEMBER_BUILDERS: list[Callable[[Model], Agent]] = [
     build_assistant,
     build_researcher,
+    build_discord_agent,
     build_ollama_specialist,
     build_litellm_specialist,
 ]

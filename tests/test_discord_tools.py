@@ -1,0 +1,125 @@
+from datetime import UTC, datetime
+
+import pytest
+
+from agent.tools.discord import (
+    delete_discord_message,
+    delete_recent_discord_messages,
+    describe_current_discord_context,
+    list_recent_discord_messages,
+)
+from core.discord_context import (
+    DiscordRunContext,
+    reset_current_discord_context,
+    set_current_discord_context,
+)
+
+
+class DummyAuthor:
+    def __init__(self, name: str, author_id: int, *, bot: bool = False):
+        self.name = name
+        self.id = author_id
+        self.bot = bot
+
+
+class DummyMessage:
+    def __init__(self, message_id: int, author: DummyAuthor, content: str, *, pinned: bool = False):
+        self.id = message_id
+        self.author = author
+        self.content = content
+        self.pinned = pinned
+        self.attachments = []
+        self.created_at = datetime(2026, 6, 8, tzinfo=UTC)
+        self.deleted = False
+
+    async def delete(self):
+        self.deleted = True
+
+
+class DummyHistory:
+    def __init__(self, messages):
+        self._messages = list(messages)
+
+    def __aiter__(self):
+        self._iter = iter(self._messages)
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._iter)
+        except StopIteration as exc:
+            raise StopAsyncIteration from exc
+
+
+class DummyChannel:
+    def __init__(self, messages):
+        self.id = 1511488659373691094
+        self.name = "general"
+        self._messages = {message.id: message for message in messages}
+        self._history = list(messages)
+
+    def history(self, limit: int = 20):
+        return DummyHistory(self._history[:limit])
+
+    async def fetch_message(self, message_id: int):
+        message = self._messages.get(message_id)
+        if message is None:
+            raise RuntimeError("missing")
+        return message
+
+
+@pytest.fixture
+def discord_context():
+    messages = [
+        DummyMessage(30, DummyAuthor("mod", 3), "latest"),
+        DummyMessage(20, DummyAuthor("alice", 2), "middle"),
+        DummyMessage(10, DummyAuthor("bob", 1), "oldest"),
+    ]
+    channel = DummyChannel(messages)
+    token = set_current_discord_context(
+        DiscordRunContext(
+            guild_id="1511488658350542878",
+            guild_name="Test Guild",
+            channel_id=str(channel.id),
+            channel_name=channel.name,
+            channel_kind="TextChannel",
+            message_id="999",
+            message_url="https://discord.example/message/999",
+            user_id="1256065127401132129",
+            username="__kharma__",
+            channel=channel,
+        )
+    )
+    try:
+        yield channel
+    finally:
+        reset_current_discord_context(token)
+
+
+def test_describe_current_discord_context_uses_live_ids(discord_context):
+    result = describe_current_discord_context.entrypoint()
+    assert "1511488658350542878" in result
+    assert "1511488659373691094" in result
+    assert "general" in result
+
+
+@pytest.mark.asyncio
+async def test_list_recent_discord_messages_returns_concrete_message_ids(discord_context):
+    result = await list_recent_discord_messages.entrypoint(limit=2)
+    assert '"message_id": "20"' in result
+    assert '"message_id": "30"' in result
+
+
+@pytest.mark.asyncio
+async def test_delete_discord_message_deletes_from_current_channel(discord_context):
+    result = await delete_discord_message.entrypoint(message_id="20")
+    assert "Deleted message 20" in result
+    assert discord_context._messages[20].deleted is True
+
+
+@pytest.mark.asyncio
+async def test_delete_recent_discord_messages_skips_current_request_and_deletes_count(discord_context):
+    result = await delete_recent_discord_messages.entrypoint(count=2)
+    assert "Deleted 2 recent message(s)" in result
+    assert discord_context._messages[30].deleted is True
+    assert discord_context._messages[20].deleted is True
