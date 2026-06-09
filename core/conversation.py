@@ -12,12 +12,18 @@ injected — nothing is constructed here.
 from dataclasses import dataclass
 from typing import Optional
 
-from agno.utils.log import log_error, log_info
+from agno.utils.log import log_error, log_info, log_warning
 from agno.utils.message import get_text_from_message
 
 from core.memory import MemoryManager
 
 _ERROR_REPLY = "Sorry, there was an error processing your message. Please try again later."
+# Run finished cleanly but the lead emitted nothing — e.g. a tool failed and it
+# stalled instead of recovering. Never hand the channel silence: say so honestly.
+_EMPTY_REPLY = (
+    "I wasn't able to put together an answer for that — a step I tried didn't pan out. "
+    "Mind rephrasing or asking again?"
+)
 
 
 @dataclass(frozen=True)
@@ -70,15 +76,22 @@ class ConversationService:
             return ConversationReply(text=_ERROR_REPLY, is_error=True)
 
         reply = get_text_from_message(response.content) if response.content else ""
+        reasoning = getattr(response, "reasoning_content", None)
         if reply:
             self.memory.record_assistant_turn(reply)
             # Fold rolled-off turns + accumulated facts (no-ops unless enabled).
             await self.memory.maybe_summarize_session()
             await self.memory.maybe_summarize_long_term()
+        elif not reasoning:
+            # Completed with neither answer nor reasoning: the lead went silent
+            # (commonly after a tool error). Return an honest fallback instead of
+            # an empty string so the channel never has to invent one.
+            log_warning(f"run completed with no content (status={response.status}); returning fallback")
+            return ConversationReply(text=_EMPTY_REPLY, is_error=True)
 
         return ConversationReply(
             text=reply,
-            reasoning=getattr(response, "reasoning_content", None),
+            reasoning=reasoning,
             is_error=False,
         )
 
