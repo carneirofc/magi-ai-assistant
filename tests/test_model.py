@@ -146,18 +146,19 @@ def test_temperature_override_applied():
     assert model.temperature == 0.2
 
 
-def test_lead_spec_is_multimodal_128k():
-    """The lead is the multimodal, large-context router brain."""
+def test_lead_spec_is_multimodal_router_brain():
+    """The lead is the multimodal router brain; its window is configured."""
     spec = lead_model_def()
-    assert spec.provider == ModelProviderEnum.LITELLM
+    assert spec.provider == ModelProviderEnum.LITELLM  # default provider (proxy)
     assert spec.model_id == config.lead_model_id
     assert spec.has_tools
     assert spec.supports_image and spec.supports_audio
-    assert spec.num_ctx == config.lead_num_ctx == 131072
+    assert spec.num_ctx == config.lead_num_ctx
 
 
-def test_member_spec_smaller_context():
+def test_member_window_no_larger_than_lead():
+    """Members get a window no larger than the lead's (kept equal for GPU fit)."""
     spec = member_model_def()
     assert spec.has_tools
     assert spec.num_ctx == config.member_num_ctx
-    assert spec.num_ctx < lead_model_def().num_ctx
+    assert spec.num_ctx <= lead_model_def().num_ctx
