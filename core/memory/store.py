@@ -31,6 +31,8 @@ class ScopedMemory:
     """The six per-(user, session) memory files, each as its file-shape adapter."""
 
     def __init__(self, root: Path, user_id: object, session_id: object):
+        self.user_id = str(user_id)
+        self.session_id = str(session_id)
         users = root / "users" / slug(user_id)
         sessions = users / "sessions"
         sid = slug(session_id)

@@ -25,13 +25,18 @@ the agent layer (see `agent/summarizer.py`). Construction is done by `build_memo
 
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Optional
+from typing import Optional
 
 from agno.utils.log import log_info, log_warning
 
 from core.config import config
+from core.memory.kinds import Episodes, LongTerm, Session, SummarizeFn
 from core.memory.semantic import MemoryRetriever
 from core.memory.store import FileMemoryStore, ScopedMemory
+
+# Re-exported for the agent layer (agent/summarizer.py) and __init__; the canonical
+# definition lives next to the kinds that consume it.
+__all__ = ["MemoryManager", "MemoryScope", "SummarizeFn"]
 
 # Rough provider-agnostic token estimate. We never see the real tokenizer through
 # the proxy, so ~4 chars/token is the standard ballpark — good enough to monitor
@@ -41,10 +46,6 @@ _CHARS_PER_TOKEN = 4
 
 def _est_tokens(text: str) -> int:
     return (len(text) + _CHARS_PER_TOKEN - 1) // _CHARS_PER_TOKEN
-
-
-# An async summarizer: takes text, returns a compact summary.
-SummarizeFn = Callable[[str], Awaitable[str]]
 
 
 @dataclass(frozen=True)
@@ -75,24 +76,17 @@ class MemoryManager:
         semantic_top_k: int = 5,
     ):
         self.store = store
-        self.short_term_max = short_term_max
-        # When set, turns evicted from the window are buffered and folded into a
-        # rolling session summary every `summarize_every` turns; on session close
-        # that summary is recorded as a global episode. When None, eviction drops.
-        self.summarize_session_fn = summarize_session_fn
-        # When set, long-term facts are condensed into a profile once enough pile up.
-        self.summarize_long_term_fn = summarize_long_term_fn
-        self.summarize_every = max(1, summarize_every)
-        self.long_term_summarize_every = max(1, long_term_summarize_every)
-        self.long_term_recent_raw = max(0, long_term_recent_raw)
-        # When set, long-term/episodes are also embedded into a vector store and
-        # `build_context(query=...)` retrieves only the top-k relevant entries
-        # instead of injecting whole files. None => whole-file injection (default).
-        self.retriever = retriever
-        self.semantic_top_k = semantic_top_k
-        # Per-user long-term fact count at the last summary (in-memory; a restart
-        # just re-summarizes once on the next threshold cross — harmless).
-        self._lt_summarized_at: dict[str, int] = {}
+        # When set, long-term/episodes are also embedded into a vector store so a kind
+        # render can retrieve only the top-k relevant entries instead of the whole
+        # file. None => whole-file injection (default). Owned by the kinds, not here.
+        # The scoped kinds. Each owns its IO + render + write + (if foldable) fold
+        # policy; this manager orchestrates them and handles the global persona.
+        self.long_term = LongTerm(
+            retriever, semantic_top_k, max(0, long_term_recent_raw),
+            summarize_long_term_fn, max(1, long_term_summarize_every),
+        )
+        self.episodes = Episodes(retriever, semantic_top_k, short_term_max)
+        self.session = Session(short_term_max, summarize_session_fn, max(1, summarize_every))
         if persona_seed:
             self.store.seed_persona(persona_seed)
 
@@ -127,157 +121,51 @@ class MemoryManager:
         self._record_turn("assistant", text)
 
     def _record_turn(self, role: str, text: str) -> None:
-        s = self.scope()
-        evicted = self.mem.live_turns.append(role, text, self.short_term_max)
-        # Don't lose evicted turns: buffer them for summarization (no model call
-        # here — that happens in `maybe_summarize_session`). No-op when the session
-        # summarizer is disabled, preserving the plain "drop oldest" behavior.
-        if evicted and self.summarize_session_fn is not None:
-            size = self.mem.pending.extend(evicted)
-            log_info(
-                f"memory: buffered {len(evicted)} evicted turn(s) for summary "
-                f"(pending={size}/{self.summarize_every}) user={s.user_id} session={s.session_id}"
-            )
-
-    @staticmethod
-    def _render_turns(turns: list[dict]) -> str:
-        """Render JSON turns to the text the model sees (impl detail, not presentation)."""
-        return "\n".join(f"- **{t.get('role', '?')}**: {t.get('content', '')}" for t in turns)
-
-    async def _fold(
-        self,
-        *,
-        fn: Optional[SummarizeFn],
-        payload: Optional[str],
-        write_back: Callable[[str], None],
-        label: str,
-    ) -> Optional[str]:
-        """Guarded summarize: await `fn(payload)`, then persist via `write_back`.
-
-        The one place the "summarization must never break a chat" contract lives:
-        a no-op (returns None) when the summarizer is unset or there's nothing to
-        fold (`payload` falsy), and any summarizer failure is logged and swallowed.
-        The per-kind gate/source/write differences are passed in by the callers.
-        """
-        if fn is None or not payload:
-            return None
-        try:
-            summary = (await fn(payload)).strip()
-        except Exception as exc:  # noqa: BLE001 — summarization must never break a chat.
-            log_warning(f"memory: {label} summary failed: {type(exc).__name__}: {exc}")
-            return None
-        if not summary:
-            return None
-        write_back(summary)
-        log_info(f"memory: summarized {label}")
-        return summary
+        self.session.record_turn(self.mem, role, text)
 
     async def maybe_summarize_session(self) -> Optional[str]:
         """Fold buffered evicted turns into the rolling session summary.
 
-        Channel awaits this after each turn. No-op unless a session summarizer is
-        configured and the pending buffer has reached `summarize_every` turns.
+        Channel awaits this after each turn; no-op unless the session summarizer is
+        set and the pending buffer has reached its threshold. (Delegates to `Session`.)
         """
-        if self.summarize_session_fn is None:
-            return None
-        s = self.scope()
-        payload = None
-        if self.mem.pending.count() >= self.summarize_every:
-            pending = self.mem.pending.read()
-            if pending:
-                prior = self.mem.session_summary.read()
-                payload = (
-                    f"Prior summary:\n{prior or '(none)'}\n\n"
-                    f"New turns:\n{self._render_turns(pending)}"
-                )
-
-        def write_back(summary: str) -> None:
-            self.mem.session_summary.write(summary)
-            self.mem.pending.delete()
-
-        return await self._fold(
-            fn=self.summarize_session_fn,
-            payload=payload,
-            write_back=write_back,
-            label=f"session for user {s.user_id}",
-        )
+        return await self.session.maybe_fold(self.mem)
 
     async def maybe_summarize_long_term(self) -> Optional[str]:
-        """Condense long-term facts into a profile once enough have accumulated.
+        """Condense long-term facts into a profile once enough accumulate.
 
-        Channel awaits this after each turn. No-op unless a long-term summarizer is
-        configured and at least `long_term_summarize_every` new facts have landed
-        since the last summary.
+        Channel awaits this after each turn; no-op unless the long-term summarizer is
+        set and enough new facts have landed. (Delegates to `LongTerm`.)
         """
-        if self.summarize_long_term_fn is None:
-            return None
-        s = self.scope()
-        count = self.mem.long_term.count()
-        last = self._lt_summarized_at.get(s.user_id, 0)
-        payload = None
-        if count >= self.long_term_summarize_every and count - last >= self.long_term_summarize_every:
-            facts = self.mem.long_term.read()
-            if facts.strip():
-                payload = facts
-
-        def write_back(summary: str) -> None:
-            self.mem.long_term_summary.write(summary)
-            self._lt_summarized_at[s.user_id] = count
-
-        return await self._fold(
-            fn=self.summarize_long_term_fn,
-            payload=payload,
-            write_back=write_back,
-            label=f"long-term for user {s.user_id}",
-        )
+        return await self.long_term.maybe_fold(self.mem)
 
     # --- flush / close (called by the channel) ------------------------------
     def flush_session(self) -> int:
-        """Close the live session: fold its summary into a global episode, then wipe.
+        """Close the live session: carry its summary into a global episode, then wipe.
 
-        The session summary (if any) is recorded as an episode so the gist of the
-        chat survives; long-term facts, episodes and persona are otherwise left
-        intact. Returns how many live turns were dropped (the `!flush` command).
+        Orchestrates the one cross-kind hand-off — `Session.close` returns the
+        rolling summary (if any), which is recorded as an `Episodes` entry so the
+        gist survives. Long-term, episodes and persona are otherwise untouched.
+        Returns how many live turns were dropped (the `!flush` command).
         """
-        s = self.scope()
-        summary = self.mem.session_summary.read()
-        if summary.strip():
-            episode = self._strip_header(summary)
-            self.mem.episodes.append(episode)
-            self._index(s.user_id, "episode", episode)
-            log_info(f"memory: folded session summary into episode for user {s.user_id}")
-        dropped = self.mem.live_turns.count()
-        self.mem.live_turns.delete()
-        self.mem.session_summary.delete()
-        self.mem.pending.delete()
-        log_info(f"memory: flushed {dropped} short-term turn(s) for session {s.session_id}")
+        mem = self.mem
+        dropped, carried = self.session.close(mem)
+        if carried:
+            self.episodes.record_episode(mem, carried)
+            log_info(f"memory: folded session summary into episode for user {mem.user_id}")
+        log_info(f"memory: flushed {dropped} short-term turn(s) for session {mem.session_id}")
         return dropped
-
-    @staticmethod
-    def _strip_header(blob: str) -> str:
-        """Drop the leading markdown `# header` line from a summary blob."""
-        lines = [ln for ln in blob.splitlines() if not ln.startswith("#")]
-        return "\n".join(lines).strip()
 
     # --- deliberate writes (the model calls these via tools) ----------------
     def remember(self, fact: str) -> str:
-        s = self.scope()
-        self.mem.long_term.append(fact)
-        self._index(s.user_id, "long_term", fact)
-        log_info(f"memory: long-term written for user {s.user_id}: {fact!r}")
+        self.long_term.remember(self.mem, fact)
+        log_info(f"memory: long-term written for user {self.scope().user_id}: {fact!r}")
         return "Stored to long-term memory."
 
     def record_episode(self, summary: str) -> str:
-        s = self.scope()
-        self.mem.episodes.append(summary)
-        self._index(s.user_id, "episode", summary)
-        log_info(f"memory: episode written for user {s.user_id}: {summary!r}")
+        self.episodes.record_episode(self.mem, summary)
+        log_info(f"memory: episode written for user {self.scope().user_id}: {summary!r}")
         return "Episode recorded."
-
-    def _index(self, user_id: str, kind: str, text: str) -> None:
-        """Mirror a deliberate write into the vector store (no-op when disabled)."""
-        if self.retriever is not None:
-            self.retriever.index(user_id, kind, text)
 
     def evolve_persona(self, adjustment: str) -> str:
         self.store.persona.append(adjustment)
@@ -286,56 +174,24 @@ class MemoryManager:
 
     # --- reads --------------------------------------------------------------
     def recall_long_term(self) -> str:
-        return self.mem.long_term.read() or "(no long-term memory yet)"
+        return self.long_term.recall(self.mem) or "(no long-term memory yet)"
 
     def recall_episodes(self, limit: int = 5) -> str:
-        return self.mem.episodes.tail(limit) or "(no episodes recorded yet)"
+        return self.episodes.recall(self.mem, limit) or "(no episodes recorded yet)"
 
     # --- context assembly (injected into every run) -------------------------
-    def _long_term_section(self, query: str | None) -> str:
-        """Long-term as: condensed summary + most-recent raw facts (or whole file).
-
-        With a retriever AND a query, return the top-k entries most relevant to the
-        query instead (so a long history isn't dumped wholesale).
-        """
-        if self.retriever is not None and query:
-            hits = self.retriever.search(self.scope().user_id, query, "long_term", self.semantic_top_k)
-            if hits:
-                return "\n".join(f"- {h}" for h in hits)
-        summary = self.mem.long_term_summary.read()
-        if not summary:
-            return self.mem.long_term.read()  # nothing condensed yet
-        recent = self.mem.long_term.recent(self.long_term_recent_raw)
-        parts = [self._strip_header(summary)]
-        if recent:
-            parts.append("Recent facts:\n" + "\n".join(f"- {r}" for r in recent))
-        return "\n\n".join(parts)
-
-    def _short_term_section(self) -> str:
-        """Short-term as: rolling session summary (if any) + the live JSON turns."""
-        summary = self.mem.session_summary.read()
-        turns = self._render_turns(self.mem.live_turns.read())
-        parts = []
-        if summary:
-            parts.append("Earlier this session:\n" + self._strip_header(summary))
-        if turns:
-            parts.append(turns)
-        return "\n\n".join(parts)
-
-    def _episodes_section(self, query: str | None) -> str:
-        if self.retriever is not None and query:
-            hits = self.retriever.search(self.scope().user_id, query, "episode", self.semantic_top_k)
-            if hits:
-                return "\n".join(f"- {h}" for h in hits)
-        return self.mem.episodes.tail(self.short_term_max)
-
     def _read_sections(self, query: str | None = None) -> dict[str, str]:
-        """The memory bodies for the current scope, by name (may be empty)."""
+        """The memory bodies for the current scope, by name (may be empty).
+
+        Persona is global (rendered straight off the store); the scoped kinds render
+        themselves against the current `mem` bundle.
+        """
+        mem = self.mem
         return {
             "persona": self.store.persona.read(),
-            "long_term": self._long_term_section(query),
-            "episodes": self._episodes_section(query),
-            "short_term": self._short_term_section(),
+            "long_term": self.long_term.render(mem, query),
+            "episodes": self.episodes.render(mem, query),
+            "short_term": self.session.render(mem, query),
         }
 
     def build_context(self, query: str | None = None) -> str:
@@ -350,11 +206,11 @@ class MemoryManager:
         if parts["persona"]:
             sections.append(parts["persona"])
         if parts["long_term"]:
-            sections.append(f"## What you remember about this user (global)\n{parts['long_term']}")
+            sections.append(f"{self.long_term.section_header}\n{parts['long_term']}")
         if parts["episodes"]:
-            sections.append(f"## Past episodes with this user (global)\n{parts['episodes']}")
+            sections.append(f"{self.episodes.section_header}\n{parts['episodes']}")
         if parts["short_term"]:
-            sections.append(f"## This session so far (short-term)\n{parts['short_term']}")
+            sections.append(f"{self.session.section_header}\n{parts['short_term']}")
         sections.append(
             "You decide what persists — nothing is saved automatically:\n"
             "- `remember(fact)` — keep a durable fact about this user (global)\n"
