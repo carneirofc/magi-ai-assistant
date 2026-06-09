@@ -53,8 +53,7 @@ def test_episodes_recorded_and_limited(manager):
 def test_short_term_window_is_capped(manager):
     for i in range(5):
         manager.record_user_turn(f"msg {i}")
-    s = manager.scope()
-    turns = manager.store.read_turns(s.user_id, s.session_id)
+    turns = manager.mem.live_turns.read()
     contents = [t["content"] for t in turns]
     assert len(turns) == 3  # short_term_max
     assert "msg 4" in contents and "msg 1" not in contents
@@ -62,9 +61,9 @@ def test_short_term_window_is_capped(manager):
 
 def test_evolve_persona_appends_and_persists(manager):
     manager.evolve_persona("Be more concise on Discord.")
-    assert "Be more concise on Discord." in manager.store.read_persona()
+    assert "Be more concise on Discord." in manager.store.persona.read()
     # Seed persona is preserved alongside the evolution.
-    assert "You are Alyssa." in manager.store.read_persona()
+    assert "You are Alyssa." in manager.store.persona.read()
 
 
 def test_build_context_includes_written_memory(manager):
@@ -99,8 +98,7 @@ def test_flush_clears_short_term_keeps_long_term(manager):
         manager.record_user_turn(f"turn {i}")
     dropped = manager.flush_session()
     assert dropped == 3
-    s = manager.scope()
-    assert manager.store.read_turns(s.user_id, s.session_id) == []
+    assert manager.mem.live_turns.read() == []
     # Long-term survives the flush.
     assert "durable fact" in manager.recall_long_term()
 
@@ -140,9 +138,8 @@ async def test_session_summary_rolls_up_and_folds_into_episode(tmp_path):
     summary = await mgr.maybe_summarize_session()
     assert summary == "rolling session summary"
     assert calls, "summarizer should have been called"
-    s = mgr.scope()
-    assert "rolling session summary" in mgr.store.read_session_summary(s.user_id, s.session_id)
-    assert mgr.store.count_pending(s.user_id, s.session_id) == 0  # buffer drained
+    assert "rolling session summary" in mgr.mem.session_summary.read()
+    assert mgr.mem.pending.count() == 0  # buffer drained
 
     # Closing the session folds the rolling summary into a global episode.
     mgr.flush_session()
@@ -165,12 +162,48 @@ async def test_no_session_summary_below_threshold(tmp_path):
     assert await mgr.maybe_summarize_session() is None
 
 
+async def test_session_summary_failure_never_breaks_the_chat(tmp_path):
+    async def boom(text: str) -> str:
+        raise RuntimeError("summarizer down")
+
+    mgr = MemoryManager(
+        store=FileMemoryStore(tmp_path / "mem"),
+        short_term_max=3,
+        summarize_session_fn=boom,
+        summarize_every=2,
+    )
+    mgr.set_scope(user_id="u1", session_id="s1")
+    for i in range(5):
+        mgr.record_user_turn(f"msg {i}")
+
+    # Summarizer raised, but the call swallows it and keeps the buffer intact.
+    assert await mgr.maybe_summarize_session() is None
+    assert mgr.mem.pending.count() >= 2
+
+
+async def test_long_term_summary_failure_never_breaks_the_chat(tmp_path):
+    async def boom(text: str) -> str:
+        raise RuntimeError("summarizer down")
+
+    mgr = MemoryManager(
+        store=FileMemoryStore(tmp_path / "mem"),
+        short_term_max=5,
+        summarize_long_term_fn=boom,
+        long_term_summarize_every=3,
+    )
+    mgr.set_scope(user_id="u1", session_id="s1")
+    for i in range(3):
+        mgr.remember(f"fact {i}")
+
+    assert await mgr.maybe_summarize_long_term() is None
+    assert mgr.mem.long_term_summary.read() == ""
+
+
 def test_eviction_without_summarizer_just_drops(manager):
     """No summarizer => old turns drop, nothing buffered (prior behavior)."""
     for i in range(5):  # window is 3
         manager.record_user_turn(f"msg {i}")
-    s = manager.scope()
-    assert manager.store.count_pending(s.user_id, s.session_id) == 0
+    assert manager.mem.pending.count() == 0
     assert manager.recall_episodes() == "(no episodes recorded yet)"
 
 
@@ -191,8 +224,7 @@ async def test_long_term_summary_written_and_injected(tmp_path):
 
     out = await mgr.maybe_summarize_long_term()
     assert out == "condensed profile"
-    s = mgr.scope()
-    assert "condensed profile" in mgr.store.read_long_term_summary(s.user_id)
+    assert "condensed profile" in mgr.mem.long_term_summary.read()
 
     # Context injects the summary plus only the most-recent raw facts.
     ctx = mgr.build_context()
