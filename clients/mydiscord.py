@@ -19,6 +19,7 @@ from textwrap import dedent
 from agno.media import Audio, File, Image, Video
 from agno.utils.log import log_info, log_warning
 
+from clients.chunking import DISCORD_MESSAGE_LIMIT, chunk
 from core.conversation import ConversationReply, ConversationService
 from core.discord_context import (
     DiscordRunContext,
@@ -413,6 +414,11 @@ class DiscordClient:
                 message="I finished processing that, but there was no text content to send.",
             )
 
+    @staticmethod
+    def _italicize(text: str) -> str:
+        """Wrap each line in `_..._` so Discord renders the whole part italic."""
+        return "\n".join(f"_{line}_" for line in text.split("\n"))
+
     async def _send_discord_messages(
         self, thread: discord.channel, message: str, italics: bool = False
     ) -> bool:  # type: ignore
@@ -422,23 +428,11 @@ class DiscordClient:
             )
             return False
 
-        if len(message) < 1500:
-            if italics:
-                formatted_message = "\n".join([f"_{line}_" for line in message.split("\n")])
-                await thread.send(formatted_message)  # type: ignore
-            else:
-                await thread.send(message)  # type: ignore
-            return True
-
-        message_batches = [message[i : i + 1500] for i in range(0, len(message), 1500)]
-
-        for i, batch in enumerate(message_batches, 1):
-            batch_message = f"[{i}/{len(message_batches)}] {batch}"
-            if italics:
-                formatted_batch = "\n".join([f"_{line}_" for line in batch_message.split("\n")])
-                await thread.send(formatted_batch)  # type: ignore
-            else:
-                await thread.send(batch_message)  # type: ignore
+        parts = chunk(message, DISCORD_MESSAGE_LIMIT)
+        numbered = len(parts) > 1
+        for i, part in enumerate(parts, 1):
+            body = f"[{i}/{len(parts)}] {part}" if numbered else part
+            await thread.send(self._italicize(body) if italics else body)  # type: ignore
         return True
 
     def serve(self):
