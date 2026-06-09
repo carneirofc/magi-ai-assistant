@@ -31,7 +31,7 @@ from agno.utils.log import log_info, log_warning
 
 from core.config import config
 from core.memory.semantic import MemoryRetriever
-from core.memory.store import FileMemoryStore
+from core.memory.store import FileMemoryStore, ScopedMemory
 
 # Rough provider-agnostic token estimate. We never see the real tokenizer through
 # the proxy, so ~4 chars/token is the standard ballpark — good enough to monitor
@@ -108,6 +108,17 @@ class MemoryManager:
             raise RuntimeError("memory scope not set; call set_scope() before use")
         return scope
 
+    @property
+    def mem(self) -> ScopedMemory:
+        """The file adapters for the current scope.
+
+        Resolved from the `ContextVar` on each access — never cached on the
+        manager — so concurrent sessions sharing this single manager instance can't
+        clobber one another's scope. Constructing the bundle is just path wrapping.
+        """
+        s = self.scope()
+        return self.store.scoped(s.user_id, s.session_id)
+
     # --- short-term turn recording (called by the channel, not the model) ---
     def record_user_turn(self, text: str) -> None:
         self._record_turn("user", text)
@@ -117,14 +128,12 @@ class MemoryManager:
 
     def _record_turn(self, role: str, text: str) -> None:
         s = self.scope()
-        evicted = self.store.append_turn(
-            s.user_id, s.session_id, role, text, self.short_term_max
-        )
+        evicted = self.mem.live_turns.append(role, text, self.short_term_max)
         # Don't lose evicted turns: buffer them for summarization (no model call
         # here — that happens in `maybe_summarize_session`). No-op when the session
         # summarizer is disabled, preserving the plain "drop oldest" behavior.
         if evicted and self.summarize_session_fn is not None:
-            size = self.store.append_pending(s.user_id, s.session_id, evicted)
+            size = self.mem.pending.extend(evicted)
             log_info(
                 f"memory: buffered {len(evicted)} evicted turn(s) for summary "
                 f"(pending={size}/{self.summarize_every}) user={s.user_id} session={s.session_id}"
@@ -135,6 +144,34 @@ class MemoryManager:
         """Render JSON turns to the text the model sees (impl detail, not presentation)."""
         return "\n".join(f"- **{t.get('role', '?')}**: {t.get('content', '')}" for t in turns)
 
+    async def _fold(
+        self,
+        *,
+        fn: Optional[SummarizeFn],
+        payload: Optional[str],
+        write_back: Callable[[str], None],
+        label: str,
+    ) -> Optional[str]:
+        """Guarded summarize: await `fn(payload)`, then persist via `write_back`.
+
+        The one place the "summarization must never break a chat" contract lives:
+        a no-op (returns None) when the summarizer is unset or there's nothing to
+        fold (`payload` falsy), and any summarizer failure is logged and swallowed.
+        The per-kind gate/source/write differences are passed in by the callers.
+        """
+        if fn is None or not payload:
+            return None
+        try:
+            summary = (await fn(payload)).strip()
+        except Exception as exc:  # noqa: BLE001 — summarization must never break a chat.
+            log_warning(f"memory: {label} summary failed: {type(exc).__name__}: {exc}")
+            return None
+        if not summary:
+            return None
+        write_back(summary)
+        log_info(f"memory: summarized {label}")
+        return summary
+
     async def maybe_summarize_session(self) -> Optional[str]:
         """Fold buffered evicted turns into the rolling session summary.
 
@@ -144,27 +181,26 @@ class MemoryManager:
         if self.summarize_session_fn is None:
             return None
         s = self.scope()
-        if self.store.count_pending(s.user_id, s.session_id) < self.summarize_every:
-            return None
-        pending = self.store.read_pending(s.user_id, s.session_id)
-        if not pending:
-            return None
-        prior = self.store.read_session_summary(s.user_id, s.session_id)
-        payload = (
-            f"Prior summary:\n{prior or '(none)'}\n\n"
-            f"New turns:\n{self._render_turns(pending)}"
+        payload = None
+        if self.mem.pending.count() >= self.summarize_every:
+            pending = self.mem.pending.read()
+            if pending:
+                prior = self.mem.session_summary.read()
+                payload = (
+                    f"Prior summary:\n{prior or '(none)'}\n\n"
+                    f"New turns:\n{self._render_turns(pending)}"
+                )
+
+        def write_back(summary: str) -> None:
+            self.mem.session_summary.write(summary)
+            self.mem.pending.delete()
+
+        return await self._fold(
+            fn=self.summarize_session_fn,
+            payload=payload,
+            write_back=write_back,
+            label=f"session for user {s.user_id}",
         )
-        try:
-            summary = (await self.summarize_session_fn(payload)).strip()
-        except Exception as exc:  # noqa: BLE001 — summarization must never break a chat.
-            log_warning(f"memory: session summary failed, keeping buffer: {type(exc).__name__}: {exc}")
-            return None
-        if not summary:
-            return None
-        self.store.write_session_summary(s.user_id, s.session_id, summary)
-        self.store.clear_pending(s.user_id, s.session_id)
-        log_info(f"memory: summarized session for user {s.user_id}: {summary[:80]!r}")
-        return summary
 
     async def maybe_summarize_long_term(self) -> Optional[str]:
         """Condense long-term facts into a profile once enough have accumulated.
@@ -176,24 +212,24 @@ class MemoryManager:
         if self.summarize_long_term_fn is None:
             return None
         s = self.scope()
-        count = self.store.count_long_term(s.user_id)
+        count = self.mem.long_term.count()
         last = self._lt_summarized_at.get(s.user_id, 0)
-        if count < self.long_term_summarize_every or count - last < self.long_term_summarize_every:
-            return None
-        facts = self.store.read_long_term(s.user_id)
-        if not facts.strip():
-            return None
-        try:
-            summary = (await self.summarize_long_term_fn(facts)).strip()
-        except Exception as exc:  # noqa: BLE001
-            log_warning(f"memory: long-term summary failed: {type(exc).__name__}: {exc}")
-            return None
-        if not summary:
-            return None
-        self.store.write_long_term_summary(s.user_id, summary)
-        self._lt_summarized_at[s.user_id] = count
-        log_info(f"memory: summarized long-term for user {s.user_id} ({count} facts)")
-        return summary
+        payload = None
+        if count >= self.long_term_summarize_every and count - last >= self.long_term_summarize_every:
+            facts = self.mem.long_term.read()
+            if facts.strip():
+                payload = facts
+
+        def write_back(summary: str) -> None:
+            self.mem.long_term_summary.write(summary)
+            self._lt_summarized_at[s.user_id] = count
+
+        return await self._fold(
+            fn=self.summarize_long_term_fn,
+            payload=payload,
+            write_back=write_back,
+            label=f"long-term for user {s.user_id}",
+        )
 
     # --- flush / close (called by the channel) ------------------------------
     def flush_session(self) -> int:
@@ -204,13 +240,16 @@ class MemoryManager:
         intact. Returns how many live turns were dropped (the `!flush` command).
         """
         s = self.scope()
-        summary = self.store.read_session_summary(s.user_id, s.session_id)
+        summary = self.mem.session_summary.read()
         if summary.strip():
             episode = self._strip_header(summary)
-            self.store.append_episode(s.user_id, episode)
+            self.mem.episodes.append(episode)
             self._index(s.user_id, "episode", episode)
             log_info(f"memory: folded session summary into episode for user {s.user_id}")
-        dropped = self.store.clear_session(s.user_id, s.session_id)
+        dropped = self.mem.live_turns.count()
+        self.mem.live_turns.delete()
+        self.mem.session_summary.delete()
+        self.mem.pending.delete()
         log_info(f"memory: flushed {dropped} short-term turn(s) for session {s.session_id}")
         return dropped
 
@@ -223,14 +262,14 @@ class MemoryManager:
     # --- deliberate writes (the model calls these via tools) ----------------
     def remember(self, fact: str) -> str:
         s = self.scope()
-        self.store.append_long_term(s.user_id, fact)
+        self.mem.long_term.append(fact)
         self._index(s.user_id, "long_term", fact)
         log_info(f"memory: long-term written for user {s.user_id}: {fact!r}")
         return "Stored to long-term memory."
 
     def record_episode(self, summary: str) -> str:
         s = self.scope()
-        self.store.append_episode(s.user_id, summary)
+        self.mem.episodes.append(summary)
         self._index(s.user_id, "episode", summary)
         log_info(f"memory: episode written for user {s.user_id}: {summary!r}")
         return "Episode recorded."
@@ -241,44 +280,41 @@ class MemoryManager:
             self.retriever.index(user_id, kind, text)
 
     def evolve_persona(self, adjustment: str) -> str:
-        self.store.append_persona_note(adjustment)
+        self.store.persona.append(adjustment)
         log_info(f"memory: persona evolved: {adjustment!r}")
         return "Persona adjustment recorded."
 
     # --- reads --------------------------------------------------------------
     def recall_long_term(self) -> str:
-        return self.store.read_long_term(self.scope().user_id) or "(no long-term memory yet)"
+        return self.mem.long_term.read() or "(no long-term memory yet)"
 
     def recall_episodes(self, limit: int = 5) -> str:
-        return (
-            self.store.read_episodes(self.scope().user_id, limit)
-            or "(no episodes recorded yet)"
-        )
+        return self.mem.episodes.tail(limit) or "(no episodes recorded yet)"
 
     # --- context assembly (injected into every run) -------------------------
-    def _long_term_section(self, user_id: str, query: str | None) -> str:
+    def _long_term_section(self, query: str | None) -> str:
         """Long-term as: condensed summary + most-recent raw facts (or whole file).
 
         With a retriever AND a query, return the top-k entries most relevant to the
         query instead (so a long history isn't dumped wholesale).
         """
         if self.retriever is not None and query:
-            hits = self.retriever.search(user_id, query, "long_term", self.semantic_top_k)
+            hits = self.retriever.search(self.scope().user_id, query, "long_term", self.semantic_top_k)
             if hits:
                 return "\n".join(f"- {h}" for h in hits)
-        summary = self.store.read_long_term_summary(user_id)
+        summary = self.mem.long_term_summary.read()
         if not summary:
-            return self.store.read_long_term(user_id)  # nothing condensed yet
-        recent = self.store.recent_long_term(user_id, self.long_term_recent_raw)
+            return self.mem.long_term.read()  # nothing condensed yet
+        recent = self.mem.long_term.recent(self.long_term_recent_raw)
         parts = [self._strip_header(summary)]
         if recent:
             parts.append("Recent facts:\n" + "\n".join(f"- {r}" for r in recent))
         return "\n\n".join(parts)
 
-    def _short_term_section(self, user_id: str, session_id: str) -> str:
+    def _short_term_section(self) -> str:
         """Short-term as: rolling session summary (if any) + the live JSON turns."""
-        summary = self.store.read_session_summary(user_id, session_id)
-        turns = self._render_turns(self.store.read_turns(user_id, session_id))
+        summary = self.mem.session_summary.read()
+        turns = self._render_turns(self.mem.live_turns.read())
         parts = []
         if summary:
             parts.append("Earlier this session:\n" + self._strip_header(summary))
@@ -286,21 +322,20 @@ class MemoryManager:
             parts.append(turns)
         return "\n\n".join(parts)
 
-    def _episodes_section(self, user_id: str, query: str | None) -> str:
+    def _episodes_section(self, query: str | None) -> str:
         if self.retriever is not None and query:
-            hits = self.retriever.search(user_id, query, "episode", self.semantic_top_k)
+            hits = self.retriever.search(self.scope().user_id, query, "episode", self.semantic_top_k)
             if hits:
                 return "\n".join(f"- {h}" for h in hits)
-        return self.store.read_episodes(user_id, self.short_term_max)
+        return self.mem.episodes.tail(self.short_term_max)
 
     def _read_sections(self, query: str | None = None) -> dict[str, str]:
         """The memory bodies for the current scope, by name (may be empty)."""
-        s = self.scope()
         return {
-            "persona": self.store.read_persona(),
-            "long_term": self._long_term_section(s.user_id, query),
-            "episodes": self._episodes_section(s.user_id, query),
-            "short_term": self._short_term_section(s.user_id, s.session_id),
+            "persona": self.store.persona.read(),
+            "long_term": self._long_term_section(query),
+            "episodes": self._episodes_section(query),
+            "short_term": self._short_term_section(),
         }
 
     def build_context(self, query: str | None = None) -> str:
@@ -347,7 +382,6 @@ class MemoryManager:
 
     def context_stats(self) -> dict:
         """Per-section + total size for the current scope (the `!ctx` command)."""
-        s = self.scope()
         parts = self._read_sections()
         context = self.build_context()
         tokens = _est_tokens(context)
@@ -358,5 +392,5 @@ class MemoryManager:
             "budget_tokens": budget,
             "ratio": (tokens / budget) if budget else 0.0,
             "sections": {k: _est_tokens(v) for k, v in parts.items()},
-            "short_term_turns": self.store.count_turns(s.user_id, s.session_id),
+            "short_term_turns": self.mem.live_turns.count(),
         }
