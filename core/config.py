@@ -68,7 +68,10 @@ class Config:
     # Lead / router brain. Multimodal (image + audio) and a large context window
     # so it can hold long histories plus media tokens.
     lead_model_id: str = os.getenv("LEAD_MODEL_ID", "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q6_K:latest")
-    lead_num_ctx: int = _int_env("LEAD_NUM_CTX", 131072)  # 128k tokens
+    # Sized to fit the local 16 GB GPU alongside the ~13 GB Q6 weights, and kept
+    # equal to member_num_ctx so a lead↔member hop never forces Ollama to reload
+    # the model at a different context size. Raise once a larger GPU is in play.
+    lead_num_ctx: int = _int_env("LEAD_NUM_CTX", 32768)  # 32k tokens
 
     # Specialist members. They get focused subtasks, so a smaller window is fine.
     member_model_id: str = os.getenv("MEMBER_MODEL_ID", "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q6_K:latest")
