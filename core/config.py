@@ -31,6 +31,21 @@ def _bool_env(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _ollama_host(default: str = "http://localhost:11434") -> str:
+    """Resolve OLLAMA_HOST into a connectable client URL.
+
+    Tolerates two common mistakes when the var is set for the *server* instead
+    of the client: a missing scheme, and 0.0.0.0 (a bind address, unroutable as
+    a connect target — rewrite to 127.0.0.1).
+    """
+    raw = (os.getenv("OLLAMA_HOST") or "").strip()
+    if not raw:
+        return default
+    if "://" not in raw:
+        raw = f"http://{raw}"
+    return raw.replace("://0.0.0.0", "://127.0.0.1")
+
+
 def _mask(secret: str | None) -> str:
     """Render a secret for logs: presence + length, never the value."""
     if not secret:
@@ -44,9 +59,12 @@ class Config:
     litellm_base_url: str = os.getenv("LITELLM_BASE_URL", "http://localhost:4000")
     litellm_api_key: str | None = os.getenv("LITELLM_MASTER_KEY")
     # Only used by the direct-Ollama builder (proxy-bypass path).
-    ollama_host: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    ollama_host: str = _ollama_host()
 
     # --- Models (ids are litellm proxy model_names; see litellm.config.yaml) ---
+    # Which builder serves the roles: `litellm` (the proxy gateway, default) or
+    # `ollama` (direct to OLLAMA_HOST, bypassing the proxy — local/offline dev).
+    model_provider: str = os.getenv("MODEL_PROVIDER", "litellm")
     # Lead / router brain. Multimodal (image + audio) and a large context window
     # so it can hold long histories plus media tokens.
     lead_model_id: str = os.getenv("LEAD_MODEL_ID", "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q6_K:latest")

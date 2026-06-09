@@ -17,11 +17,29 @@ from agent.model import (
     LITELLM_PROXY_PREFIX,
     ModelDefinition,
     ModelProviderEnum,
+    _provider,
     build_model,
     lead_model_def,
     member_model_def,
 )
 from core.config import config
+
+
+def test_provider_resolves_known_names():
+    assert _provider("litellm") is ModelProviderEnum.LITELLM
+    assert _provider("ollama") is ModelProviderEnum.OLLAMA
+
+
+def test_provider_rejects_unknown_name():
+    with pytest.raises(ValueError, match="MODEL_PROVIDER"):
+        _provider("made-up")
+
+
+def test_role_specs_share_the_configured_provider():
+    """Both roles read the one configured provider (default: litellm proxy)."""
+    want = _provider(config.model_provider)
+    assert lead_model_def().provider == want
+    assert member_model_def().provider == want
 
 
 def _litellm(model_id: str, **kwargs):

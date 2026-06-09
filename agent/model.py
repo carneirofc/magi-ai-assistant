@@ -155,11 +155,19 @@ def build_model(model: ModelDefinition) -> Model:
 # a role (model id, context window, capabilities) without touching team code.
 
 
+def _provider(raw: str) -> ModelProviderEnum:
+    """Map a `MODEL_PROVIDER` string to the enum, with a clear error on typos."""
+    try:
+        return ModelProviderEnum(raw)
+    except ValueError:
+        valid = [e.value for e in ModelProviderEnum]
+        raise ValueError(f"unknown MODEL_PROVIDER {raw!r}; use one of {valid}") from None
+
+
 def lead_model_def() -> ModelDefinition:
     """The lead/router brain: tools + multimodal + a 128k context window."""
     return ModelDefinition(
-        # provider=ModelProviderEnum.LITELLM,
-        provider=ModelProviderEnum.OLLAMA,
+        provider=_provider(config.model_provider),
         model_id=config.lead_model_id,
         has_tools=True,
         supports_image=True,
@@ -172,7 +180,7 @@ def lead_model_def() -> ModelDefinition:
 def member_model_def() -> ModelDefinition:
     """A specialist member: tools + multimodal, smaller context window."""
     return ModelDefinition(
-        provider=ModelProviderEnum.OLLAMA,
+        provider=_provider(config.model_provider),
         model_id=config.member_model_id,
         has_tools=True,
         supports_image=True,
