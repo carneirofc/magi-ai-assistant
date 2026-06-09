@@ -1,0 +1,265 @@
+"""The scoped memory kinds, each one module behind a small interface.
+
+A *kind* (long-term, episode, session) owns its own storage wiring, how it renders
+into the model's context, how it's written, and — for the two that fold — its fold
+policy (threshold + marker + payload). Persona is global and stays on the manager,
+not here. See docs/adr/0001-per-kind-memory-modules.md.
+
+Two protocols, composed (not a uniform base): every scoped kind `Renders`; only
+long-term and session also `Fold`. Kinds are stateless across scopes — the manager
+resolves the scope and passes the `ScopedMemory` bundle (which carries its own
+`user_id` / `session_id`) into every call. The "must never break a chat" fold
+guard and the retriever fallback each live once, as the helpers below.
+"""
+
+from typing import Awaitable, Callable, Optional, Protocol, runtime_checkable
+
+from agno.utils.log import log_info, log_warning
+
+from core.memory.semantic import MemoryRetriever
+from core.memory.store import ScopedMemory
+
+# An async summarizer: takes text, returns a compact summary. Injected by the agent
+# layer so `core` stays model-free.
+SummarizeFn = Callable[[str], Awaitable[str]]
+
+
+@runtime_checkable
+class Renders(Protocol):
+    """A kind that contributes a section to the assembled context block."""
+
+    section_header: str
+
+    def render(self, mem: ScopedMemory, query: Optional[str]) -> str: ...
+
+
+@runtime_checkable
+class Folds(Protocol):
+    """A kind that compresses its overflow into a compact form on a threshold."""
+
+    async def maybe_fold(self, mem: ScopedMemory) -> Optional[str]: ...
+
+
+# --- shared helpers (each invariant lives here, once) -----------------------
+def render_turns(turns: list[dict]) -> str:
+    """Render JSON turns to the text the model sees (impl detail, not presentation)."""
+    return "\n".join(f"- **{t.get('role', '?')}**: {t.get('content', '')}" for t in turns)
+
+
+def strip_header(blob: str) -> str:
+    """Drop the leading markdown `# header` line(s) from a summary blob."""
+    lines = [ln for ln in blob.splitlines() if not ln.startswith("#")]
+    return "\n".join(lines).strip()
+
+
+def index(retriever: Optional[MemoryRetriever], user_id: str, key: str, text: str) -> None:
+    """Mirror a deliberate write into the vector store (no-op when disabled)."""
+    if retriever is not None:
+        retriever.index(user_id, key, text)
+
+
+def retrieved_or(
+    retriever: Optional[MemoryRetriever],
+    user_id: str,
+    query: Optional[str],
+    key: str,
+    top_k: int,
+    fallback: Callable[[], str],
+) -> str:
+    """Top-k semantic hits for this kind when a retriever + query exist, else `fallback()`.
+
+    The single home of the "search a long history instead of dumping it" branch,
+    shared by every retrievable kind.
+    """
+    if retriever is not None and query:
+        hits = retriever.search(user_id, query, key, top_k)
+        if hits:
+            return "\n".join(f"- {h}" for h in hits)
+    return fallback()
+
+
+async def guarded_fold(
+    fn: Optional[SummarizeFn],
+    payload: Optional[str],
+    write_back: Callable[[str], None],
+    label: str,
+) -> Optional[str]:
+    """Await `fn(payload)`, then persist via `write_back`. The one place the
+    "summarization must never break a chat" contract lives: a no-op when the
+    summarizer is unset or there's nothing to fold, and any failure is swallowed."""
+    if fn is None or not payload:
+        return None
+    try:
+        summary = (await fn(payload)).strip()
+    except Exception as exc:  # noqa: BLE001 — summarization must never break a chat.
+        log_warning(f"memory: {label} summary failed: {type(exc).__name__}: {exc}")
+        return None
+    if not summary:
+        return None
+    write_back(summary)
+    log_info(f"memory: summarized {label}")
+    return summary
+
+
+# --- the kinds --------------------------------------------------------------
+class LongTerm:
+    """Durable per-user facts: rendered as a condensed profile + recent raw facts,
+    folded into that profile once enough accumulate."""
+
+    section_header = "## What you remember about this user (global)"
+    retriever_key = "long_term"
+
+    def __init__(
+        self,
+        retriever: Optional[MemoryRetriever],
+        top_k: int,
+        recent_raw: int,
+        summarize_fn: Optional[SummarizeFn],
+        summarize_every: int,
+    ):
+        self.retriever = retriever
+        self.top_k = top_k
+        self.recent_raw = recent_raw
+        self.summarize_fn = summarize_fn
+        self.summarize_every = summarize_every
+        # Per-user fact count at the last fold (keyed by user — safe across scopes).
+        self._summarized_at: dict[str, int] = {}
+
+    def render(self, mem: ScopedMemory, query: Optional[str]) -> str:
+        return retrieved_or(
+            self.retriever, mem.user_id, query, self.retriever_key, self.top_k,
+            lambda: self._whole(mem),
+        )
+
+    def _whole(self, mem: ScopedMemory) -> str:
+        summary = mem.long_term_summary.read()
+        if not summary:
+            return mem.long_term.read()  # nothing condensed yet
+        recent = mem.long_term.recent(self.recent_raw)
+        parts = [strip_header(summary)]
+        if recent:
+            parts.append("Recent facts:\n" + "\n".join(f"- {r}" for r in recent))
+        return "\n\n".join(parts)
+
+    def remember(self, mem: ScopedMemory, fact: str) -> None:
+        mem.long_term.append(fact)
+        index(self.retriever, mem.user_id, self.retriever_key, fact)
+
+    def recall(self, mem: ScopedMemory) -> str:
+        return mem.long_term.read()
+
+    async def maybe_fold(self, mem: ScopedMemory) -> Optional[str]:
+        if self.summarize_fn is None:
+            return None
+        count = mem.long_term.count()
+        last = self._summarized_at.get(mem.user_id, 0)
+        payload = None
+        if count >= self.summarize_every and count - last >= self.summarize_every:
+            facts = mem.long_term.read()
+            if facts.strip():
+                payload = facts
+
+        def write_back(summary: str) -> None:
+            mem.long_term_summary.write(summary)
+            self._summarized_at[mem.user_id] = count
+
+        return await guarded_fold(
+            self.summarize_fn, payload, write_back, f"long-term for user {mem.user_id}"
+        )
+
+
+class Episodes:
+    """Summaries of whole past interactions. Written (by the model or by session
+    close), rendered as a recent tail; never folds."""
+
+    section_header = "## Past episodes with this user (global)"
+    retriever_key = "episode"
+
+    def __init__(self, retriever: Optional[MemoryRetriever], top_k: int, tail_limit: int):
+        self.retriever = retriever
+        self.top_k = top_k
+        self.tail_limit = tail_limit
+
+    def render(self, mem: ScopedMemory, query: Optional[str]) -> str:
+        return retrieved_or(
+            self.retriever, mem.user_id, query, self.retriever_key, self.top_k,
+            lambda: mem.episodes.tail(self.tail_limit),
+        )
+
+    def record_episode(self, mem: ScopedMemory, summary: str) -> None:
+        mem.episodes.append(summary)
+        index(self.retriever, mem.user_id, self.retriever_key, summary)
+
+    def recall(self, mem: ScopedMemory, limit: int) -> str:
+        return mem.episodes.tail(limit)
+
+
+class Session:
+    """The live conversation: a capped window of recent turns + a rolling summary
+    of turns evicted from it. Folds the pending buffer into that summary; on close
+    hands the summary up to be recorded as an episode."""
+
+    section_header = "## This session so far (short-term)"
+
+    def __init__(
+        self,
+        short_term_max: int,
+        summarize_fn: Optional[SummarizeFn],
+        summarize_every: int,
+    ):
+        self.short_term_max = short_term_max
+        self.summarize_fn = summarize_fn
+        self.summarize_every = summarize_every
+
+    def render(self, mem: ScopedMemory, query: Optional[str] = None) -> str:
+        summary = mem.session_summary.read()
+        turns = render_turns(mem.live_turns.read())
+        parts = []
+        if summary:
+            parts.append("Earlier this session:\n" + strip_header(summary))
+        if turns:
+            parts.append(turns)
+        return "\n\n".join(parts)
+
+    def record_turn(self, mem: ScopedMemory, role: str, text: str) -> None:
+        evicted = mem.live_turns.append(role, text, self.short_term_max)
+        # Don't lose evicted turns: buffer them for summarization (the model call is
+        # in maybe_fold). No-op when the summarizer is disabled — plain drop-oldest.
+        if evicted and self.summarize_fn is not None:
+            size = mem.pending.extend(evicted)
+            log_info(
+                f"memory: buffered {len(evicted)} evicted turn(s) for summary "
+                f"(pending={size}/{self.summarize_every}) user={mem.user_id} session={mem.session_id}"
+            )
+
+    async def maybe_fold(self, mem: ScopedMemory) -> Optional[str]:
+        if self.summarize_fn is None:
+            return None
+        payload = None
+        if mem.pending.count() >= self.summarize_every:
+            pending = mem.pending.read()
+            if pending:
+                prior = mem.session_summary.read()
+                payload = (
+                    f"Prior summary:\n{prior or '(none)'}\n\n"
+                    f"New turns:\n{render_turns(pending)}"
+                )
+
+        def write_back(summary: str) -> None:
+            mem.session_summary.write(summary)
+            mem.pending.delete()
+
+        return await guarded_fold(
+            self.summarize_fn, payload, write_back, f"session for user {mem.user_id}"
+        )
+
+    def close(self, mem: ScopedMemory) -> tuple[int, Optional[str]]:
+        """Wipe the live window + summary + pending. Returns (turns dropped, the
+        rolling summary body to carry forward as an episode, or None)."""
+        summary = mem.session_summary.read()
+        carried = strip_header(summary) if summary.strip() else None
+        dropped = mem.live_turns.count()
+        mem.live_turns.delete()
+        mem.session_summary.delete()
+        mem.pending.delete()
+        return dropped, carried

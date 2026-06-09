@@ -5,6 +5,14 @@ unchanged after the store was refactored onto adapters.
 """
 
 from core.memory.adapters import BulletLog, Blob, JsonWindow
+from core.memory.store import FileMemoryStore
+
+
+def test_scoped_memory_exposes_its_identity(tmp_path):
+    scoped = FileMemoryStore(tmp_path).scoped("u1", "s1")
+
+    assert scoped.user_id == "u1"
+    assert scoped.session_id == "s1"
 
 
 def test_bullet_log_appends_timestamped_bullets_and_reads_bodies(tmp_path):
