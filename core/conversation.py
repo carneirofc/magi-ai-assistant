@@ -9,6 +9,7 @@ plain inputs in and render the plain `ConversationReply` out.
 injected — nothing is constructed here.
 """
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol
 
@@ -19,10 +20,11 @@ from core.memory import MemoryManager
 
 
 class Runner(Protocol):
-    """The slice of an agno `Agent`/`Team` this service drives: one awaitable run."""
+    """The slice of an agno `Agent`/`Team` this service drives: one run, awaited
+    whole or consumed as an event stream (`stream=True` rides through kwargs)."""
 
     def arun(
-        self, *, input: str, user_id: str, session_id: str, **media: Any
+        self, *, input: str, user_id: str, session_id: str, **kwargs: Any
     ) -> Any: ...
 
 _ERROR_REPLY = "Sorry, there was an error processing your message. Please try again later."
@@ -41,6 +43,13 @@ class ConversationReply:
     text: str
     reasoning: Optional[str] = None
     is_error: bool = False
+
+
+@dataclass(frozen=True)
+class ConversationDelta:
+    """One streamed chunk of the reply text (see `handle_stream`)."""
+
+    text: str
 
 
 class ConversationService:
