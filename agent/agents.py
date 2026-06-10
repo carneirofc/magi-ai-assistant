@@ -1,9 +1,10 @@
 """Single-agent builder.
 
-`build_agent` is the generic, fully-injectable primitive for the non-team path
-(`DiscordClient(agent=build_agent())`). Every argument defaults from config but
-can be overridden, so callers opt into exactly what they need. Memory
-(`enable_user_memories`) and history both require a `db`.
+`build_agent` is the generic, fully-injectable primitive for the non-team path:
+pass the result as the `runner` of a `ConversationService` instead of a team.
+Every argument defaults from config but can be overridden, so callers opt into
+exactly what they need. Memory (`enable_user_memories`) and history both
+require a `db`.
 """
 
 from collections.abc import Sequence

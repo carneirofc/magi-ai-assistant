@@ -10,12 +10,20 @@ injected — nothing is constructed here.
 """
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional, Protocol
 
 from agno.utils.log import log_error, log_info, log_warning
 from agno.utils.message import get_text_from_message
 
 from core.memory import MemoryManager
+
+
+class Runner(Protocol):
+    """The slice of an agno `Agent`/`Team` this service drives: one awaitable run."""
+
+    def arun(
+        self, *, input: str, user_id: str, session_id: str, **media: Any
+    ) -> Any: ...
 
 _ERROR_REPLY = "Sorry, there was an error processing your message. Please try again later."
 # Run finished cleanly but the lead emitted nothing — e.g. a tool failed and it
@@ -36,7 +44,7 @@ class ConversationReply:
 
 
 class ConversationService:
-    def __init__(self, runner, memory: MemoryManager, channel_guidance: str = ""):
+    def __init__(self, runner: Runner, memory: MemoryManager, channel_guidance: str = ""):
         self.runner = runner
         self.memory = memory
         # Channel-specific output rules (e.g. Discord markdown). Appended to the
@@ -46,7 +54,7 @@ class ConversationService:
     async def handle(
         self,
         *,
-        user_id,
+        user_id: str | int,
         session_id: str,
         text: str,
         media: Optional[dict] = None,
@@ -54,17 +62,22 @@ class ConversationService:
     ) -> ConversationReply:
         """Run one turn end to end and return a channel-neutral reply."""
         media = media or {}
+        user_id = str(user_id)
         log_info(f"conversation: handling (session={session_id}, user={user_id})")
 
         self.memory.set_scope(user_id, session_id)
         # Assemble context in order: caller identity/channel info, persisted memory,
         # then channel output rules. The message is the retrieval query.
         parts = [extra_context, self.memory.build_context(query=text), self.channel_guidance]
-        self.runner.additional_context = "\n\n".join(p for p in parts if p and p.strip())
+        context = "\n\n".join(p for p in parts if p and p.strip())
         self.memory.record_user_turn(text)
 
+        # The context rides inside this run's input, never on the shared runner:
+        # mutating `runner.additional_context` races concurrent conversations (the
+        # team reads it mid-run, so one user could see another's memory).
+        run_input = f"<context>\n{context}\n</context>\n\n{text}" if context else text
         response = await self.runner.arun(
-            input=text, user_id=user_id, session_id=session_id, **media
+            input=run_input, user_id=user_id, session_id=session_id, **media
         )
         log_info(
             f"conversation: status={response.status}, "
@@ -96,11 +109,11 @@ class ConversationService:
         )
 
     # --- control commands (channel formats the reply text) ------------------
-    def flush(self, user_id, session_id: str) -> int:
+    def flush(self, user_id: str | int, session_id: str) -> int:
         """Close the session (fold summary → episode, wipe live turns). Returns dropped."""
         self.memory.set_scope(user_id, session_id)
         return self.memory.flush_session()
 
-    def context_stats(self, user_id, session_id: str) -> dict:
+    def context_stats(self, user_id: str | int, session_id: str) -> dict:
         self.memory.set_scope(user_id, session_id)
         return self.memory.context_stats()

@@ -13,7 +13,6 @@ composition root (channels/discord.py); nothing is constructed here.
 import asyncio
 import re
 from contextlib import asynccontextmanager
-from os import getenv
 from textwrap import dedent
 
 from agno.media import Audio, File, Image, Video
@@ -92,9 +91,11 @@ class DiscordClient:
         self,
         conversation: ConversationService,
         client: discord.Client,
+        token: str,
     ):
         self.conversation = conversation
         self.client = client
+        self.token = token
         log_info("DiscordClient init")
         self._setup_events()
 
@@ -435,12 +436,7 @@ class DiscordClient:
             await thread.send(self._italicize(body) if italics else body)  # type: ignore
         return True
 
-    def serve(self):
-        try:
-            token = getenv("DISCORD_BOT_TOKEN")
-            if not token:
-                raise ValueError("DISCORD_BOT_TOKEN NOT SET")
-            log_info("starting discord client (connecting to gateway)...")
-            return self.client.run(token)
-        except Exception as e:
-            raise ValueError(f"Failed to run Discord client: {str(e)}")
+    def serve(self) -> None:
+        """Connect to the gateway and block until shutdown."""
+        log_info("starting discord client (connecting to gateway)...")
+        self.client.run(self.token)

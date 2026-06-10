@@ -8,3 +8,6 @@ import os
 
 os.environ.setdefault("LITELLM_MASTER_KEY", "test-key")
 os.environ.setdefault("LITELLM_BASE_URL", "http://localhost:4000")
+# Assigned (not setdefault) so neither the host shell nor a local .env can flip
+# the provider under the tests — config's load_dotenv() never overrides os.environ.
+os.environ["MODEL_PROVIDER"] = "litellm"

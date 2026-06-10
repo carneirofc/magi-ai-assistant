@@ -6,8 +6,6 @@
 
 import sys
 
-GUILD_ID = 1511488658350542878
-
 
 def check() -> None:
     """Phase 1 — raw discord.py, no agno. See channels/discord_check.py for event handlers."""
