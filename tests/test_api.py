@@ -5,10 +5,12 @@ run against a fake service — no model, no Discord, no filesystem. Focus: the
 wire contract (paths, bodies, validation) and the bearer-token gate.
 """
 
+import json
+
 from fastapi.testclient import TestClient
 
 from channels.api import create_app
-from core.conversation import ConversationReply
+from core.conversation import ConversationDelta, ConversationReply
 
 
 class _FakeConversation:
@@ -21,6 +23,12 @@ class _FakeConversation:
     async def handle(self, *, user_id, session_id, text, media=None, extra_context=""):
         self.calls.append(("handle", user_id, session_id, text))
         return self.reply
+
+    async def handle_stream(self, *, user_id, session_id, text, media=None, extra_context=""):
+        self.calls.append(("handle_stream", user_id, session_id, text))
+        for chunk in ("the ", "answer"):
+            yield ConversationDelta(text=chunk)
+        yield self.reply
 
     def flush(self, user_id, session_id):
         self.calls.append(("flush", user_id, session_id))
@@ -69,6 +77,43 @@ def test_empty_text_is_rejected():
     resp = client.post("/v1/sessions/s/messages", json={"user_id": "u1", "text": ""})
 
     assert resp.status_code == 422
+    assert conversation.calls == []
+
+
+def _parse_sse(body: str) -> list[tuple[str, dict]]:
+    """SSE frames as (event, payload) pairs."""
+    frames = []
+    for block in body.strip().split("\n\n"):
+        lines = dict(line.split(": ", 1) for line in block.splitlines())
+        frames.append((lines["event"], json.loads(lines["data"])))
+    return frames
+
+
+def test_stream_emits_deltas_then_done():
+    client, conversation = _client()
+
+    resp = client.post(
+        "/v1/sessions/win-1/messages/stream", json={"user_id": "u1", "text": "hi"}
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    assert _parse_sse(resp.text) == [
+        ("delta", {"text": "the "}),
+        ("delta", {"text": "answer"}),
+        ("done", {"text": "the answer", "reasoning": None, "is_error": False}),
+    ]
+    assert conversation.calls == [("handle_stream", "u1", "win-1", "hi")]
+
+
+def test_stream_requires_bearer_token_when_configured():
+    client, conversation = _client(auth_token="secret")
+
+    resp = client.post(
+        "/v1/sessions/s/messages/stream", json={"user_id": "u1", "text": "hi"}
+    )
+
+    assert resp.status_code == 401
     assert conversation.calls == []
 
 

@@ -7,8 +7,16 @@ tooling. v1 is deliberately small and session-scoped, mirroring the
 
     GET  /healthz                                   liveness probe (no auth)
     POST /v1/sessions/{session_id}/messages         run one turn, return the reply
+    POST /v1/sessions/{session_id}/messages/stream  same turn, streamed over SSE
     POST /v1/sessions/{session_id}/flush            close the session (fold + wipe)
     GET  /v1/sessions/{session_id}/context          context size stats
+
+The two message endpoints are interchangeable per request — same body, same brain,
+same memory semantics; the client picks whole-reply JSON or SSE. The SSE stream
+emits `delta` events (`{"text": chunk}`) while the model produces text, then one
+terminal `done` event carrying the full `MessageReply` JSON — the authoritative
+result (render it over the assembled deltas; errors arrive as `done` with
+`is_error: true`).
 
 `user_id` scopes memory and `session_id` scopes the conversation — the client
 owns both ids (a desktop app might use its install id + one session per window).
@@ -19,18 +27,20 @@ Two factories, mirroring the other channel:
   - `create_app(conversation, auth_token)` — pure, fully injected (what tests use)
   - `build_api_app(db)` — composition root wiring the real stack from config
 
-Text-only for now; media and streaming (SSE) are the natural v2 extensions.
+Text-only for now; media is the natural v2 extension.
 """
 
+import json
 from typing import Optional
 
 from agno.db.base import BaseDb
 from agno.utils.log import log_info
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
-from core.conversation import ConversationService
+from core.conversation import ConversationDelta, ConversationService
 
 
 # --- wire format (the public contract; version it, don't break it) -----------
@@ -51,6 +61,11 @@ class FlushRequest(BaseModel):
 
 class FlushReply(BaseModel):
     dropped_turns: int
+
+
+def _sse(event: str, data: dict) -> str:
+    """One SSE frame: named event + single-line JSON payload."""
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 def create_app(conversation: ConversationService, auth_token: Optional[str] = None) -> FastAPI:
@@ -82,6 +97,32 @@ def create_app(conversation: ConversationService, auth_token: Optional[str] = No
         # Errors travel in-band (`is_error`), not as HTTP errors: the run finished
         # and produced an honest reply for the client to show — that's a 200.
         return MessageReply(text=reply.text, reasoning=reply.reasoning, is_error=reply.is_error)
+
+    @app.post(
+        "/v1/sessions/{session_id}/messages/stream",
+        dependencies=[Depends(require_auth)],
+    )
+    async def post_message_stream(session_id: str, body: MessageRequest) -> StreamingResponse:
+        async def events():
+            async for item in conversation.handle_stream(
+                user_id=body.user_id, session_id=session_id, text=body.text
+            ):
+                if isinstance(item, ConversationDelta):
+                    yield _sse("delta", {"text": item.text})
+                else:
+                    yield _sse(
+                        "done",
+                        MessageReply(
+                            text=item.text, reasoning=item.reasoning, is_error=item.is_error
+                        ).model_dump(),
+                    )
+
+        return StreamingResponse(
+            events(),
+            media_type="text/event-stream",
+            # SSE responses must never be buffered or cached along the way.
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
 
     @app.post(
         "/v1/sessions/{session_id}/flush",
