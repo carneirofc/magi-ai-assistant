@@ -39,15 +39,45 @@ class _FakeMemory:
 class _FakeRunner:
     def __init__(self, response):
         self._response = response
-        self.additional_context = ""
+        self.calls = []
 
     async def arun(self, **kwargs):
+        self.calls.append(kwargs)
         return self._response
 
 
 def _service(response):
     mem = _FakeMemory()
     return ConversationService(runner=_FakeRunner(response), memory=mem), mem
+
+
+async def test_context_rides_in_the_run_input_not_on_the_runner():
+    """Per-run context must travel inside `input` (a shared runner attribute would
+    race concurrent conversations and leak one user's memory into another's run)."""
+    response = SimpleNamespace(status="COMPLETED", content="ok", reasoning_content=None)
+    runner = _FakeRunner(response)
+    service = ConversationService(
+        runner=runner, memory=_FakeMemory(), channel_guidance="channel rules"
+    )
+
+    await service.handle(user_id=1, session_id="s", text="hi", extra_context="who/where")
+
+    assert not hasattr(runner, "additional_context")  # nothing set on the shared runner
+    (call,) = runner.calls
+    assert call["user_id"] == "1"  # normalized for agno (expects str)
+    assert call["input"].endswith("hi")
+    assert "who/where" in call["input"]
+    assert "channel rules" in call["input"]
+
+
+async def test_no_context_means_bare_input():
+    response = SimpleNamespace(status="COMPLETED", content="ok", reasoning_content=None)
+    runner = _FakeRunner(response)
+    service = ConversationService(runner=runner, memory=_FakeMemory())
+
+    await service.handle(user_id=1, session_id="s", text="hi")
+
+    assert runner.calls[0]["input"] == "hi"
 
 
 async def test_completed_but_empty_returns_fallback():

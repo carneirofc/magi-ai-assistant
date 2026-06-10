@@ -1,9 +1,11 @@
+import threading
 from datetime import UTC, datetime
 
 import pytest
 
 from agent.tools.discord import (
     delete_discord_message,
+    delete_discord_messages,
     delete_recent_discord_messages,
     describe_current_discord_context,
     list_recent_discord_messages,
@@ -57,15 +59,22 @@ class DummyChannel:
         self.name = "general"
         self._messages = {message.id: message for message in messages}
         self._history = list(messages)
+        # Mirrors a real discord.py channel holding unpicklable state (asyncio
+        # Futures); as_dict must not try to deep-copy the channel.
+        self._unpicklable = threading.Lock()
 
     def history(self, limit: int = 20):
         return DummyHistory(self._history[:limit])
 
-    async def fetch_message(self, message_id: int):
+    def get_partial_message(self, message_id: int):
         message = self._messages.get(message_id)
         if message is None:
             raise RuntimeError("missing")
         return message
+
+    async def delete_messages(self, messages):
+        for message in messages:
+            await message.delete()
 
 
 @pytest.fixture
@@ -115,6 +124,15 @@ async def test_delete_discord_message_deletes_from_current_channel(discord_conte
     result = await delete_discord_message.entrypoint(message_id="20")
     assert "Deleted message 20" in result
     assert discord_context._messages[20].deleted is True
+
+
+@pytest.mark.asyncio
+async def test_delete_discord_messages_bulk_deletes_each_id(discord_context):
+    result = await delete_discord_messages.entrypoint(message_ids=["10", "30"])
+    assert "Deleted 2 message(s)" in result
+    assert discord_context._messages[10].deleted is True
+    assert discord_context._messages[30].deleted is True
+    assert discord_context._messages[20].deleted is False
 
 
 @pytest.mark.asyncio

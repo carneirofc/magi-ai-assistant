@@ -9,8 +9,10 @@ here is injectable (model via config, db via arg) so the team is testable and
 reconfigurable.
 """
 
+from collections.abc import Callable, Sequence
 from typing import Optional
 
+from agno.agent import Agent
 from agno.db.base import BaseDb
 from agno.models.base import Model
 from agno.team import Team
@@ -49,14 +51,21 @@ def _build_introspection_tool(lead: Model, members):
     return agent_introspection
 
 
-def build_team(memory: MemoryManager, db: Optional[BaseDb] = None) -> Team:
+def build_team(
+    memory: MemoryManager,
+    db: Optional[BaseDb] = None,
+    member_builders: Optional[Sequence[Callable[[Model], Agent]]] = None,
+) -> Team:
     """Assemble the chatbot team: a multimodal lead routing to specialist members.
 
     `memory` is injected so the lead's memory tools are bound to it (no globals).
+    `member_builders` defaults to the full registry; a channel that can't host a
+    specialist (e.g. the Discord member outside Discord) passes a trimmed list.
     """
     lead = build_lead_model()
     member_model = build_member_model()
-    members = [build(member_model) for build in MEMBER_BUILDERS]
+    builders = MEMBER_BUILDERS if member_builders is None else list(member_builders)
+    members = [build(member_model) for build in builders]
 
     instructions = load_prompt("team/lead.md")
     log_info(

@@ -132,6 +132,13 @@ class Config:
     # --- Discord bot ---
     DISCORD_BOT_TOKEN: str | None = os.getenv("DISCORD_BOT_TOKEN")
 
+    # --- HTTP API service (channels/api). The standalone integration point for
+    # external clients (desktop app, web UI, ...). Bound to localhost by default;
+    # set API_AUTH_TOKEN to require `Authorization: Bearer <token>` on /v1. ---
+    api_host: str = os.getenv("API_HOST", "127.0.0.1")
+    api_port: int = _int_env("API_PORT", 8000)
+    api_auth_token: str | None = os.getenv("API_AUTH_TOKEN")
+
     def log_settings(self) -> None:
         """Dump the effective config to the console (secrets masked).
 
@@ -139,7 +146,7 @@ class Config:
         proxy url, model ids, context windows, paths — without grepping env.
         """
         # Secrets that must never hit the log verbatim.
-        masked = {"litellm_api_key", "DISCORD_BOT_TOKEN", "qdrant_api_key"}
+        masked = {"litellm_api_key", "DISCORD_BOT_TOKEN", "qdrant_api_key", "api_auth_token"}
         # Long prose: log the length, not the body.
         prose = {"system_prompt", "persona_seed"}
 
