@@ -19,10 +19,16 @@ For a desktop app or any other client. JSON over HTTP, session-scoped
 
 ```
 GET  /healthz
-POST /v1/sessions/{session_id}/messages   {"user_id": "...", "text": "..."}
-POST /v1/sessions/{session_id}/flush      {"user_id": "..."}
-GET  /v1/sessions/{session_id}/context    ?user_id=...
+POST /v1/sessions/{session_id}/messages          {"user_id": "...", "text": "..."}
+POST /v1/sessions/{session_id}/messages/stream   same body, reply streamed over SSE
+POST /v1/sessions/{session_id}/flush             {"user_id": "..."}
+GET  /v1/sessions/{session_id}/context           ?user_id=...
 ```
+
+The two message endpoints are interchangeable per request: plain JSON gives the
+whole reply at once; the SSE variant emits `delta` events (`{"text": chunk}`)
+while the model writes, then one terminal `done` event with the full reply JSON
+(authoritative — errors arrive as `done` with `is_error: true`).
 
 The client owns the ids: `user_id` scopes memory (durable per person),
 `session_id` scopes one conversation. Configure with `API_HOST`, `API_PORT`;
