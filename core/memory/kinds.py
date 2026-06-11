@@ -52,6 +52,21 @@ def strip_header(blob: str) -> str:
     return "\n".join(lines).strip()
 
 
+def clamp(text: str, max_chars: int, label: str) -> str:
+    """Hard cap on one memory payload (a turn, a summary). `max_chars <= 0`
+    disables. The cut is marked so the model can see content was dropped.
+
+    This is the size guardrail: the window caps *how many* turns are kept, this
+    caps *how big* each piece may be — without it one pasted blob or a runaway
+    summarizer output is replayed into every later run.
+    """
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    cut = len(text) - max_chars
+    log_warning(f"memory: {label} clamped to {max_chars} chars ({cut} dropped)")
+    return text[:max_chars] + f"\n…[truncated {cut} chars]"
+
+
 def index(retriever: Optional[MemoryRetriever], user_id: str, key: str, text: str) -> None:
     """Mirror a deliberate write into the vector store (no-op when disabled)."""
     if retriever is not None:
@@ -206,10 +221,18 @@ class Session:
         short_term_max: int,
         summarize_fn: Optional[SummarizeFn],
         summarize_every: int,
+        turn_max_chars: int = 4_000,
+        pending_max: int = 30,
+        summary_max_chars: int = 4_000,
     ):
         self.short_term_max = short_term_max
         self.summarize_fn = summarize_fn
         self.summarize_every = summarize_every
+        self.turn_max_chars = turn_max_chars
+        # The pending cap must clear the fold threshold, or the fold can never
+        # trigger and the buffer silently churns oldest-out forever.
+        self.pending_max = max(pending_max, summarize_every) if pending_max > 0 else 0
+        self.summary_max_chars = summary_max_chars
 
     def render(self, mem: ScopedMemory, query: Optional[str] = None) -> str:
         summary = mem.session_summary.read()
@@ -222,11 +245,22 @@ class Session:
         return "\n\n".join(parts)
 
     def record_turn(self, mem: ScopedMemory, role: str, text: str) -> None:
+        text = clamp(text, self.turn_max_chars, f"{role} turn")
         evicted = mem.live_turns.append(role, text, self.short_term_max)
         # Don't lose evicted turns: buffer them for summarization (the model call is
         # in maybe_fold). No-op when the summarizer is disabled — plain drop-oldest.
         if evicted and self.summarize_fn is not None:
-            size = mem.pending.extend(evicted)
+            before = mem.pending.count()
+            size = mem.pending.extend(evicted, self.pending_max)
+            dropped = before + len(evicted) - size
+            if dropped > 0:
+                # Pending only piles past its cap when folds keep failing (the
+                # summarizer is down) — losing the oldest beats unbounded growth.
+                log_warning(
+                    f"memory: pending buffer at cap {self.pending_max}; dropped "
+                    f"{dropped} oldest turn(s) — is the session summarizer failing? "
+                    f"user={mem.user_id} session={mem.session_id}"
+                )
             log_info(
                 f"memory: buffered {len(evicted)} evicted turn(s) for summary "
                 f"(pending={size}/{self.summarize_every}) user={mem.user_id} session={mem.session_id}"
@@ -246,7 +280,9 @@ class Session:
                 )
 
         def write_back(summary: str) -> None:
-            mem.session_summary.write(summary)
+            # A misbehaving summarizer (e.g. a thinking-trace leak) must not park
+            # a giant blob that gets replayed into every later run.
+            mem.session_summary.write(clamp(summary, self.summary_max_chars, "session summary"))
             mem.pending.delete()
 
         return await guarded_fold(

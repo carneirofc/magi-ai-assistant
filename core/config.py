@@ -93,6 +93,10 @@ class Config:
     # reads/writes on purpose via tools — NOT framework auto-extraction. ---
     memory_dir: str = "data/memory"
     short_term_max: int = 20  # turns kept per session
+    # Per-turn size guard: the window caps how many turns are kept, this caps how
+    # big each one may be (chars, ~4/token; <= 0 disables). Without it one pasted
+    # blob is replayed into every later run's context.
+    short_term_turn_max_chars: int = 4_000
     # The base persona lives in prompts/team/lead.md (injected as the team's
     # instructions). This memory file holds only the adjustments the model makes
     # to itself over time via evolve_persona, so it starts empty. Set a seed
@@ -103,6 +107,12 @@ class Config:
     # Hard cap on tool calls per run (incl. member delegations) so a lead can't
     # loop forever delegating. None/0 = no limit.
     tool_call_limit: int = 12
+
+    # --- HTTP request tool (agent/tools/http). SSRF guard: the model can be
+    # steered by untrusted page content, so by default it may not call private /
+    # loopback hosts. Flip to True only for a deployment that must reach a local
+    # service on purpose (keep the bind trusted). ---
+    http_allow_private_hosts: bool = False
 
     # --- Context-size monitoring. We can't perfectly count provider tokens, so
     # estimate (~4 chars/token) and warn when the assembled context crosses this
@@ -115,6 +125,13 @@ class Config:
     # global episode. ---
     session_summary: bool = False
     summarize_every: int = 10  # evicted turns per summary
+    # Caps that keep summarization failures from compounding: if the summarizer is
+    # down, the evicted-turn buffer would otherwise grow (and its fold payload
+    # with it) on every turn — beyond this many buffered turns the oldest are
+    # dropped with a warning. The summary blob itself is clamped so a runaway
+    # summarizer output isn't replayed into every later run (<= 0 disables).
+    session_pending_max: int = 30
+    session_summary_max_chars: int = 4_000
 
     # --- Long-term summarization. Once enough durable facts pile up, condense
     # long_term.md with an LLM into long_term_summary.md and inject the summary
@@ -134,6 +151,13 @@ class Config:
     qdrant_api_key: str | None = _secret("QDRANT_API_KEY")
     semantic_top_k: int = 5
 
+    # --- Seanime media server (agent/tools/seanime). A dedicated client with a
+    # fixed base URL — the model never chooses the host, so the http-tool SSRF
+    # guard doesn't apply here. Token only needed when the server has a password
+    # (sent as X-Seanime-Token). ---
+    seanime_base_url: str = "http://127.0.0.1:43211"
+    seanime_token: str | None = _secret("SEANIME_TOKEN")
+
     # --- Discord bot ---
     DISCORD_BOT_TOKEN: str | None = _secret("DISCORD_BOT_TOKEN")
 
@@ -151,7 +175,7 @@ class Config:
         backend urls, model ids, context windows, paths — in one place.
         """
         # Secrets that must never hit the log verbatim.
-        masked = {"litellm_api_key", "llamacpp_api_key", "DISCORD_BOT_TOKEN", "qdrant_api_key", "api_auth_token"}
+        masked = {"litellm_api_key", "llamacpp_api_key", "DISCORD_BOT_TOKEN", "qdrant_api_key", "api_auth_token", "seanime_token"}
         # Long prose: log the length, not the body.
         prose = {"system_prompt", "persona_seed"}
 

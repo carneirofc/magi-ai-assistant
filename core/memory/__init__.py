@@ -40,6 +40,9 @@ def build_memory(
     long_term_recent_raw: int = 5,
     retriever: Optional[MemoryRetriever] = None,
     semantic_top_k: int = 5,
+    short_term_turn_max_chars: int = 4_000,
+    session_pending_max: int = 30,
+    session_summary_max_chars: int = 4_000,
 ) -> MemoryManager:
     """Assemble a `MemoryManager` from already-built dependencies."""
     return MemoryManager(
@@ -53,6 +56,9 @@ def build_memory(
         long_term_recent_raw=long_term_recent_raw,
         retriever=retriever,
         semantic_top_k=semantic_top_k,
+        short_term_turn_max_chars=short_term_turn_max_chars,
+        session_pending_max=session_pending_max,
+        session_summary_max_chars=session_summary_max_chars,
     )
 
 
@@ -79,4 +85,7 @@ def build_memory_from_config(
         long_term_recent_raw=config.long_term_recent_raw,
         retriever=build_semantic_index(),  # None unless SEMANTIC_MEMORY is on
         semantic_top_k=config.semantic_top_k,
+        short_term_turn_max_chars=config.short_term_turn_max_chars,
+        session_pending_max=config.session_pending_max,
+        session_summary_max_chars=config.session_summary_max_chars,
     )
