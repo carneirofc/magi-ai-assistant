@@ -16,6 +16,7 @@ from typing import Any, Optional, Protocol
 from agno.utils.log import log_error, log_info, log_warning
 from agno.utils.message import get_text_from_message
 
+from core.media import close_media_outbox, collect_reply_media, open_media_outbox
 from core.memory import MemoryManager
 
 
@@ -38,11 +39,25 @@ _EMPTY_REPLY = (
 
 @dataclass(frozen=True)
 class ConversationReply:
-    """The result of handling one message, in channel-neutral terms."""
+    """The result of handling one message, in channel-neutral terms.
+
+    Media tuples hold agno media objects (`agno.media.Image` etc.) gathered
+    from the run output and the per-run outbox (see core/media.py); each
+    channel renders them its own way (Discord uploads attachments, the API
+    serializes them).
+    """
 
     text: str
     reasoning: Optional[str] = None
     is_error: bool = False
+    images: tuple = ()
+    videos: tuple = ()
+    audio: tuple = ()
+    files: tuple = ()
+
+    @property
+    def has_media(self) -> bool:
+        return bool(self.images or self.videos or self.audio or self.files)
 
 
 @dataclass(frozen=True)
@@ -78,21 +93,22 @@ class ConversationService:
         return f"<context>\n{context}\n</context>\n\n{text}" if context else text
 
     async def _finish_turn(
-        self, reply: str, reasoning: Optional[str]
+        self, reply: str, reasoning: Optional[str], media: Optional[dict] = None
     ) -> ConversationReply:
         """Record the reply + fold memory; the one tail both run modes share."""
+        media = media or {}
         if reply:
             self.memory.record_assistant_turn(reply)
             # Fold rolled-off turns + accumulated facts (no-ops unless enabled).
             await self.memory.maybe_summarize_session()
             await self.memory.maybe_summarize_long_term()
-        elif not reasoning:
-            # Completed with neither answer nor reasoning: the lead went silent
-            # (commonly after a tool error). Return an honest fallback instead of
-            # an empty string so the channel never has to invent one.
+        elif not reasoning and not any(media.values()):
+            # Completed with neither answer, reasoning, nor media: the lead went
+            # silent (commonly after a tool error). Return an honest fallback
+            # instead of an empty string so the channel never has to invent one.
             log_warning("run completed with no content; returning fallback")
             return ConversationReply(text=_EMPTY_REPLY, is_error=True)
-        return ConversationReply(text=reply, reasoning=reasoning, is_error=False)
+        return ConversationReply(text=reply, reasoning=reasoning, is_error=False, **media)
 
     async def handle(
         self,
@@ -109,9 +125,13 @@ class ConversationService:
         log_info(f"conversation: handling (session={session_id}, user={user_id})")
 
         run_input = self._prepare_input(user_id, session_id, text, extra_context)
-        response = await self.runner.arun(
-            input=run_input, user_id=user_id, session_id=session_id, **media
-        )
+        outbox_token = open_media_outbox()
+        try:
+            response = await self.runner.arun(
+                input=run_input, user_id=user_id, session_id=session_id, **media
+            )
+        finally:
+            outbox = close_media_outbox(outbox_token)
         log_info(
             f"conversation: status={response.status}, "
             f"content_len={len(response.content or '')}"
@@ -122,7 +142,11 @@ class ConversationService:
             return ConversationReply(text=_ERROR_REPLY, is_error=True)
 
         reply = get_text_from_message(response.content) if response.content else ""
-        return await self._finish_turn(reply, getattr(response, "reasoning_content", None))
+        return await self._finish_turn(
+            reply,
+            getattr(response, "reasoning_content", None),
+            collect_reply_media(response, outbox),
+        )
 
     async def handle_stream(
         self,
@@ -147,6 +171,7 @@ class ConversationService:
         run_input = self._prepare_input(user_id, session_id, text, extra_context)
         chunks: list[str] = []
         final = None
+        outbox_token = open_media_outbox()
         try:
             stream = self.runner.arun(
                 input=run_input,
@@ -173,6 +198,8 @@ class ConversationService:
             log_error(f"conversation: stream failed: {type(exc).__name__}: {exc}")
             yield ConversationReply(text=_ERROR_REPLY, is_error=True)
             return
+        finally:
+            outbox = close_media_outbox(outbox_token)
 
         if final is not None and final.status == "ERROR":
             log_error(final.content)
@@ -186,7 +213,7 @@ class ConversationService:
             reply = get_text_from_message(final.content)
         reply = reply or "".join(chunks)
         reasoning = getattr(final, "reasoning_content", None) if final is not None else None
-        yield await self._finish_turn(reply, reasoning)
+        yield await self._finish_turn(reply, reasoning, collect_reply_media(final, outbox))
 
     # --- control commands (channel formats the reply text) ------------------
     def flush(self, user_id: str | int, session_id: str) -> int:

@@ -27,20 +27,22 @@ Two factories, mirroring the other channel:
   - `create_app(conversation, auth_token)` — pure, fully injected (what tests use)
   - `build_api_app(db)` — composition root wiring the real stack from config
 
-Text-only for now; media is the natural v2 extension.
+Replies may carry media (images/audio the agent delivered): each item arrives
+in `media` as a kind + mime type + either a base64 payload or a URL.
 """
 
+import base64
 import json
 from typing import Optional
 
 from agno.db.base import BaseDb
-from agno.utils.log import log_info
+from agno.utils.log import log_info, log_warning
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
-from core.conversation import ConversationDelta, ConversationService
+from core.conversation import ConversationDelta, ConversationReply, ConversationService
 
 
 # --- wire format (the public contract; version it, don't break it) -----------
@@ -49,10 +51,60 @@ class MessageRequest(BaseModel):
     text: str = Field(min_length=1, description="The user's message.")
 
 
+class MediaItem(BaseModel):
+    """One piece of reply media. Exactly one of `data_base64` / `url` is set."""
+
+    kind: str  # "image" | "video" | "audio" | "file"
+    mime_type: Optional[str] = None
+    filename: Optional[str] = None
+    url: Optional[str] = None
+    data_base64: Optional[str] = None
+
+
 class MessageReply(BaseModel):
     text: str
     reasoning: Optional[str] = None
     is_error: bool = False
+    media: list[MediaItem] = Field(default_factory=list)
+
+
+def _media_items(reply: ConversationReply) -> list[MediaItem]:
+    """Serialize the reply's agno media objects onto the wire: inline bytes as
+    base64, by-reference media as its URL; items with neither are dropped."""
+    items: list[MediaItem] = []
+    for kind, media_list in (
+        ("image", reply.images),
+        ("video", reply.videos),
+        ("audio", reply.audio),
+        ("file", reply.files),
+    ):
+        for m in media_list:
+            content = getattr(m, "content", None)
+            url = getattr(m, "url", None)
+            if not isinstance(content, bytes) and not url:
+                log_warning(f"reply media ({kind}) has no content or url; dropped")
+                continue
+            items.append(
+                MediaItem(
+                    kind=kind,
+                    mime_type=getattr(m, "mime_type", None),
+                    filename=getattr(m, "filename", None),
+                    url=None if isinstance(content, bytes) else url,
+                    data_base64=base64.b64encode(content).decode("ascii")
+                    if isinstance(content, bytes)
+                    else None,
+                )
+            )
+    return items
+
+
+def _to_wire(reply: ConversationReply) -> MessageReply:
+    return MessageReply(
+        text=reply.text,
+        reasoning=reply.reasoning,
+        is_error=reply.is_error,
+        media=_media_items(reply),
+    )
 
 
 class FlushRequest(BaseModel):
@@ -96,7 +148,7 @@ def create_app(conversation: ConversationService, auth_token: Optional[str] = No
         )
         # Errors travel in-band (`is_error`), not as HTTP errors: the run finished
         # and produced an honest reply for the client to show — that's a 200.
-        return MessageReply(text=reply.text, reasoning=reply.reasoning, is_error=reply.is_error)
+        return _to_wire(reply)
 
     @app.post(
         "/v1/sessions/{session_id}/messages/stream",
@@ -110,12 +162,7 @@ def create_app(conversation: ConversationService, auth_token: Optional[str] = No
                 if isinstance(item, ConversationDelta):
                     yield _sse("delta", {"text": item.text})
                 else:
-                    yield _sse(
-                        "done",
-                        MessageReply(
-                            text=item.text, reasoning=item.reasoning, is_error=item.is_error
-                        ).model_dump(),
-                    )
+                    yield _sse("done", _to_wire(item).model_dump())
 
         return StreamingResponse(
             events(),

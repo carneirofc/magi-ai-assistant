@@ -57,8 +57,34 @@ def test_post_message_runs_a_turn_and_returns_the_reply():
     )
 
     assert resp.status_code == 200
-    assert resp.json() == {"text": "the answer", "reasoning": None, "is_error": False}
+    assert resp.json() == {
+        "text": "the answer", "reasoning": None, "is_error": False, "media": [],
+    }
     assert conversation.calls == [("handle", "u1", "win-1", "hi")]
+
+
+def test_reply_media_is_serialized_on_the_wire():
+    """Inline bytes ride as base64, by-reference media as its URL."""
+    import base64
+
+    from agno.media import Audio, Image
+
+    reply = ConversationReply(
+        text="here you go",
+        images=(Image(content=b"png-bytes", mime_type="image/png"),),
+        audio=(Audio(url="https://cdn.example/x.mp3", mime_type="audio/mpeg"),),
+    )
+    client, _ = _client(reply)
+
+    resp = client.post("/v1/sessions/s/messages", json={"user_id": "u1", "text": "hi"})
+
+    media = resp.json()["media"]
+    assert len(media) == 2
+    image = next(m for m in media if m["kind"] == "image")
+    assert base64.b64decode(image["data_base64"]) == b"png-bytes"
+    assert image["mime_type"] == "image/png" and image["url"] is None
+    audio = next(m for m in media if m["kind"] == "audio")
+    assert audio["url"] == "https://cdn.example/x.mp3" and audio["data_base64"] is None
 
 
 def test_error_reply_travels_in_band_as_200():
@@ -101,7 +127,7 @@ def test_stream_emits_deltas_then_done():
     assert _parse_sse(resp.text) == [
         ("delta", {"text": "the "}),
         ("delta", {"text": "answer"}),
-        ("done", {"text": "the answer", "reasoning": None, "is_error": False}),
+        ("done", {"text": "the answer", "reasoning": None, "is_error": False, "media": []}),
     ]
     assert conversation.calls == [("handle_stream", "u1", "win-1", "hi")]
 

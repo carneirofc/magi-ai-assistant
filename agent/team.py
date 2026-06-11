@@ -24,6 +24,7 @@ from agent.hooks import tool_call_hook
 from agent.members import MEMBER_BUILDERS
 from agent.model import build_lead_model, build_member_model
 from agent.tools.http import HTTP_TOOLS
+from agent.tools.media import MEDIA_TOOLS
 from agent.tools.memory import build_memory_tools
 from agent.tools.thinking import build_thinking_tools
 from agent.tools.vision import VISION_TOOLS
@@ -118,6 +119,9 @@ def build_team(
             # Lead is multimodal; this lets it pull an image URL into its own
             # context and actually look, instead of guessing from the link text.
             *VISION_TOOLS,
+            # Deliver a URL's actual bytes to the user as an attachment (image,
+            # audio, file) instead of pasting a link (see core/media.py outbox).
+            *MEDIA_TOOLS,
             # Read a URL (http_get) and perform an explicit user-described request
             # (http_request) without round-tripping through a member.
             *HTTP_TOOLS,

@@ -9,6 +9,7 @@ Everything is injected — no globals, nothing constructed inside a constructor.
 from agno.db.base import BaseDb
 from agno.utils.log import log_info
 
+from agent.model import lead_model_def
 from channels.bootstrap import build_conversation_service
 from clients.mydiscord import DiscordClient
 from core.config import config
@@ -36,5 +37,10 @@ def build_discord_client(db: BaseDb | None = None) -> DiscordClient:
     log_info("discord client: building with all intents")
     client = discord.Client(intents=discord.Intents.all())
     return DiscordClient(
-        conversation=conversation, client=client, token=config.DISCORD_BOT_TOKEN
+        conversation=conversation,
+        client=client,
+        token=config.DISCORD_BOT_TOKEN,
+        # Inbound audio is only wired into runs when the lead can actually hear
+        # it (vision-only backends reject `input_audio` parts).
+        supports_audio=lead_model_def().supports_audio,
     )
