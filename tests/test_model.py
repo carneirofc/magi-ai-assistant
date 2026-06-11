@@ -28,6 +28,7 @@ from core.config import config
 def test_provider_resolves_known_names():
     assert _provider("litellm") is ModelProviderEnum.LITELLM
     assert _provider("ollama") is ModelProviderEnum.OLLAMA
+    assert _provider("llamacpp") is ModelProviderEnum.LLAMACPP
 
 
 def test_provider_rejects_unknown_name():
@@ -146,13 +147,60 @@ def test_temperature_override_applied():
     assert model.temperature == 0.2
 
 
+def _llamacpp(model_id: str = "qwen3.5-9b", **kwargs):
+    return build_model(
+        ModelDefinition(
+            has_tools=True,
+            provider=ModelProviderEnum.LLAMACPP,
+            model_id=model_id,
+            **kwargs,
+        )
+    )
+
+
+def test_llamacpp_targets_configured_server():
+    """Direct builder hits LLAMACPP_BASE_URL with the bare model id (no prefix)."""
+    model = _llamacpp()
+    assert model.id == "qwen3.5-9b"
+    assert model.base_url == "http://localhost:8080/v1"
+
+
+def test_llamacpp_num_ctx_is_budget_only():
+    """llama-server fixes the window at launch (--ctx-size); `num_ctx` must
+    never leave the app — there is no per-request context option to set."""
+    model = _llamacpp(num_ctx=128000)
+    params = model.get_request_params()
+    assert "num_ctx" not in (params.get("extra_body") or {})
+    assert "num_ctx" not in params
+
+
+def test_llamacpp_sampling_rides_extra_body():
+    """llama.cpp-native sampling params (top_k, min_p, ...) are accepted on
+    /v1/chat/completions per-request; extra_body must reach the wire verbatim."""
+    model = _llamacpp(extra_body={"top_k": 20, "min_p": 0})
+    assert model.get_request_params()["extra_body"] == {"top_k": 20, "min_p": 0}
+
+
+def test_llamacpp_defers_sampling_to_server_by_default():
+    """No overrides set -> nothing sent; the server's launch flags (the model's
+    recommended sampling) rule."""
+    model = _llamacpp()
+    assert model.get_request_params() == {}
+
+
+def test_llamacpp_temperature_override_applied():
+    model = _llamacpp(temperature=0.6)
+    assert model.get_request_params()["temperature"] == 0.6
+
+
 def test_lead_spec_is_multimodal_router_brain():
     """The lead is the multimodal router brain; its window is configured."""
     spec = lead_model_def()
     assert spec.provider == ModelProviderEnum.LITELLM  # default provider (proxy)
     assert spec.model_id == config.lead_model_id
     assert spec.has_tools
-    assert spec.supports_image and spec.supports_audio
+    assert spec.supports_image
+    assert not spec.supports_audio  # llama-server mmproj: vision only
     assert spec.num_ctx == config.lead_num_ctx
 
 

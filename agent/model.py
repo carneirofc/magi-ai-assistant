@@ -24,6 +24,7 @@ from core.config import config
 class ModelProviderEnum(enum.StrEnum):
     OLLAMA = "ollama"
     LITELLM = "litellm"
+    LLAMACPP = "llamacpp"
 
 
 # Prefix that tells the litellm SDK "this id is served by a litellm proxy at
@@ -125,6 +126,34 @@ def _build_litellm(model: ModelDefinition) -> Model:
     return llm
 
 
+def _build_llamacpp(model: ModelDefinition) -> Model:
+    """Direct llama.cpp llama-server via its OpenAI-compatible /v1 endpoint.
+
+    The server fixes its context window at launch (--ctx-size), so `num_ctx`
+    here is a budget for context assembly only and is never transmitted —
+    unlike Ollama, there is no per-request context option. Sampling overrides
+    *are* per-request: /v1/chat/completions accepts llama.cpp-native params
+    (top_k, min_p, mirostat, ...) alongside the OpenAI fields, so `extra_body`
+    rides through verbatim. With no overrides set, the server's launch flags
+    (the model's recommended sampling) rule.
+    """
+    from agno.models.openai.like import OpenAILike
+
+    llm = OpenAILike(
+        id=model.model_id,
+        base_url=config.llamacpp_base_url,
+        # The openai client demands a key even when the server enforces none.
+        api_key=config.llamacpp_api_key or "sk-no-key",
+    )
+    if model.temperature is not None:
+        llm.temperature = model.temperature
+    if model.max_tokens is not None:
+        llm.max_tokens = model.max_tokens
+    if model.extra_body:
+        llm.extra_body = dict(model.extra_body)
+    return llm
+
+
 def _build_ollama(model: ModelDefinition) -> Model:
     """Direct Ollama, bypassing the proxy. Handy for local dev / offline tests."""
     from agno.models.ollama import Ollama
@@ -138,6 +167,7 @@ def _build_ollama(model: ModelDefinition) -> Model:
 _BUILDERS: dict[ModelProviderEnum, Callable[[ModelDefinition], Model]] = {
     ModelProviderEnum.LITELLM: _build_litellm,
     ModelProviderEnum.OLLAMA: _build_ollama,
+    ModelProviderEnum.LLAMACPP: _build_llamacpp,
 }
 
 
@@ -171,9 +201,12 @@ def lead_model_def() -> ModelDefinition:
         model_id=config.lead_model_id,
         has_tools=True,
         supports_image=True,
-        supports_audio=True,
+        # llama-server with the Qwen3.5 mmproj reports modalities vision=true,
+        # audio=false (GET /props) — flip when an audio-capable backend lands.
+        supports_audio=False,
         num_ctx=config.lead_num_ctx,
         temperature=config.model_temperature,
+        extra_body=config.model_extra_body,
     )
 
 
@@ -184,9 +217,12 @@ def member_model_def() -> ModelDefinition:
         model_id=config.member_model_id,
         has_tools=True,
         supports_image=True,
-        supports_audio=True,
+        # llama-server with the Qwen3.5 mmproj reports modalities vision=true,
+        # audio=false (GET /props) — flip when an audio-capable backend lands.
+        supports_audio=False,
         num_ctx=config.member_num_ctx,
         temperature=config.model_temperature,
+        extra_body=config.model_extra_body,
     )
 
 

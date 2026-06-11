@@ -50,6 +50,7 @@ class DiscordRunContext:
     channel_kind: str
     message_id: str
     message_url: str
+    message_text: str
     user_id: str
     username: str
     channel: DiscordChannel

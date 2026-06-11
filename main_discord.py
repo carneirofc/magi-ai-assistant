@@ -23,6 +23,10 @@ def check() -> None:
 
 def serve() -> None:
     """Phase 2 — full agno integration via DiscordClient."""
+    from main import apply_deployment_config
+
+    apply_deployment_config()
+
     from channels.discord import build_discord_client
 
     print("[serve] Building agno Discord client...")

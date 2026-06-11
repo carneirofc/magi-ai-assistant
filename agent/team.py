@@ -24,6 +24,7 @@ from agent.hooks import tool_call_hook
 from agent.members import MEMBER_BUILDERS
 from agent.model import build_lead_model, build_member_model
 from agent.tools.memory import build_memory_tools
+from agent.tools.thinking import build_thinking_tools
 from agent.tools.vision import VISION_TOOLS
 from core.config import config
 from core.db import get_db
@@ -66,6 +67,13 @@ def build_team(
     member_model = build_member_model()
     builders = MEMBER_BUILDERS if member_builders is None else list(member_builders)
     members = [build(member_model) for build in builders]
+    # agno copies the team's tool_hooks onto the *team-level* tools only —
+    # members never inherit them, so their tool calls (wiki lookups, http_get,
+    # …) ran invisibly. Attach the same hook to every member: each call is
+    # logged with args/timing/result and failures become member-visible text.
+    for m in members:
+        if not m.tool_hooks:
+            m.tool_hooks = [tool_call_hook]
 
     instructions = load_prompt("team/lead.md")
     log_info(
@@ -92,6 +100,10 @@ def build_team(
         # turn off agno's automatic history-stuffing and memory extraction.
         add_history_to_context=False,
         update_memory_on_run=False,
+        # List each member's tool names in the lead's <team_members> block, so
+        # routing can match a request to a member's actual capabilities (e.g.
+        # danbooru_* → Prompt Artist), not just its prose role.
+        add_member_tools_to_context=True,
         markdown=True,
         telemetry=False,
         # Observability + robustness: log every member/tool call and convert a
@@ -106,5 +118,8 @@ def build_team(
             # context and actually look, instead of guessing from the link text.
             *VISION_TOOLS,
             *build_memory_tools(memory),
+            # Bound to the live model objects: members all share `member_model`,
+            # so one mutation flips the whole team.
+            *build_thinking_tools([lead, member_model]),
         ],
     )

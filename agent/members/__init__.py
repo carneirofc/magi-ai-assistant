@@ -12,6 +12,7 @@ from agno.agent import Agent
 from agno.models.base import Model
 
 from agent.members.assistant import build_assistant
+from agent.members.danbooru import build_danbooru_specialist
 from agent.members.litellm import build_litellm_specialist
 from agent.members.ollama import build_ollama_specialist
 from agent.members.researcher import build_researcher
@@ -52,4 +53,5 @@ MEMBER_BUILDERS: list[Callable[[Model], Agent]] = [
     build_discord_agent,
     build_ollama_specialist,
     build_litellm_specialist,
+    build_danbooru_specialist,
 ]
