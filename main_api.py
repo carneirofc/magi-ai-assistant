@@ -22,6 +22,11 @@ def apply_deployment_config() -> None:
         member_num_ctx=128_000,
         model_temperature=None,  # defer to llama-server launch flags
         model_extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        # Long-running sessions: fold turns that roll out of the live window into
+        # a rolling session summary, and condense long-term facts once they pile
+        # up — so context stays bounded over a long-lived client session.
+        session_summary=True,
+        long_term_summary=True,
         # HTTP binding for this service.
         api_host="127.0.0.1",
         api_port=8000,

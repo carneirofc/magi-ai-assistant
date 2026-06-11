@@ -199,6 +199,63 @@ async def test_long_term_summary_failure_never_breaks_the_chat(tmp_path):
     assert mgr.mem.long_term_summary.read() == ""
 
 
+# --- size guards (short-term must not explode the context) ------------------
+
+
+def test_huge_turn_is_clamped(tmp_path):
+    mgr = MemoryManager(
+        store=FileMemoryStore(tmp_path / "mem"),
+        short_term_max=3,
+        short_term_turn_max_chars=100,
+    )
+    mgr.set_scope(user_id="u1", session_id="s1")
+    mgr.record_user_turn("x" * 10_000)
+
+    [turn] = mgr.mem.live_turns.read()
+    assert len(turn["content"]) < 200  # 100 + truncation marker
+    assert "truncated" in turn["content"]
+
+
+async def test_pending_buffer_capped_when_summarizer_keeps_failing(tmp_path):
+    async def boom(text: str) -> str:
+        raise RuntimeError("summarizer down")
+
+    mgr = MemoryManager(
+        store=FileMemoryStore(tmp_path / "mem"),
+        short_term_max=2,
+        summarize_session_fn=boom,
+        summarize_every=2,
+        session_pending_max=4,
+    )
+    mgr.set_scope(user_id="u1", session_id="s1")
+    for i in range(20):  # 18 evictions, every fold attempt fails
+        mgr.record_user_turn(f"msg {i}")
+        await mgr.maybe_summarize_session()
+
+    assert mgr.mem.pending.count() <= 4  # oldest dropped, no unbounded growth
+
+
+async def test_runaway_session_summary_is_clamped(tmp_path):
+    async def huge(text: str) -> str:
+        return "s" * 50_000
+
+    mgr = MemoryManager(
+        store=FileMemoryStore(tmp_path / "mem"),
+        short_term_max=2,
+        summarize_session_fn=huge,
+        summarize_every=2,
+        session_summary_max_chars=500,
+    )
+    mgr.set_scope(user_id="u1", session_id="s1")
+    for i in range(4):  # 2 evicted => fold fires
+        mgr.record_user_turn(f"msg {i}")
+    await mgr.maybe_summarize_session()
+
+    stored = mgr.mem.session_summary.read()
+    assert len(stored) < 700  # 500 + header + marker
+    assert "truncated" in stored
+
+
 def test_eviction_without_summarizer_just_drops(manager):
     """No summarizer => old turns drop, nothing buffered (prior behavior)."""
     for i in range(5):  # window is 3

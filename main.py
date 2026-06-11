@@ -25,6 +25,11 @@ def apply_deployment_config() -> None:
         # blocks, breaking delegation. The lead's set_thinking tool can flip
         # this at runtime.
         model_extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        # Long-running sessions: fold evicted turns into a rolling session
+        # summary and condense long-term facts as they accumulate, keeping the
+        # assembled context bounded over a long-lived conversation.
+        session_summary=True,
+        long_term_summary=True,
     )
 
 

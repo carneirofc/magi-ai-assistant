@@ -148,10 +148,13 @@ class JsonWindow:
         self._write(kept)
         return evicted
 
-    def extend(self, turns: list[dict]) -> int:
-        """Append turn dicts as-is (no trim). Returns the buffer's new size."""
+    def extend(self, turns: list[dict], max_entries: int = 0) -> int:
+        """Append turn dicts; when `max_entries` > 0 keep only the newest that many.
+        Returns the buffer's new size."""
         buffered = self.read()
         buffered.extend(turns)
+        if max_entries > 0 and len(buffered) > max_entries:
+            buffered = buffered[-max_entries:]
         self._write(buffered)
         return len(buffered)
 

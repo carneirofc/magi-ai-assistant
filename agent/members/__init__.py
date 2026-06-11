@@ -16,6 +16,7 @@ from agent.members.danbooru import build_danbooru_specialist
 from agent.members.litellm import build_litellm_specialist
 from agent.members.ollama import build_ollama_specialist
 from agent.members.researcher import build_researcher
+from agent.members.seanime import build_seanime_specialist
 from agent.tools.discord import DISCORD_TOOLS
 from core.prompts import load_prompt
 
@@ -54,4 +55,5 @@ MEMBER_BUILDERS: list[Callable[[Model], Agent]] = [
     build_ollama_specialist,
     build_litellm_specialist,
     build_danbooru_specialist,
+    build_seanime_specialist,
 ]

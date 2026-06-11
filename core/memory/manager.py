@@ -74,6 +74,9 @@ class MemoryManager:
         long_term_recent_raw: int = 5,
         retriever: Optional[MemoryRetriever] = None,
         semantic_top_k: int = 5,
+        short_term_turn_max_chars: int = 4_000,
+        session_pending_max: int = 30,
+        session_summary_max_chars: int = 4_000,
     ):
         self.store = store
         # When set, long-term/episodes are also embedded into a vector store so a kind
@@ -86,7 +89,12 @@ class MemoryManager:
             summarize_long_term_fn, max(1, long_term_summarize_every),
         )
         self.episodes = Episodes(retriever, semantic_top_k, short_term_max)
-        self.session = Session(short_term_max, summarize_session_fn, max(1, summarize_every))
+        self.session = Session(
+            short_term_max, summarize_session_fn, max(1, summarize_every),
+            turn_max_chars=short_term_turn_max_chars,
+            pending_max=session_pending_max,
+            summary_max_chars=session_summary_max_chars,
+        )
         if persona_seed:
             self.store.seed_persona(persona_seed)
 
