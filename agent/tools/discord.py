@@ -1,6 +1,7 @@
 """Discord moderation tools bound to the current live conversation context."""
 
 import json
+import re
 from datetime import UTC, datetime, timedelta
 
 from agno.tools import tool
@@ -14,12 +15,29 @@ try:
 except (ImportError, ModuleNotFoundError):
     raise ImportError("`discord.py` not installed. Please install using `pip install discord.py`")
 
+_DELETE_VERB_RE = re.compile(r"\b(delete|remove|purge|erase)\b", re.IGNORECASE)
+_CLEAR_VERB_RE = re.compile(r"\bclear\b", re.IGNORECASE)
+_CLEAR_SCOPE_RE = re.compile(r"\b(message|messages|post|posts|chat|history|recent|last)\b", re.IGNORECASE)
+
 
 def _message_preview(message, limit: int = 200) -> str:
     text = " ".join((getattr(message, "content", "") or "").split())
     if len(text) <= limit:
         return text
     return f"{text[:limit]}..."
+
+
+def _delete_intent_error(request_text: str) -> str | None:
+    normalized = " ".join(request_text.split()).lower()
+    if _DELETE_VERB_RE.search(normalized):
+        return None
+    if _CLEAR_VERB_RE.search(normalized) and _CLEAR_SCOPE_RE.search(normalized):
+        return None
+    return (
+        "Refusing to delete Discord messages because the user's current request "
+        "does not clearly ask for deleting messages. Use delete tools only for "
+        "explicit delete/remove/purge/clear message requests."
+    )
 
 
 @tool
@@ -75,9 +93,17 @@ async def delete_discord_message(message_id: str) -> str:
 
     Use only after the user clearly identifies the target message. This tool
     acts only in the current conversation's channel; it cannot delete elsewhere.
+    Never use it for renaming threads, editing content, or any other non-delete
+    action.
     """
     context = get_current_discord_context()
     target = f"{context.channel_name or context.channel_kind} ({context.channel_id})"
+    if error := _delete_intent_error(context.message_text):
+        log_warning(
+            f"delete_discord_message: refused non-delete request in {target}: "
+            f"{context.message_text!r}"
+        )
+        return error
     try:
         # Partial message issues only a DELETE; fetch_message would add a
         # needless GET per id and is what gets rate limited (429) in bulk.
@@ -103,12 +129,19 @@ async def delete_discord_messages(message_ids: list[str]) -> str:
 
     Prefer this over calling the single-message tool in a loop: it deletes the
     whole batch in a single tool call, throttled to stay under Discord's rate
-    limits. Pass the exact message ids the user identified.
+    limits. Pass the exact message ids the user identified. Never use it for
+    renaming threads, editing content, or any other non-delete action.
     """
     context = get_current_discord_context()
     if not message_ids:
         return "No message ids were provided to delete."
     target = f"{context.channel_name or context.channel_kind} ({context.channel_id})"
+    if error := _delete_intent_error(context.message_text):
+        log_warning(
+            f"delete_discord_messages: refused non-delete request in {target}: "
+            f"{context.message_text!r}"
+        )
+        return error
     ids = ", ".join(str(mid) for mid in message_ids)
     messages = [context.channel.get_partial_message(int(mid)) for mid in message_ids]
     try:
@@ -129,10 +162,18 @@ async def delete_recent_discord_messages(count: int) -> str:
     """Delete the most recent non-pinned messages in the current conversation.
 
     Use only when the user explicitly asks to clear the last N recent messages
-    from THIS conversation. `count` must be between 1 and 20.
+    from THIS conversation. `count` must be between 1 and 20. Never use it for
+    renaming threads, editing content, or any other non-delete action.
     """
     context = get_current_discord_context()
     count = max(1, min(count, 20))
+    target = f"{context.channel_name or context.channel_kind} ({context.channel_id})"
+    if error := _delete_intent_error(context.message_text):
+        log_warning(
+            f"delete_recent_discord_messages: refused non-delete request in {target}: "
+            f"{context.message_text!r}"
+        )
+        return error
     cutoff = datetime.now(UTC) - timedelta(days=14)
     candidates = []
 
@@ -151,7 +192,6 @@ async def delete_recent_discord_messages(count: int) -> str:
     if not candidates:
         return "No recent deletable messages were found in the current conversation."
 
-    target = f"{context.channel_name or context.channel_kind} ({context.channel_id})"
     ids = ", ".join(str(message.id) for message in candidates)
     try:
         # Deletes one at a time, throttled, to stay under the per-message DELETE

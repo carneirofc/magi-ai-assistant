@@ -94,6 +94,7 @@ def discord_context():
             channel_kind="TextChannel",
             message_id="999",
             message_url="https://discord.example/message/999",
+            message_text="delete the selected messages",
             user_id="1256065127401132129",
             username="__kharma__",
             channel=channel,
@@ -141,3 +142,43 @@ async def test_delete_recent_discord_messages_skips_current_request_and_deletes_
     assert "Deleted 2 recent message(s)" in result
     assert discord_context._messages[30].deleted is True
     assert discord_context._messages[20].deleted is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool", "kwargs"),
+    [
+        (delete_discord_message, {"message_id": "20"}),
+        (delete_discord_messages, {"message_ids": ["10", "30"]}),
+        (delete_recent_discord_messages, {"count": 2}),
+    ],
+)
+async def test_delete_tools_refuse_when_request_is_not_a_delete(tool, kwargs):
+    messages = [
+        DummyMessage(30, DummyAuthor("mod", 3), "latest"),
+        DummyMessage(20, DummyAuthor("alice", 2), "middle"),
+        DummyMessage(10, DummyAuthor("bob", 1), "oldest"),
+    ]
+    channel = DummyChannel(messages)
+    token = set_current_discord_context(
+        DiscordRunContext(
+            guild_id="1511488658350542878",
+            guild_name="Test Guild",
+            channel_id=str(channel.id),
+            channel_name=channel.name,
+            channel_kind="TextChannel",
+            message_id="999",
+            message_url="https://discord.example/message/999",
+            message_text="rename this thread to release-notes",
+            user_id="1256065127401132129",
+            username="__kharma__",
+            channel=channel,
+        )
+    )
+    try:
+        result = await tool.entrypoint(**kwargs)
+    finally:
+        reset_current_discord_context(token)
+
+    assert "Refusing to delete Discord messages" in result
+    assert all(message.deleted is False for message in channel._messages.values())

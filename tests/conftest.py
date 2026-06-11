@@ -1,13 +1,11 @@
 """Shared test fixtures.
 
-Set proxy env vars *before* `core.config` is imported, so the module-level
-`config` object picks up deterministic values instead of whatever is on the host.
+Config is code-first (see core/config.py): tests run against the `Config`
+dataclass defaults, so nothing on the host can flip them. Only secrets are
+read from the environment — pin the one the model tests assert on *before*
+`core.config` is imported.
 """
 
 import os
 
-os.environ.setdefault("LITELLM_MASTER_KEY", "test-key")
-os.environ.setdefault("LITELLM_BASE_URL", "http://localhost:4000")
-# Assigned (not setdefault) so neither the host shell nor a local .env can flip
-# the provider under the tests — config's load_dotenv() never overrides os.environ.
-os.environ["MODEL_PROVIDER"] = "litellm"
+os.environ["LITELLM_MASTER_KEY"] = "test-key"

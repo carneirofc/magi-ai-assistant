@@ -162,6 +162,7 @@ class DiscordClient:
                 run_context = self._build_run_context(
                     message=message,
                     target=target,
+                    message_text=message_text,
                     message_user=message_user,
                     message_user_id=message_user_id,
                     message_url=message_url,
@@ -231,6 +232,7 @@ class DiscordClient:
         *,
         message,
         target,
+        message_text: str,
         message_user: str,
         message_user_id,
         message_url: str,
@@ -244,6 +246,7 @@ class DiscordClient:
             channel_kind=type(target).__name__,
             message_id=str(message.id),
             message_url=message_url,
+            message_text=message_text,
             user_id=str(message_user_id),
             username=message_user,
             channel=target,

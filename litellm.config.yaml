@@ -4,6 +4,16 @@ model_list:
       model: databricks/databricks-claude-sonnet-4-6
       api_key: os.environ/DATABRICKS_TOKEN
       api_base: os.environ/DATABRICKS_API_BASE
+  # llama.cpp llama-server, OpenAI-compatible. One model per instance; context
+  # size is fixed at launch (--ctx-size), so there is no per-request num_ctx.
+  # llama.cpp-native sampling params (top_k, min_p, ...) pass through the body.
+  - model_name: qwen3.5-9b-llamacpp
+    litellm_params:
+      model: openai/qwen3.5-9b
+      api_base: os.environ/LLAMACPP_API_BASE
+      api_key: dummy # llama-server enforces none unless launched with --api-key
+  # --- Ollama entries below are dormant (Ollama retired in favor of
+  # llama-server) — kept as a future fallback; they only matter when called. ---
   # Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q6_K:latest
   - model_name: qwen3.5-9b-uncensored
     litellm_params:
