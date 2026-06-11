@@ -4,3 +4,6 @@ __pycache__/
 *.pyc
 *.sqlite
 *.db
+data/
+# Local Danbooru CSV dumps (config.danbooru_*_csv) — ~100 MB, not for git.
+artifacts/
