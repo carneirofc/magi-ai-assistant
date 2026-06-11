@@ -76,6 +76,11 @@ async def test_success_returns_image_bytes(monkeypatch):
     assert image.content == payload
     assert image.mime_type == "image/png"
     assert image.format == "png"
+    # Marked view-only: model input, never reposted to the user by the reply
+    # media collection (core/media.py).
+    from core.media import is_view_only
+
+    assert is_view_only(image)
 
 
 async def test_rejects_non_image_content_type(monkeypatch):

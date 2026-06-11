@@ -18,6 +18,8 @@ from agno.tools import tool
 from agno.tools.function import ToolResult
 from agno.utils.log import log_info, log_warning
 
+from core.media import view_only_id
+
 # Don't pull a whole movie into context because a link happened to resolve to
 # one. 20 MB comfortably covers any real image; bigger almost certainly isn't one.
 _MAX_IMAGE_BYTES = 20 * 1024 * 1024
@@ -38,6 +40,10 @@ async def view_image_from_url(url: str) -> ToolResult:
     This fetches the bytes at the URL directly; it does not scrape web pages. If
     the user gives a link to a page (not the image itself), find the direct image
     URL first. Returns an error string if the URL isn't reachable or isn't an image.
+
+    This is for YOU to look — the image is not sent to the user. To deliver an
+    image (or any file) to the user as a real attachment, use
+    `send_media_from_url` instead.
     """
     url = (url or "").strip()
     if not url.lower().startswith(("http://", "https://")):
@@ -76,7 +82,9 @@ async def view_image_from_url(url: str) -> ToolResult:
     log_info(f"view_image_from_url: fetched {len(data)} bytes ({ctype}) from {url}")
     return ToolResult(
         content=f"Loaded the image from {url} ({ctype}, {len(data)} bytes). It is now visible to you.",
-        images=[Image(content=data, mime_type=ctype, format=subtype)],
+        # view-only id: this image is model input, not a deliverable — reply
+        # media collection (core/media.py) must not repost it to the user.
+        images=[Image(id=view_only_id(), content=data, mime_type=ctype, format=subtype)],
     )
 
 

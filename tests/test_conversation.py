@@ -131,6 +131,60 @@ async def test_reasoning_only_is_not_overridden_by_fallback():
     assert reply.is_error is False
 
 
+# --- reply media ---------------------------------------------------------------
+async def test_run_output_media_rides_the_reply_minus_view_only():
+    from agno.media import Image
+
+    from core.media import view_only_id
+
+    viewed = Image(id=view_only_id(), content=b"viewed")
+    delivered = Image(content=b"delivered")
+    response = SimpleNamespace(
+        status="COMPLETED",
+        content="here",
+        reasoning_content=None,
+        images=[viewed, delivered],
+    )
+    service, _ = _service(response)
+
+    reply = await service.handle(user_id=1, session_id="s", text="hi")
+
+    assert [i.content for i in reply.images] == [b"delivered"]
+    assert reply.has_media
+
+
+async def test_outbox_media_staged_during_run_rides_the_reply():
+    """A tool staging media mid-run (send_media_from_url) must reach the reply."""
+    from agno.media import Audio
+
+    from core.media import stage_media
+
+    class _StagingRunner:
+        async def arun(self, **kwargs):
+            assert stage_media(audio=(Audio(content=b"wav", format="wav"),)) is True
+            return SimpleNamespace(status="COMPLETED", content="done", reasoning_content=None)
+
+    service = ConversationService(runner=_StagingRunner(), memory=_FakeMemory())
+
+    reply = await service.handle(user_id=1, session_id="s", text="hi")
+
+    assert len(reply.audio) == 1 and reply.audio[0].content == b"wav"
+
+
+async def test_media_only_reply_is_not_replaced_by_fallback():
+    from agno.media import Image
+
+    response = SimpleNamespace(
+        status="COMPLETED", content="", reasoning_content=None, images=[Image(content=b"x")]
+    )
+    service, _ = _service(response)
+
+    reply = await service.handle(user_id=1, session_id="s", text="hi")
+
+    assert reply.text == "" and reply.is_error is False
+    assert len(reply.images) == 1
+
+
 # --- streaming (handle_stream) ----------------------------------------------
 def _delta(text):
     """A fake agno content-delta event (`event` ends with 'RunContent')."""

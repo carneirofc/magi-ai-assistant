@@ -11,10 +11,15 @@ composition root (channels/discord.py); nothing is constructed here.
 """
 
 import asyncio
+import io
+import mimetypes
 import re
 from contextlib import asynccontextmanager
+from pathlib import Path
 from textwrap import dedent
+from urllib.parse import urlparse
 
+import httpx
 from agno.media import Audio, File, Image, Video
 from agno.utils.log import log_info, log_warning
 
@@ -40,6 +45,27 @@ _NEW_THREAD_RE = re.compile(
     r"\b(?:new|start|create|open|fresh|separate|another|split|spin up|begin)\b[\s\w]*?\bthread\b",
     re.IGNORECASE,
 )
+
+# Discord custom emoji in message text: <:name:id> (static) / <a:name:id> (animated).
+_CUSTOM_EMOJI_RE = re.compile(r"<(a?):(\w+):(\d{15,21})>")
+
+# --- inbound media limits ----------------------------------------------------
+# Total media items passed into one run (attachments + emoji + stickers).
+_MAX_INBOUND_ITEMS = 10
+# Per-item byte cap: media rides base64 into the model request; bigger than
+# this is almost certainly not meant for the model.
+_MAX_INBOUND_BYTES = 25 * 1024 * 1024
+# Custom emoji per message wired into the model (each is one image).
+_MAX_EMOJI = 4
+
+# --- outbound media limits ---------------------------------------------------
+# Discord free-tier per-file upload cap; bigger files fall back to a link.
+_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+# Discord hard limit on attachments per message.
+_MAX_FILES_PER_MESSAGE = 10
+_FETCH_TIMEOUT_S = 30.0
+# Browser-ish UA — some CDNs (Discord's included) 403 the default httpx agent.
+_FETCH_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; AlyssaBot/1.0; +https://discord.com)"}
 
 
 def _wants_new_thread(text: str) -> bool:
@@ -92,11 +118,16 @@ class DiscordClient:
         conversation: ConversationService,
         client: discord.Client,
         token: str,
+        supports_audio: bool = True,
     ):
         self.conversation = conversation
         self.client = client
         self.token = token
-        log_info("DiscordClient init")
+        # Whether the backing model can hear audio. When False, inbound audio
+        # is not wired into the run (a vision-only backend would reject the
+        # `input_audio` part) — the model gets a context note instead.
+        self.supports_audio = supports_audio
+        log_info(f"DiscordClient init (supports_audio={supports_audio})")
         self._setup_events()
 
     def _setup_events(self):
@@ -127,7 +158,7 @@ class DiscordClient:
             if await self._maybe_handle_command(channel, message_text, message_user_id):
                 return
 
-            media = await self._extract_media(message)
+            media, media_notes = await self._extract_media(message)
             channel_kind = type(channel).__name__
             log_info(
                 f"message from {message_user} (id={message_user_id}) in {channel_kind} "
@@ -168,6 +199,10 @@ class DiscordClient:
                     message_url=message_url,
                 )
                 extra_context = self._build_additional_context(run_context)
+                if media_notes:
+                    extra_context += "\nMedia notes:\n" + "\n".join(
+                        f"- {note}" for note in media_notes
+                    ) + "\n"
                 if created_thread:
                     extra_context += (
                         "\nNote: a new thread was just opened for this user at their "
@@ -188,44 +223,140 @@ class DiscordClient:
                 finally:
                     reset_current_discord_context(token)
 
-    async def _extract_media(self, message) -> dict:
-        """Map the first attachment to agno media kwargs for `*.arun(**media)`.
+    async def _extract_media(self, message) -> tuple[dict, list[str]]:
+        """Map ALL of a message's media to agno media kwargs for `*.arun(**media)`.
 
-        Images/audio are passed by URL (agno fetches + encodes for the model);
-        video/files are read as bytes since providers want raw content. Only the
-        first attachment is processed — Discord allows many, the model takes one.
+        Everything is read as raw bytes and handed to agno, which formats it per
+        the OpenAI vision/audio spec (base64 data URLs / `input_audio` parts) —
+        passing Discord CDN URLs through would break on local backends that
+        can't fetch, and the URLs expire anyway. Covered sources: every
+        attachment (image/audio/video/file), custom emoji in the text, and
+        stickers. Returns `(media_kwargs, notes)` — notes are short lines for
+        the model's context (what was attached, what was skipped and why).
         """
-        media: dict = {"images": None, "videos": None, "audio": None, "files": None}
-        if not message.attachments:
-            return media
+        images: list[Image] = []
+        videos: list[Video] = []
+        audio: list[Audio] = []
+        files: list[File] = []
+        notes: list[str] = []
 
-        if len(message.attachments) > 1:
-            log_warning(
-                f"{len(message.attachments)} attachments received; only the first is processed"
+        def total() -> int:
+            return len(images) + len(videos) + len(audio) + len(files)
+
+        for att in message.attachments:
+            if total() >= _MAX_INBOUND_ITEMS:
+                notes.append(
+                    f"More attachments were sent than the {_MAX_INBOUND_ITEMS}-item limit; "
+                    "the rest were skipped."
+                )
+                break
+            ctype = (att.content_type or "").split(";", 1)[0].strip().lower()
+            if not ctype:
+                ctype = mimetypes.guess_type(att.filename or "")[0] or ""
+            log_info(
+                f"attachment: name={att.filename} type={ctype or '?'} size={att.size} bytes"
             )
+            if att.size and att.size > _MAX_INBOUND_BYTES:
+                notes.append(
+                    f"Attachment '{att.filename}' ({att.size} bytes) is too large to process."
+                )
+                continue
+            if ctype.startswith("audio/") and not self.supports_audio:
+                notes.append(
+                    f"The user attached the audio file '{att.filename}' ({ctype}), but the "
+                    "current model cannot listen to audio. Say so if the audio matters."
+                )
+                continue
+            try:
+                data = await att.read()
+            except discord.HTTPException as exc:
+                log_warning(f"attachment read failed for {att.filename}: {exc}")
+                notes.append(f"Attachment '{att.filename}' could not be downloaded.")
+                continue
 
-        att = message.attachments[0]
-        ctype = att.content_type
-        log_info(
-            f"attachment: name={att.filename} type={ctype} size={att.size} bytes url={att.url}"
-        )
-        if not ctype:
-            log_warning(f"attachment {att.filename} has no content_type; skipping media")
-            return media
+            subtype = ctype.split("/", 1)[1] if "/" in ctype else None
+            if ctype.startswith("image/"):
+                images.append(Image(content=data, format=subtype, mime_type=ctype))
+                notes.append(f"The user attached the image '{att.filename}'.")
+            elif ctype.startswith("audio/"):
+                audio.append(Audio(content=data, format=subtype, mime_type=ctype))
+                notes.append(f"The user attached the audio '{att.filename}'.")
+            elif ctype.startswith("video/"):
+                videos.append(Video(content=data, format=subtype, mime_type=ctype))
+                notes.append(f"The user attached the video '{att.filename}'.")
+            else:
+                files.append(
+                    File(content=data, mime_type=ctype or None, filename=att.filename)
+                )
+                notes.append(f"The user attached the file '{att.filename}' ({ctype or '?'}).")
 
-        # "image/png; codecs=..." -> "png"
-        subtype = ctype.split("/", 1)[1].split(";", 1)[0].strip() or None
-        if ctype.startswith("image/"):
-            media["images"] = [Image(url=att.url, format=subtype, mime_type=ctype)]
-        elif ctype.startswith("audio/"):
-            media["audio"] = [Audio(url=att.url, format=subtype, mime_type=ctype)]
-        elif ctype.startswith("video/"):
-            media["videos"] = [Video(content=await att.read())]
-        elif ctype.startswith("application/"):
-            media["files"] = [File(content=await att.read())]
-        else:
-            log_warning(f"unhandled attachment content_type: {ctype}")
-        return media
+        images, notes = await self._extract_emoji(message, images, notes)
+        images, notes = await self._extract_stickers(message, images, notes)
+        media = {
+            "images": images or None,
+            "videos": videos or None,
+            "audio": audio or None,
+            "files": files or None,
+        }
+        return media, notes
+
+    async def _extract_emoji(
+        self, message, images: list[Image], notes: list[str]
+    ) -> tuple[list[Image], list[str]]:
+        """Wire custom emoji (`<:name:id>`) into the run as images.
+
+        The model otherwise sees only the raw tag and has no idea what the
+        emoji looks like. Unicode emoji are plain text and need nothing.
+        """
+        seen: set[str] = set()
+        for animated, name, emoji_id in _CUSTOM_EMOJI_RE.findall(message.content or ""):
+            if emoji_id in seen:
+                continue
+            seen.add(emoji_id)
+            if len(seen) > _MAX_EMOJI or len(images) >= _MAX_INBOUND_ITEMS:
+                break
+            ext = "gif" if animated else "png"
+            url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}"
+            data = await self._fetch_bytes(url)
+            if data is None:
+                continue
+            images.append(Image(content=data, format=ext, mime_type=f"image/{ext}"))
+            notes.append(f"The custom emoji :{name}: from the message is attached as an image.")
+        return images, notes
+
+    async def _extract_stickers(
+        self, message, images: list[Image], notes: list[str]
+    ) -> tuple[list[Image], list[str]]:
+        """Wire message stickers into the run as images (lottie ones are JSON
+        animations, not pixels — skipped with a note)."""
+        for sticker in getattr(message, "stickers", None) or []:
+            if len(images) >= _MAX_INBOUND_ITEMS:
+                break
+            if getattr(sticker, "format", None) == discord.StickerFormatType.lottie:
+                notes.append(f"The sticker '{sticker.name}' is an animation and can't be viewed.")
+                continue
+            data = await self._fetch_bytes(sticker.url)
+            if data is None:
+                notes.append(f"The sticker '{sticker.name}' could not be downloaded.")
+                continue
+            ext = Path(urlparse(sticker.url).path).suffix.lstrip(".") or "png"
+            images.append(Image(content=data, format=ext, mime_type=f"image/{ext}"))
+            notes.append(f"The sticker '{sticker.name}' from the message is attached as an image.")
+        return images, notes
+
+    @staticmethod
+    async def _fetch_bytes(url: str) -> bytes | None:
+        """Fetch a CDN asset; None on any failure (callers degrade gracefully)."""
+        try:
+            async with httpx.AsyncClient(
+                timeout=_FETCH_TIMEOUT_S, follow_redirects=True, headers=_FETCH_HEADERS
+            ) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                return resp.content
+        except httpx.HTTPError as exc:
+            log_warning(f"media fetch failed for {url}: {exc}")
+            return None
 
     def _build_run_context(
         self,
@@ -401,13 +532,15 @@ class DiscordClient:
         return f"{user}: {snippet}" if snippet else f"{user}'s thread"
 
     async def _send_reply(self, reply: ConversationReply, target) -> None:
-        """Render a channel-neutral reply onto the Discord target."""
+        """Render a channel-neutral reply onto the Discord target: text first,
+        then any media as real attachments."""
         sent_any = False
         if reply.reasoning:
             sent_any = await self._send_discord_messages(
                 thread=target, message=f"Reasoning: \n{reply.reasoning}", italics=True
             )
         sent_any = await self._send_discord_messages(thread=target, message=reply.text) or sent_any
+        sent_any = await self._send_media(reply, target) or sent_any
         if not sent_any:
             log_warning(
                 f"response produced no sendable text for target id={getattr(target, 'id', '?')}; "
@@ -417,6 +550,101 @@ class DiscordClient:
                 thread=target,
                 message="I finished processing that, but there was no text content to send.",
             )
+
+    async def _send_media(self, reply: ConversationReply, target) -> bool:
+        """Upload the reply's media as Discord attachments.
+
+        Each agno media object is resolved to bytes (inline content, local
+        file, or URL fetch) and uploaded; whatever can't be uploaded (fetch
+        failed, over Discord's size cap) degrades to its URL as text so the
+        user still gets *something*. Returns True if anything was sent.
+        """
+        if not reply.has_media:
+            return False
+
+        uploads: list[discord.File] = []
+        fallback_lines: list[str] = []
+        counters: dict[str, int] = {}
+        for kind, items in (
+            ("image", reply.images),
+            ("video", reply.videos),
+            ("audio", reply.audio),
+            ("file", reply.files),
+        ):
+            for item in items:
+                counters[kind] = counters.get(kind, 0) + 1
+                name = self._media_filename(item, kind, counters[kind])
+                data = await self._media_bytes(item)
+                if data is None:
+                    if getattr(item, "url", None):
+                        fallback_lines.append(f"Couldn't attach {name} — link: {item.url}")
+                    else:
+                        log_warning(f"reply media {name} has no retrievable content; dropped")
+                    continue
+                if len(data) > _MAX_UPLOAD_BYTES:
+                    if getattr(item, "url", None):
+                        fallback_lines.append(
+                            f"{name} is too large to upload — link: {item.url}"
+                        )
+                    else:
+                        fallback_lines.append(
+                            f"{name} ({len(data)} bytes) is too large to upload to Discord."
+                        )
+                    continue
+                uploads.append(discord.File(io.BytesIO(data), filename=name))
+
+        sent_any = False
+        for start in range(0, len(uploads), _MAX_FILES_PER_MESSAGE):
+            batch = uploads[start : start + _MAX_FILES_PER_MESSAGE]
+            try:
+                await target.send(files=batch)
+                sent_any = True
+                log_info(f"uploaded {len(batch)} attachment(s) to target id={getattr(target, 'id', '?')}")
+            except discord.HTTPException as exc:
+                log_warning(f"attachment upload failed: {exc}")
+                fallback_lines.append("Some attachments failed to upload.")
+        if fallback_lines:
+            sent_any = (
+                await self._send_discord_messages(thread=target, message="\n".join(fallback_lines))
+                or sent_any
+            )
+        return sent_any
+
+    @staticmethod
+    def _media_filename(item, kind: str, index: int) -> str:
+        """A display name for the upload: explicit filename > URL basename >
+        generated `kind-N.ext` from format/mime."""
+        explicit = getattr(item, "filename", None)
+        if explicit:
+            return explicit
+        url = getattr(item, "url", None)
+        if url:
+            name = Path(urlparse(url).path).name
+            if name and "." in name:
+                return name
+        ext = getattr(item, "format", None)
+        if not ext:
+            mime = getattr(item, "mime_type", None)
+            guessed = mimetypes.guess_extension(mime) if mime else None
+            ext = (guessed or ".bin").lstrip(".")
+        return f"{kind}-{index}.{ext}"
+
+    async def _media_bytes(self, item) -> bytes | None:
+        """Resolve an agno media object to raw bytes; None when unavailable."""
+        content = getattr(item, "content", None)
+        if isinstance(content, bytes) and content:
+            return content
+        filepath = getattr(item, "filepath", None)
+        if filepath:
+            try:
+                return await asyncio.to_thread(Path(filepath).read_bytes)
+            except OSError as exc:
+                log_warning(f"reply media file read failed for {filepath}: {exc}")
+                return None
+        url = getattr(item, "url", None)
+        if url:
+            return await self._fetch_bytes(url)
+        return None
 
     @staticmethod
     def _italicize(text: str) -> str:
