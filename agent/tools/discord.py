@@ -1,14 +1,14 @@
 """Discord moderation tools bound to the current live conversation context."""
 
-import json
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from agno.tools import tool
 from agno.utils.log import log_info, log_warning
-from pydantic import Field
+from pydantic import BaseModel, Field
 
+from agent.tools.outputs import ToolOutput, fail, ok
 from core.discord_context import get_current_discord_context
 
 try:
@@ -20,6 +20,42 @@ except (ImportError, ModuleNotFoundError):
 _DELETE_VERB_RE = re.compile(r"\b(delete|remove|purge|erase)\b", re.IGNORECASE)
 _CLEAR_VERB_RE = re.compile(r"\bclear\b", re.IGNORECASE)
 _CLEAR_SCOPE_RE = re.compile(r"\b(message|messages|post|posts|chat|history|recent|last)\b", re.IGNORECASE)
+
+
+class DiscordContextData(BaseModel):
+    guild_id: str | None = None
+    guild_name: str | None = None
+    channel_id: str
+    channel_name: str | None = None
+    channel_kind: str
+    message_id: str
+    message_url: str
+    user_id: str
+    username: str
+
+
+class DiscordMessageSummary(BaseModel):
+    message_id: str
+    author: str | None = None
+    author_id: str
+    created_at: str | None = None
+    pinned: bool
+    has_attachments: bool
+    content_preview: str
+
+
+class DiscordRecentMessagesData(BaseModel):
+    channel_id: str
+    channel_name: str | None = None
+    messages: list[DiscordMessageSummary]
+
+
+class DiscordDeleteData(BaseModel):
+    message_id: str | None = None
+    message_ids: list[str] = Field(default_factory=list)
+    channel_id: str | None = None
+    count: int | None = None
+    deleted: bool | None = None
 
 
 def _message_preview(message, limit: int = 200) -> str:
@@ -47,14 +83,14 @@ def _delete_intent_error(request_text: str) -> str | None:
     instructions="Use before moderation actions or whenever exact Discord ids are needed. Never invent ids. Takes no arguments.",
     show_result=True,
 )
-def describe_current_discord_context() -> str:
+def describe_current_discord_context() -> ToolOutput[DiscordContextData]:
     """Return the exact guild/channel/message context for THIS Discord conversation.
 
     Use this before moderation actions if you need to confirm where you are.
     Never invent ids; the host app already provides the live context here.
     """
     context = get_current_discord_context()
-    return json.dumps(context.as_dict(), indent=2)
+    return ok("Current Discord context.", DiscordContextData(**context.as_dict()))
 
 
 @tool(
@@ -63,8 +99,11 @@ def describe_current_discord_context() -> str:
     show_result=True,
 )
 async def list_recent_discord_messages(
-    limit: Annotated[int, Field(description="Number of recent messages to list, clamped to 1-50.")] = 20,
-) -> str:
+    limit: Annotated[
+        int,
+        Field(default=20, ge=1, le=50, description="Number of recent messages to list."),
+    ] = 20,
+) -> ToolOutput[DiscordRecentMessagesData]:
     """List recent messages in the current Discord conversation with concrete ids.
 
     Use this to identify which messages the user means before deleting anything.
@@ -72,30 +111,30 @@ async def list_recent_discord_messages(
     """
     context = get_current_discord_context()
     limit = max(1, min(limit, 50))
-    messages: list[dict[str, object]] = []
+    messages: list[DiscordMessageSummary] = []
 
     async for message in context.channel.history(limit=limit):
         messages.append(
-            {
-                "message_id": str(message.id),
-                "author": getattr(message.author, "name", None),
-                "author_id": str(getattr(message.author, "id", "")),
-                "created_at": getattr(message, "created_at", None).isoformat()
+            DiscordMessageSummary(
+                message_id=str(message.id),
+                author=getattr(message.author, "name", None),
+                author_id=str(getattr(message.author, "id", "")),
+                created_at=getattr(message, "created_at", None).isoformat()
                 if getattr(message, "created_at", None)
                 else None,
-                "pinned": bool(getattr(message, "pinned", False)),
-                "has_attachments": bool(getattr(message, "attachments", None)),
-                "content_preview": _message_preview(message),
-            }
+                pinned=bool(getattr(message, "pinned", False)),
+                has_attachments=bool(getattr(message, "attachments", None)),
+                content_preview=_message_preview(message),
+            )
         )
 
-    return json.dumps(
-        {
-            "channel_id": context.channel_id,
-            "channel_name": context.channel_name,
-            "messages": list(reversed(messages)),
-        },
-        indent=2,
+    return ok(
+        f"Listed {len(messages)} recent Discord message(s).",
+        DiscordRecentMessagesData(
+            channel_id=context.channel_id,
+            channel_name=context.channel_name,
+            messages=list(reversed(messages)),
+        ),
     )
 
 
@@ -108,8 +147,11 @@ async def list_recent_discord_messages(
     show_result=True,
 )
 async def delete_discord_message(
-    message_id: Annotated[str, Field(description="Exact Discord message id to delete.")],
-) -> str:
+    message_id: Annotated[
+        str,
+        Field(min_length=1, description="Exact Discord message id to delete."),
+    ],
+) -> ToolOutput[DiscordDeleteData]:
     """Delete one specific message from the current Discord conversation by id.
 
     Use only after the user clearly identifies the target message. This tool
@@ -124,7 +166,7 @@ async def delete_discord_message(
             f"delete_discord_message: refused non-delete request in {target}: "
             f"{context.message_text!r}"
         )
-        return error
+        return fail(error, DiscordDeleteData(message_id=message_id, channel_id=context.channel_id))
     try:
         # Partial message issues only a DELETE; fetch_message would add a
         # needless GET per id and is what gets rate limited (429) in bulk.
@@ -132,16 +174,19 @@ async def delete_discord_message(
         log_info(f"delete_discord_message: deleting {message_id} from {target}")
         await message.delete()
         log_info(f"delete_discord_message: deleted {message_id} from {target}")
-        return f"Deleted message {message_id} from {target}."
+        return ok(
+            f"Deleted message {message_id} from {target}.",
+            DiscordDeleteData(message_id=message_id, channel_id=context.channel_id, deleted=True),
+        )
     except discord.NotFound:
         log_warning(f"delete_discord_message: {message_id} not found in {target}")
-        return f"Message {message_id} was not found in {target}."
+        return fail(f"Message {message_id} was not found in {target}.", DiscordDeleteData(message_id=message_id))
     except discord.Forbidden as exc:
         log_warning(f"delete_discord_message: forbidden for {message_id} in {target} ({exc})")
-        return f"Cannot delete message {message_id}: missing Discord permissions ({exc})."
+        return fail(f"Cannot delete message {message_id}: missing Discord permissions ({exc}).")
     except discord.HTTPException as exc:
         log_warning(f"delete_discord_message: HTTP error for {message_id} in {target} ({exc})")
-        return f"Discord rejected deleting message {message_id}: {exc}."
+        return fail(f"Discord rejected deleting message {message_id}: {exc}.")
 
 
 @tool(
@@ -155,9 +200,12 @@ async def delete_discord_message(
 async def delete_discord_messages(
     message_ids: Annotated[
         list[str],
-        Field(description="Exact Discord message ids to delete from the current channel."),
+        Field(
+            min_length=1,
+            description="Exact Discord message ids to delete from the current channel.",
+        ),
     ],
-) -> str:
+) -> ToolOutput[DiscordDeleteData]:
     """Delete several messages in the current conversation by id in one call.
 
     Prefer this over calling the single-message tool in a loop: it deletes the
@@ -167,14 +215,14 @@ async def delete_discord_messages(
     """
     context = get_current_discord_context()
     if not message_ids:
-        return "No message ids were provided to delete."
+        return fail("No message ids were provided to delete.", DiscordDeleteData(message_ids=[]))
     target = f"{context.channel_name or context.channel_kind} ({context.channel_id})"
     if error := _delete_intent_error(context.message_text):
         log_warning(
             f"delete_discord_messages: refused non-delete request in {target}: "
             f"{context.message_text!r}"
         )
-        return error
+        return fail(error, DiscordDeleteData(message_ids=message_ids, channel_id=context.channel_id))
     ids = ", ".join(str(mid) for mid in message_ids)
     messages = [context.channel.get_partial_message(int(mid)) for mid in message_ids]
     try:
@@ -182,12 +230,15 @@ async def delete_discord_messages(
         await context.delete_messages(messages)
     except discord.Forbidden as exc:
         log_warning(f"delete_discord_messages: forbidden in {target} ({exc})")
-        return f"Could not delete messages: missing permissions ({exc})."
+        return fail(f"Could not delete messages: missing permissions ({exc}).")
     except discord.HTTPException as exc:
         log_warning(f"delete_discord_messages: HTTP error in {target} ({exc})")
-        return f"Could not delete messages: Discord error ({exc})."
+        return fail(f"Could not delete messages: Discord error ({exc}).")
     log_info(f"delete_discord_messages: deleted {len(messages)} message(s) from {target}: {ids}")
-    return f"Deleted {len(messages)} message(s) from {target}: {ids}"
+    return ok(
+        f"Deleted {len(messages)} message(s) from {target}: {ids}",
+        DiscordDeleteData(message_ids=[str(mid) for mid in message_ids], channel_id=context.channel_id, deleted=True),
+    )
 
 
 @tool(
@@ -199,8 +250,11 @@ async def delete_discord_messages(
     show_result=True,
 )
 async def delete_recent_discord_messages(
-    count: Annotated[int, Field(description="Number of recent non-pinned messages to delete, clamped to 1-20.")],
-) -> str:
+    count: Annotated[
+        int,
+        Field(ge=1, le=20, description="Number of recent non-pinned messages to delete."),
+    ],
+) -> ToolOutput[DiscordDeleteData]:
     """Delete the most recent non-pinned messages in the current conversation.
 
     Use only when the user explicitly asks to clear the last N recent messages
@@ -215,7 +269,7 @@ async def delete_recent_discord_messages(
             f"delete_recent_discord_messages: refused non-delete request in {target}: "
             f"{context.message_text!r}"
         )
-        return error
+        return fail(error, DiscordDeleteData(count=count, channel_id=context.channel_id))
     cutoff = datetime.now(UTC) - timedelta(days=14)
     candidates = []
 
@@ -232,7 +286,7 @@ async def delete_recent_discord_messages(
             break
 
     if not candidates:
-        return "No recent deletable messages were found in the current conversation."
+        return fail("No recent deletable messages were found in the current conversation.", DiscordDeleteData(count=count))
 
     ids = ", ".join(str(message.id) for message in candidates)
     try:
@@ -245,16 +299,23 @@ async def delete_recent_discord_messages(
         await context.delete_messages(candidates)
     except discord.Forbidden as exc:
         log_warning(f"delete_recent_discord_messages: forbidden in {target} ({exc})")
-        return f"Could not delete messages: missing permissions ({exc})."
+        return fail(f"Could not delete messages: missing permissions ({exc}).")
     except discord.HTTPException as exc:
         log_warning(f"delete_recent_discord_messages: HTTP error in {target} ({exc})")
-        return f"Could not delete messages: Discord error ({exc})."
+        return fail(f"Could not delete messages: Discord error ({exc}).")
 
     log_info(
         f"delete_recent_discord_messages: deleted {len(candidates)} recent "
         f"message(s) from {target}: {ids}"
     )
-    return f"Deleted {len(candidates)} recent message(s) from {target}: {ids}"
+    return ok(
+        f"Deleted {len(candidates)} recent message(s) from {target}: {ids}",
+        DiscordDeleteData(
+            message_ids=[str(message.id) for message in candidates],
+            channel_id=context.channel_id,
+            deleted=True,
+        ),
+    )
 
 
 DISCORD_TOOLS = [

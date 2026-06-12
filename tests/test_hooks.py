@@ -5,7 +5,8 @@ call through unchanged, and it must turn a raising tool into a lead-visible
 ERROR string instead of letting the exception abort the run.
 """
 
-from agent.hooks import tool_call_hook
+from agent.hooks import _preview, tool_call_hook
+from agent.tools.outputs import FlexiblePayload, ok
 
 
 async def test_hook_passes_through_success():
@@ -44,3 +45,12 @@ async def test_hook_materializes_async_generator_member_result():
 
     result = await tool_call_hook("delegate_task_to_member", delegate, {"member_id": "x", "task": "t"})
     assert result == "first\nsecond"
+
+
+def test_preview_serializes_pydantic_outputs_as_json():
+    result = ok("done", FlexiblePayload(text="payload"))
+
+    preview = _preview(result)
+
+    assert '"message":"done"' in preview
+    assert '"data":{"text":"payload"}' in preview

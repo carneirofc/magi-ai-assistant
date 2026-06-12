@@ -11,6 +11,7 @@ import httpx
 
 import agent.tools.media as media_tools
 from agent.tools.media import send_media_from_url
+from agent.tools.outputs import ToolOutput
 from core.media import (
     close_media_outbox,
     collect_reply_media,
@@ -19,6 +20,10 @@ from core.media import (
     stage_media,
     view_only_id,
 )
+
+
+def _tool_text(result: dict) -> str:
+    return result.get("message", "")
 
 
 class _FakeResponse:
@@ -66,7 +71,7 @@ async def test_image_is_staged_in_outbox_not_returned(monkeypatch):
     result = await send_media_from_url.entrypoint(url="https://cdn.example/icon.png")
     outbox = close_media_outbox(token)
 
-    assert isinstance(result, str) and "Attached the image 'icon.png'" in result
+    assert isinstance(result, ToolOutput) and "Attached the image 'icon.png'" in _tool_text(result)
     assert len(outbox.images) == 1
     assert outbox.images[0].content == b"png"
     assert outbox.images[0].mime_type == "image/png"
@@ -97,11 +102,12 @@ async def test_no_outbox_is_an_honest_failure(monkeypatch):
         response=_FakeResponse(content=b"png", headers={"content-type": "image/png"}),
     )
     result = await send_media_from_url.entrypoint(url="https://cdn.example/icon.png")
-    assert "not available" in result and "https://cdn.example/icon.png" in result
+    assert "not available" in _tool_text(result) and "https://cdn.example/icon.png" in _tool_text(result)
 
 
 async def test_refuses_non_http_url():
-    assert "non-http" in await send_media_from_url.entrypoint(url="file:///etc/passwd")
+    result = await send_media_from_url.entrypoint(url="file:///etc/passwd")
+    assert "non-http" in _tool_text(result)
 
 
 async def test_surfaces_http_and_network_errors(monkeypatch):
@@ -109,10 +115,12 @@ async def test_surfaces_http_and_network_errors(monkeypatch):
         monkeypatch,
         response=_FakeResponse(headers={"content-type": "image/png"}, status_code=404),
     )
-    assert "404" in await send_media_from_url.entrypoint(url="https://x/missing.png")
+    result = await send_media_from_url.entrypoint(url="https://x/missing.png")
+    assert "404" in _tool_text(result)
 
     _patch_client(monkeypatch, raise_exc=httpx.ConnectError("boom"))
-    assert "Could not fetch" in await send_media_from_url.entrypoint(url="https://x/a.png")
+    result = await send_media_from_url.entrypoint(url="https://x/a.png")
+    assert "Could not fetch" in _tool_text(result)
 
 
 async def test_oversized_file_is_rejected(monkeypatch):
@@ -124,7 +132,7 @@ async def test_oversized_file_is_rejected(monkeypatch):
     token = open_media_outbox()
     result = await send_media_from_url.entrypoint(url="https://x/huge.png")
     outbox = close_media_outbox(token)
-    assert "too large" in result
+    assert "too large" in _tool_text(result)
     assert not outbox.images
 
 

@@ -28,14 +28,15 @@ pixels into context; these return text only.
 import asyncio
 import ipaddress
 import socket
-from typing import Annotated, Any, Final
+from typing import Annotated, Any, Final, Literal
 from urllib.parse import urlsplit
 
 import httpx
 from agno.tools import tool
 from agno.utils.log import log_info, log_warning
-from pydantic import Field
+from pydantic import BaseModel, Field
 
+from agent.tools.outputs import ToolOutput, fail, ok
 from core.config import config
 
 # Don't pull a huge payload into context. 2 MB covers any reasonable API/page
@@ -53,6 +54,29 @@ _ALLOWED_METHODS: Final[frozenset[str]] = frozenset(
 )
 # Response headers worth echoing back to the model; the full set is noise.
 _ECHO_HEADERS: Final[tuple[str, ...]] = ("content-type", "content-length", "location")
+
+
+class HttpGetData(BaseModel):
+    url: str = Field(description="Fetched or rejected URL.")
+    status_code: int | None = Field(default=None, description="HTTP status code, when available.")
+    content_type: str | None = Field(default=None, description="Response MIME type, when available.")
+    bytes: int | None = Field(default=None, description="Response byte count, when available.")
+    limit: int | None = Field(default=None, description="Maximum allowed byte count, for oversized responses.")
+    body: str | None = Field(default=None, description="Response body text, when returned.")
+    reason: str | None = Field(default=None, description="Reason the request was refused, when relevant.")
+
+
+class HttpRequestData(BaseModel):
+    method: str = Field(description="HTTP method used or rejected.")
+    url: str | None = Field(default=None, description="Requested URL.")
+    status_code: int | None = Field(default=None, description="HTTP status code, when available.")
+    reason: str | None = Field(default=None, description="HTTP reason phrase or refusal reason.")
+    headers: dict[str, str] = Field(default_factory=dict, description="Selected response headers echoed back.")
+    bytes: int | None = Field(default=None, description="Response byte count, when available.")
+    body_omitted: bool | None = Field(default=None, description="Whether the body was omitted due to size.")
+    body: str | None = Field(default=None, description="Response body text, when returned.")
+    text: str | None = Field(default=None, description="Compact model-readable HTTP report.")
+    allowed: list[str] = Field(default_factory=list, description="Allowed methods, for unsupported method errors.")
 
 
 def _scheme_ok(url: str) -> bool:
@@ -117,9 +141,12 @@ async def _host_allowed(url: str, method: str = "GET") -> tuple[bool, str]:
 async def http_get(
     url: Annotated[
         str,
-        Field(description="Full HTTP(S) URL to fetch with a plain GET request."),
+        Field(
+            min_length=8,
+            description="Full HTTP(S) URL to fetch with a plain GET request.",
+        ),
     ],
-) -> str:
+) -> ToolOutput[HttpGetData]:
     """Fetch the text body of an HTTP(S) URL via a GET request.
 
     Use this to read an API response (JSON), a web page's raw HTML, or any
@@ -133,12 +160,12 @@ async def http_get(
     """
     url = (url or "").strip()
     if not _scheme_ok(url):
-        return f"Refusing to fetch non-http(s) URL: {url!r}"
+        return fail(f"Refusing to fetch non-http(s) URL: {url!r}", HttpGetData(url=url))
 
     allowed, reason = await _host_allowed(url, method="GET")
     if not allowed:
         log_warning(f"http_get: blocked {url} ({reason})")
-        return f"Refusing to fetch {url}: {reason}."
+        return fail(f"Refusing to fetch {url}: {reason}.", HttpGetData(url=url, reason=reason))
 
     try:
         async with httpx.AsyncClient(
@@ -148,18 +175,33 @@ async def http_get(
             resp.raise_for_status()
     except httpx.HTTPStatusError as exc:
         log_warning(f"http_get: HTTP {exc.response.status_code} for {url}")
-        return f"Could not fetch {url}: HTTP {exc.response.status_code}"
+        return fail(
+            f"Could not fetch {url}: HTTP {exc.response.status_code}",
+            HttpGetData(url=url, status_code=exc.response.status_code),
+        )
     except httpx.HTTPError as exc:
         log_warning(f"http_get: fetch failed for {url}: {exc}")
-        return f"Could not fetch {url}: {exc}"
+        return fail(f"Could not fetch {url}: {exc}", HttpGetData(url=url))
 
     data = resp.content
     if len(data) > _MAX_BYTES:
-        return f"Response is too large to read ({len(data)} bytes; limit {_MAX_BYTES})."
+        return fail(
+            f"Response is too large to read ({len(data)} bytes; limit {_MAX_BYTES}).",
+            HttpGetData(url=url, bytes=len(data), limit=_MAX_BYTES),
+        )
 
     ctype = (resp.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
     log_info(f"http_get: fetched {len(data)} bytes ({ctype or 'unknown'}) from {url}")
-    return resp.text
+    return ok(
+        f"Fetched {url}.",
+        HttpGetData(
+            url=url,
+            status_code=resp.status_code,
+            content_type=ctype or None,
+            bytes=len(data),
+            body=resp.text,
+        ),
+    )
 
 
 def _normalize_headers(headers: dict[str, str] | None) -> dict[str, str]:
@@ -198,20 +240,29 @@ def _format_response(method: str, url: str, resp: httpx.Response) -> str:
     show_result=True,
 )
 async def http_request(
-    url: Annotated[str, Field(description="Full HTTP(S) URL to call.")],
-    method: Annotated[
+    url: Annotated[
         str,
-        Field(description="HTTP method: GET, HEAD, POST, PUT, PATCH, DELETE, or OPTIONS."),
+        Field(min_length=8, description="Full HTTP(S) URL to call."),
+    ],
+    method: Annotated[
+        Literal["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        Field(default="GET", description="HTTP method to use for the request."),
     ] = "GET",
     headers: Annotated[
         dict[str, str] | None,
-        Field(description="Optional flat request headers, e.g. Authorization or Content-Type."),
+        Field(
+            default=None,
+            description="Optional flat request headers, e.g. Authorization or Content-Type.",
+        ),
     ] = None,
     body: Annotated[
         str | None,
-        Field(description="Optional raw request body. For JSON, pass serialized JSON text."),
+        Field(
+            default=None,
+            description="Optional raw request body. For JSON, pass serialized JSON text.",
+        ),
     ] = None,
-) -> str:
+) -> ToolOutput[HttpRequestData]:
     """Perform one HTTP request the user described, returning its status and body.
 
     Use this when a plain `http_get` is not enough: a different method (POST,
@@ -237,14 +288,17 @@ async def http_request(
     method = (method or "GET").strip().upper()
 
     if not _scheme_ok(url):
-        return f"Refusing to call non-http(s) URL: {url!r}"
+        return fail(f"Refusing to call non-http(s) URL: {url!r}", HttpRequestData(url=url, method=method))
     if method not in _ALLOWED_METHODS:
-        return f"Unsupported HTTP method {method!r}. Allowed: {', '.join(sorted(_ALLOWED_METHODS))}."
+        return fail(
+            f"Unsupported HTTP method {method!r}. Allowed: {', '.join(sorted(_ALLOWED_METHODS))}.",
+            HttpRequestData(method=method, allowed=sorted(_ALLOWED_METHODS)),
+        )
 
     allowed, reason = await _host_allowed(url, method=method)
     if not allowed:
         log_warning(f"http_request: blocked {method} {url} ({reason})")
-        return f"Refusing to call {url}: {reason}."
+        return fail(f"Refusing to call {url}: {reason}.", HttpRequestData(url=url, method=method, reason=reason))
 
     req_headers = _normalize_headers(headers)
     content: bytes | None = body.encode("utf-8") if body is not None else None
@@ -260,10 +314,25 @@ async def http_request(
             resp = await client.request(method, url, headers=req_headers, content=content)
     except httpx.HTTPError as exc:
         log_warning(f"http_request: {method} {url} failed: {exc}")
-        return f"Request to {url} failed: {exc}"
+        return fail(f"Request to {url} failed: {exc}", HttpRequestData(url=url, method=method))
 
     log_info(f"http_request: {method} {url} -> {resp.status_code} ({len(resp.content)} bytes)")
-    return _format_response(method, url, resp)
+    body_omitted = len(resp.content) > _MAX_BYTES
+    echoed_headers = {name: resp.headers.get(name) for name in _ECHO_HEADERS if resp.headers.get(name)}
+    return ok(
+        f"HTTP {method} {url} returned {resp.status_code}.",
+        HttpRequestData(
+            method=method,
+            url=url,
+            status_code=resp.status_code,
+            reason=resp.reason_phrase,
+            headers=echoed_headers,
+            bytes=len(resp.content),
+            body_omitted=body_omitted,
+            body=None if body_omitted else (resp.text if resp.text.strip() else ""),
+            text=_format_response(method, url, resp),
+        ),
+    )
 
 
 # Read-only fetch + the controllable arbitrary-request escape hatch.

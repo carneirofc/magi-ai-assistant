@@ -8,12 +8,41 @@ Tools return short human-readable strings (and never raise): on failure they ret
 an error line the model can relay.
 """
 
+from typing import Annotated
+
 import httpx
 from agno.tools import tool
+from pydantic import BaseModel, Field
 
+from agent.tools.outputs import ToolOutput, fail, ok
 from core.config import config
 
 _TIMEOUT = 10.0
+
+
+class LiteLLMModelsData(BaseModel):
+    models: list[str]
+
+
+class LiteLLMModelInfoRow(BaseModel):
+    model_name: str | None = None
+    backend: str
+    max_tokens: int | None = None
+
+
+class LiteLLMModelInfoData(BaseModel):
+    models: list[LiteLLMModelInfoRow]
+
+
+class LiteLLMHealthEndpoint(BaseModel):
+    model: str
+    error: str
+
+
+class LiteLLMHealthData(BaseModel):
+    healthy_count: int | str
+    unhealthy_count: int | str
+    unhealthy_endpoints: list[LiteLLMHealthEndpoint]
 
 
 def _headers() -> dict:
@@ -34,7 +63,7 @@ def _get(path: str, timeout: float = _TIMEOUT) -> dict:
     instructions="Use when asked which LiteLLM models are configured or callable by the app. Takes no arguments.",
     show_result=True,
 )
-def list_litellm_models() -> str:
+def list_litellm_models() -> ToolOutput[LiteLLMModelsData]:
     """List the model_names served by the LiteLLM proxy.
 
     Use when asked what models can be called / are configured in litellm. These
@@ -43,11 +72,11 @@ def list_litellm_models() -> str:
     try:
         data = _get("/v1/models")
     except Exception as e:
-        return f"Failed to reach LiteLLM proxy at {config.litellm_base_url}: {e}"
+        return fail(f"Failed to reach LiteLLM proxy at {config.litellm_base_url}: {e}")
     ids = [m.get("id") for m in data.get("data", []) if m.get("id")]
     if not ids:
-        return "LiteLLM proxy lists no models."
-    return "LiteLLM models:\n" + "\n".join(f"- {i}" for i in ids)
+        return ok("LiteLLM proxy lists no models.", LiteLLMModelsData(models=[]))
+    return ok("LiteLLM models.", LiteLLMModelsData(models=ids))
 
 
 @tool(
@@ -55,7 +84,15 @@ def list_litellm_models() -> str:
     instructions="Use to identify which provider/backend a LiteLLM model routes to. Optional model filters by model_name.",
     show_result=True,
 )
-def litellm_model_info(model: str | None = None) -> str:
+def litellm_model_info(
+    model: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description="Optional LiteLLM model_name to filter for exactly.",
+        ),
+    ] = None,
+) -> ToolOutput[LiteLLMModelInfoData]:
     """Show LiteLLM model_name -> backend mapping (and per-model token limits).
 
     Optional `model` filters to one model_name. Use to see which provider/backend
@@ -64,22 +101,19 @@ def litellm_model_info(model: str | None = None) -> str:
     try:
         data = _get("/model/info")
     except Exception as e:
-        return f"Failed to read LiteLLM model info: {e}"
+        return fail(f"Failed to read LiteLLM model info: {e}")
     rows = data.get("data", [])
     if model:
         rows = [r for r in rows if r.get("model_name") == model]
     if not rows:
-        return f"No LiteLLM model info{f' for {model!r}' if model else ''}."
-    lines = []
+        return ok(f"No LiteLLM model info{f' for {model!r}' if model else ''}.", LiteLLMModelInfoData(models=[]))
+    models = []
     for r in rows:
         backend = (r.get("litellm_params") or {}).get("model", "?")
         info = r.get("model_info") or {}
         ctx = info.get("max_input_tokens") or info.get("max_tokens")
-        lines.append(
-            f"- {r.get('model_name')} -> {backend}"
-            + (f" (max_tokens={ctx})" if ctx else "")
-        )
-    return "LiteLLM model mapping:\n" + "\n".join(lines)
+        models.append(LiteLLMModelInfoRow(model_name=r.get("model_name"), backend=backend, max_tokens=ctx))
+    return ok("LiteLLM model mapping.", LiteLLMModelInfoData(models=models))
 
 
 @tool(
@@ -87,7 +121,7 @@ def litellm_model_info(model: str | None = None) -> str:
     instructions="Use to diagnose model-call failures through LiteLLM. This can take a few seconds. Takes no arguments.",
     show_result=True,
 )
-def litellm_health() -> str:
+def litellm_health() -> ToolOutput[LiteLLMHealthData]:
     """Check LiteLLM proxy health: which model endpoints are healthy/unhealthy.
 
     Use to diagnose why a model call is failing. The proxy pings each backend, so
@@ -96,11 +130,18 @@ def litellm_health() -> str:
     try:
         data = _get("/health", timeout=30.0)
     except Exception as e:
-        return f"Failed to reach LiteLLM proxy at {config.litellm_base_url}: {e}"
+        return fail(f"Failed to reach LiteLLM proxy at {config.litellm_base_url}: {e}")
     healthy = data.get("healthy_count", "?")
     unhealthy = data.get("unhealthy_count", "?")
-    lines = [f"healthy={healthy}, unhealthy={unhealthy}"]
-    for ep in (data.get("unhealthy_endpoints") or [])[:10]:
-        err = str(ep.get("error", ""))[:120]
-        lines.append(f"DOWN {ep.get('model', '?')}: {err}")
-    return "LiteLLM health:\n" + "\n".join(lines)
+    unhealthy_endpoints = [
+        LiteLLMHealthEndpoint(model=ep.get("model", "?"), error=str(ep.get("error", ""))[:120])
+        for ep in (data.get("unhealthy_endpoints") or [])[:10]
+    ]
+    return ok(
+        f"LiteLLM health: healthy={healthy}, unhealthy={unhealthy}.",
+        LiteLLMHealthData(
+            healthy_count=healthy,
+            unhealthy_count=unhealthy,
+            unhealthy_endpoints=unhealthy_endpoints,
+        ),
+    )
