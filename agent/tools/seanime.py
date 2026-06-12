@@ -32,13 +32,15 @@ import json
 import re
 from collections import defaultdict
 from html import unescape
-from typing import Any, Final, Literal, Optional
+from typing import Annotated, Any, Final, Literal, Optional
 from urllib.parse import quote
 
 import httpx
 from agno.tools import tool
 from agno.utils.log import log_info, log_warning
+from pydantic import Field
 
+from agent.tools.outputs import FlexiblePayload, ToolOutput, fail, ok
 from core.config import config
 
 _TIMEOUT_S: Final[float] = 30.0
@@ -122,6 +124,28 @@ def _drop_none(value: Any) -> Any:
 
 def _json_result(**fields: Any) -> str:
     return _render(_drop_none(fields))
+
+
+class SeanimeData(FlexiblePayload):
+    pass
+
+
+SeanimeOutput = ToolOutput[SeanimeData]
+
+
+def _data(**fields: object) -> SeanimeData:
+    return SeanimeData(**fields)
+
+
+def _tool_result(message: str, value: Any) -> SeanimeOutput:
+    """Wrap compact Seanime renderings in a structured tool envelope."""
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            parsed = {"text": value}
+        return ok(message, SeanimeData(**parsed) if isinstance(parsed, dict) else _data(text=_render(parsed)))
+    return ok(message, SeanimeData(**value) if isinstance(value, dict) else _data(text=_render(value)))
 
 
 async def _call(method: str, path: str, body: Optional[dict] = None) -> Any | str:
@@ -756,17 +780,17 @@ def _compact_search_results(result: Any, kind: str) -> Optional[str]:
     ),
     show_result=True,
 )
-async def seanime_status() -> str:
+async def seanime_status() -> SeanimeOutput:
     """Get the Seanime server status: version, logged-in AniList user, whether
     adult content is enabled, server readiness. Call this first when the user
     asks whether Seanime is up, who is logged in, or before debugging any other
     Seanime call that failed."""
     result = await _call("GET", "/api/v1/status")
     if _is_error(result):
-        return result
+        return fail(result)
     if isinstance(result, dict):
-        return _compact_status(result)
-    return _render(result)
+        return _tool_result("Seanime status.", _compact_status(result))
+    return _tool_result("Seanime status.", _render(result))
 
 
 # --- tools: library (the user's own anime + manga lists) ------------------------
@@ -774,8 +798,53 @@ _COLLECTION_PATHS: Final[dict[str, tuple[str, str]]] = {
     "anime": ("/api/v1/library/collection", "episodes"),
     "manga": ("/api/v1/manga/collection", "chapters"),
 }
-LibraryKind = Optional[Literal["anime", "manga"]]
-LibraryGroupBy = Optional[Literal["none", "status", "genre", "format", "year", "score"]]
+LibraryKind = Literal["anime", "manga"]
+LibraryGroupBy = Literal["none", "status", "genre", "format", "year", "score"]
+MediaKind = Literal["anime", "manga"]
+FindKind = Literal["all", "anime", "manga"]
+AdultMode = Literal["exclude", "include", "only"]
+AnimeSeason = Literal["WINTER", "SPRING", "SUMMER", "FALL"]
+AnimeFormat = Literal["TV", "TV_SHORT", "MOVIE", "SPECIAL", "OVA", "ONA", "MUSIC"]
+MangaFormat = Literal["MANGA", "NOVEL", "ONE_SHOT"]
+MediaStatus = Literal["FINISHED", "RELEASING", "NOT_YET_RELEASED", "CANCELLED", "HIATUS"]
+MediaSort = Literal[
+    "SCORE_DESC",
+    "SCORE",
+    "POPULARITY_DESC",
+    "POPULARITY",
+    "TRENDING_DESC",
+    "FAVOURITES_DESC",
+    "START_DATE_DESC",
+    "START_DATE",
+    "END_DATE_DESC",
+    "EPISODES_DESC",
+    "CHAPTERS_DESC",
+    "VOLUMES_DESC",
+    "TITLE_ROMAJI",
+    "TITLE_ENGLISH",
+    "UPDATED_AT_DESC",
+]
+AniListGenre = Literal[
+    "Action",
+    "Adventure",
+    "Comedy",
+    "Drama",
+    "Ecchi",
+    "Fantasy",
+    "Hentai",
+    "Horror",
+    "Mahou Shoujo",
+    "Mecha",
+    "Music",
+    "Mystery",
+    "Psychological",
+    "Romance",
+    "Sci-Fi",
+    "Slice of Life",
+    "Sports",
+    "Supernatural",
+    "Thriller",
+]
 
 
 @tool(
@@ -790,25 +859,34 @@ LibraryGroupBy = Optional[Literal["none", "status", "genre", "format", "year", "
     ),
     show_result=True,
 )
-async def seanime_library(kind: LibraryKind = "anime", group_by: LibraryGroupBy = "none") -> str:
+async def seanime_library(
+    kind: Annotated[
+        LibraryKind,
+        Field(default="anime", description="Library type to read from Seanime."),
+    ] = "anime",
+    group_by: Annotated[
+        LibraryGroupBy,
+        Field(default="none", description="Optional grouping for library summaries."),
+    ] = "none",
+) -> SeanimeOutput:
     """The user's OWN library lists on the Seanime server — the source of truth
     for "what am I watching/reading", "what's on my list", and any library
     statistics. Never answer those questions from the global AniList catalog."""
     kind = (kind or "anime").strip().lower()
     if kind not in _COLLECTION_PATHS:
-        return 'Unknown kind; use "anime" or "manga".'
+        return fail('Unknown kind; use "anime" or "manga".', _data(kind=kind))
     group_by = (group_by or "none").strip().lower()
     if group_by not in ("none", "status", "genre", "format", "year", "score"):
-        return "Unknown group_by; use one of: none, status, genre, format, year, score."
+        return fail("Unknown group_by; use one of: none, status, genre, format, year, score.", _data(group_by=group_by))
     path, unit = _COLLECTION_PATHS[kind]
     result = await _call("GET", path)
     if _is_error(result):
-        return result
+        return fail(result)
     if not isinstance(result, dict):
-        return _render(result)
+        return _tool_result("Seanime library.", _render(result))
     if group_by == "none":
-        return _compact_collection(result, unit)
-    return _overview(_entry_records(result, unit), group_by, unit)
+        return _tool_result("Seanime library.", _compact_collection(result, unit))
+    return _tool_result("Seanime library overview.", _overview(_entry_records(result, unit), group_by, unit))
 
 
 # --- tools: one title, the full picture ------------------------------------------
@@ -853,7 +931,16 @@ async def _media_info(media_id: int, kind: str) -> str:
     ),
     show_result=True,
 )
-async def seanime_media_info(media_id: int, kind: str = "anime") -> str:
+async def seanime_media_info(
+    media_id: Annotated[
+        int,
+        Field(gt=0, description="AniList media id from seanime_find or seanime_library."),
+    ],
+    kind: Annotated[
+        MediaKind,
+        Field(default="anime", description="Whether the media id is anime or manga."),
+    ] = "anime",
+) -> SeanimeOutput:
     """Everything about ONE title, by AniList media id, in one call: the user's
     library/list state (list status, progress, score; for anime also the files
     on disk, next episode to watch, and undownloaded episodes) plus AniList
@@ -861,8 +948,8 @@ async def seanime_media_info(media_id: int, kind: str = "anime") -> str:
     cover URL). Get the id from `seanime_find` or `seanime_library` — never
     guess it. `kind` must match what the id is: "anime" (default) or "manga"."""
     if kind not in ("anime", "manga"):
-        return 'Unknown kind; use "anime" or "manga".'
-    return await _media_info(int(media_id), kind)
+        return fail('Unknown kind; use "anime" or "manga".', _data(kind=kind))
+    return _tool_result("Seanime media info.", await _media_info(int(media_id), kind))
 
 
 @tool(
@@ -873,25 +960,30 @@ async def seanime_media_info(media_id: int, kind: str = "anime") -> str:
     ),
     show_result=True,
 )
-async def seanime_episode_collection(media_id: int) -> str:
+async def seanime_episode_collection(
+    media_id: Annotated[
+        int,
+        Field(gt=0, description="AniList anime media id from seanime_find or seanime_library."),
+    ],
+) -> SeanimeOutput:
     """The full main-episode list for an anime by AniList media id: episode
     number, title, air date, filler flag, and whether it's downloaded. Use for
     "how many episodes does X have", "which episodes are filler", "when did
     episode N air", or to see what's downloaded vs missing for one show."""
     result = await _call("GET", f"/api/v1/anime/episode-collection/{int(media_id)}")
     if _is_error(result):
-        return result
+        return fail(result)
     if isinstance(result, dict):
         episodes = result.get("episodes") or []
         if not episodes:
-            return "(no episodes found for this media id)"
+            return ok("No episodes found for this media id.", _data(media_id=media_id, episodes=[]))
         episodes = sorted(episodes, key=lambda e: e.get("episodeNumber") or 0)
         lines = [f"{len(episodes)} main episode(s):"]
         lines += [_compact_episode_line(ep) for ep in episodes]
         if result.get("hasMappingError"):
             lines.append("(warning: metadata mapping error — episode data may be incomplete)")
-        return _clip("\n".join(lines))
-    return _render(result)
+        return ok("Seanime episode collection.", _data(media_id=media_id, text=_clip("\n".join(lines)), episodes=episodes))
+    return _tool_result("Seanime episode collection.", _render(result))
 
 
 @tool(
@@ -899,15 +991,15 @@ async def seanime_episode_collection(media_id: int) -> str:
     instructions="Use for questions like what episodes are missing or what can be downloaded. Takes no arguments.",
     show_result=True,
 )
-async def seanime_missing_episodes() -> str:
+async def seanime_missing_episodes() -> SeanimeOutput:
     """Episodes that have aired but are not in the local library yet, per anime
     the user is watching. Use for "what am I missing" / "what can I download"."""
     result = await _call("GET", "/api/v1/library/missing-episodes")
     if _is_error(result):
-        return result
+        return fail(result)
     if isinstance(result, dict):
-        return _compact_missing(result)
-    return _render(result)
+        return ok("Seanime missing episodes.", _data(text=_compact_missing(result)))
+    return _tool_result("Seanime missing episodes.", _render(result))
 
 
 @tool(
@@ -915,15 +1007,15 @@ async def seanime_missing_episodes() -> str:
     instructions="Use for what airs today, this week, next, or upcoming collection episodes. Takes no arguments.",
     show_result=True,
 )
-async def seanime_upcoming_schedule() -> str:
+async def seanime_upcoming_schedule() -> SeanimeOutput:
     """The airing schedule for anime in the user's collection: which episodes
     air on which date. Use for "what airs this week / today / next"."""
     result = await _call("GET", "/api/v1/library/schedule")
     if _is_error(result):
-        return result
+        return fail(result)
     if isinstance(result, list):
-        return _compact_schedule(result)
-    return _render(result)
+        return ok("Seanime upcoming schedule.", _data(text=_compact_schedule(result), items=result))
+    return _tool_result("Seanime upcoming schedule.", _render(result))
 
 
 @tool(
@@ -931,13 +1023,14 @@ async def seanime_upcoming_schedule() -> str:
     instructions="Use when asked what the user was watching recently or where playback stopped. Takes no arguments.",
     show_result=True,
 )
-async def seanime_continuity_history() -> str:
+async def seanime_continuity_history() -> SeanimeOutput:
     """The user's recent watch history (continuity): what was watched last and
     where playback stopped. Use for "what was I watching" / "where did I leave off"."""
     result = await _call("GET", "/api/v1/continuity/history")
     if _is_error(result):
-        return result
-    return _compact_continuity(result) or _render(result)
+        return fail(result)
+    text = _compact_continuity(result)
+    return ok("Seanime continuity history.", _data(text=text, raw=result)) if text else _tool_result("Seanime continuity history.", _render(result))
 
 
 # --- tools: resolve a named title (the find workflow) ----------------------------
@@ -1005,7 +1098,16 @@ _BROWSE_PATHS: Final[dict[str, str]] = {
     ),
     show_result=True,
 )
-async def seanime_find(title: str, kind: str = "all") -> str:
+async def seanime_find(
+    title: Annotated[
+        str,
+        Field(min_length=1, description="Anime or manga title as the user named it."),
+    ],
+    kind: Annotated[
+        FindKind,
+        Field(default="all", description="Search anime, manga, or both."),
+    ] = "all",
+) -> SeanimeOutput:
     """Resolve a title the user named — ALWAYS your first call when the user
     mentions a specific show or manga. One call runs the whole lookup: the
     user's own Seanime library is searched first, and the result states
@@ -1028,9 +1130,9 @@ async def seanime_find(title: str, kind: str = "all") -> str:
       - kind: "all" (default — both), "anime", or "manga"."""
     normalized = (title or "").strip().casefold()
     if not normalized:
-        return "Provide a non-empty title."
+        return fail("Provide a non-empty title.", _data(title=title))
     if kind not in ("all", "anime", "manga"):
-        return 'Unknown kind; use "all" (default), "anime", or "manga".'
+        return fail('Unknown kind; use "all" (default), "anime", or "manga".', _data(kind=kind))
     words = normalized.split()
     kinds: tuple[str, ...] = ("anime", "manga") if kind == "all" else (kind,)
 
@@ -1044,17 +1146,20 @@ async def seanime_find(title: str, kind: str = "all") -> str:
         elif isinstance(result, dict):
             matches += _local_matches(result, words, k, unit)
     if errors and len(errors) == len(kinds):
-        return errors[0]
+        return fail(errors[0])
 
     if len(matches) == 1:
         match = matches[0]
         info = await _media_info(int(match["id"]), str(match["kind"]))
-        return _clip(f"Found in the user's library ({match['kind']}):\n\n{info}")
+        return _tool_result(
+            "Found title in the user's library.",
+            _clip(f"Found in the user's library ({match['kind']}):\n\n{info}"),
+        )
     if matches:
         lines = [f"{len(matches)} matches in the user's library for {title!r}:"]
         lines += [str(m["line"]) for m in matches]
         lines.append("Call seanime_media_info(media_id, kind) for the one the user means.")
-        return _clip("\n".join(lines))
+        return ok("Found multiple title matches in the user's library.", _data(text=_clip("\n".join(lines)), matches=matches))
 
     # Nothing local — fall back to the global AniList catalog. isAdult is
     # omitted on purpose: the user named this title, so an adult title must be
@@ -1072,14 +1177,22 @@ async def seanime_find(title: str, kind: str = "all") -> str:
             sections.append(f"## {k}\n{compact}")
     if not sections:
         if errors:
-            return errors[0]
-        return (
+            return fail(errors[0])
+        return fail(
             f"No match for {title!r}: not in the user's library, and no AniList "
-            "catalog result either. Check the spelling with the user."
+            "catalog result either. Check the spelling with the user.",
+            _data(title=title, kind=kind),
         )
-    return _clip(
-        f"NOT in the user's library. Global AniList catalog matches for {title!r} "
-        "(relay that these are not the user's own):\n\n" + "\n\n".join(sections)
+    return ok(
+        "Found global AniList catalog matches outside the user's library.",
+        _data(
+            text=_clip(
+                f"NOT in the user's library. Global AniList catalog matches for {title!r} "
+                "(relay that these are not the user's own):\n\n" + "\n\n".join(sections)
+            ),
+            title=title,
+            kind=kind,
+        ),
     )
 
 
@@ -1093,17 +1206,44 @@ async def seanime_find(title: str, kind: str = "all") -> str:
     show_result=True,
 )
 async def seanime_browse_anime(
-    search: str = "",
-    page: int = 1,
-    per_page: int = 10,
-    genres: Optional[list[str]] = None,
-    season: Optional[str] = None,
-    year: Optional[int] = None,
-    format: Optional[str] = None,
-    status: Optional[str] = None,
-    sort: Optional[str] = None,
-    adult: str = "exclude",
-) -> str:
+    search: Annotated[
+        str,
+        Field(default="", description="Optional keyword search term; leave empty for filter-only browsing."),
+    ] = "",
+    page: Annotated[int, Field(default=1, ge=1, description="AniList result page number.")] = 1,
+    per_page: Annotated[
+        int,
+        Field(default=10, ge=1, le=25, description="Number of results to return."),
+    ] = 10,
+    genres: Annotated[
+        list[AniListGenre] | None,
+        Field(default=None, description="Optional AniList genres to filter by."),
+    ] = None,
+    season: Annotated[
+        AnimeSeason | None,
+        Field(default=None, description="Optional anime airing season."),
+    ] = None,
+    year: Annotated[
+        int | None,
+        Field(default=None, ge=1900, le=2100, description="Optional airing season year."),
+    ] = None,
+    format: Annotated[
+        AnimeFormat | None,
+        Field(default=None, description="Optional anime format."),
+    ] = None,
+    status: Annotated[
+        MediaStatus | None,
+        Field(default=None, description="Optional anime release status."),
+    ] = None,
+    sort: Annotated[
+        MediaSort | None,
+        Field(default=None, description="Optional AniList sort mode."),
+    ] = None,
+    adult: Annotated[
+        AdultMode,
+        Field(default="exclude", description="Adult-content filtering mode."),
+    ] = "exclude",
+) -> SeanimeOutput:
     """DISCOVER anime in the global AniList catalog by filters — "top rated
     2024 TV anime", "romance anime from winter 2024", trending, seasonal
     browsing. Results are recommendations from the whole catalog, NOT the
@@ -1130,11 +1270,11 @@ async def seanime_browse_anime(
         adult=adult,
     )
     if error:
-        return error
+        return fail(error)
     result = await _call("POST", _BROWSE_PATHS["anime"], body)
     if _is_error(result):
-        return result
-    return _compact_search_results(result, "anime") or _render(result)
+        return fail(result)
+    return _tool_result("Seanime anime browse results.", _compact_search_results(result, "anime") or _render(result))
 
 
 @tool(
@@ -1146,8 +1286,19 @@ async def seanime_browse_anime(
     show_result=True,
 )
 async def seanime_update_progress(
-    media_id: int, episode_number: int, total_episodes: int = 0
-) -> str:
+    media_id: Annotated[
+        int,
+        Field(gt=0, description="AniList anime media id to update."),
+    ],
+    episode_number: Annotated[
+        int,
+        Field(ge=0, description="Episode progress value to set."),
+    ],
+    total_episodes: Annotated[
+        int,
+        Field(default=0, ge=0, description="Known total episode count, or 0 when unknown."),
+    ] = 0,
+) -> SeanimeOutput:
     """Mark an episode as watched: updates the user's AniList progress for the
     anime to `episode_number`. This CHANGES the user's AniList list — only call
     it when the user explicitly asks to mark/update progress, and confirm the
@@ -1159,8 +1310,11 @@ async def seanime_update_progress(
     }
     result = await _call("POST", "/api/v1/library/anime-entry/update-progress", body)
     if _is_error(result):
-        return result
-    return f"Progress updated: media {media_id} marked at episode {episode_number}."
+        return fail(result)
+    return ok(
+        f"Progress updated: media {media_id} marked at episode {episode_number}.",
+        _data(media_id=media_id, episode_number=episode_number, total_episodes=total_episodes),
+    )
 
 
 @tool(
@@ -1172,16 +1326,40 @@ async def seanime_update_progress(
     show_result=True,
 )
 async def seanime_browse_manga(
-    search: str = "",
-    page: int = 1,
-    per_page: int = 10,
-    genres: Optional[list[str]] = None,
-    year: Optional[int] = None,
-    format: Optional[str] = None,
-    status: Optional[str] = None,
-    sort: Optional[str] = None,
-    adult: str = "exclude",
-) -> str:
+    search: Annotated[
+        str,
+        Field(default="", description="Optional keyword search term; leave empty for filter-only browsing."),
+    ] = "",
+    page: Annotated[int, Field(default=1, ge=1, description="AniList result page number.")] = 1,
+    per_page: Annotated[
+        int,
+        Field(default=10, ge=1, le=25, description="Number of results to return."),
+    ] = 10,
+    genres: Annotated[
+        list[AniListGenre] | None,
+        Field(default=None, description="Optional AniList genres to filter by."),
+    ] = None,
+    year: Annotated[
+        int | None,
+        Field(default=None, ge=1900, le=2100, description="Optional publication start year."),
+    ] = None,
+    format: Annotated[
+        MangaFormat | None,
+        Field(default=None, description="Optional manga format."),
+    ] = None,
+    status: Annotated[
+        MediaStatus | None,
+        Field(default=None, description="Optional manga publication status."),
+    ] = None,
+    sort: Annotated[
+        MediaSort | None,
+        Field(default=None, description="Optional AniList sort mode."),
+    ] = None,
+    adult: Annotated[
+        AdultMode,
+        Field(default="exclude", description="Adult-content filtering mode."),
+    ] = "exclude",
+) -> SeanimeOutput:
     """DISCOVER manga in the global AniList catalog by filters — "top rated
     romance manga", "finished novels from 2024", trending. Results are
     recommendations from the whole catalog, NOT the user's library — say so
@@ -1207,11 +1385,11 @@ async def seanime_browse_manga(
         adult=adult,
     )
     if error:
-        return error
+        return fail(error)
     result = await _call("POST", _BROWSE_PATHS["manga"], body)
     if _is_error(result):
-        return result
-    return _compact_search_results(result, "manga") or _render(result)
+        return fail(result)
+    return _tool_result("Seanime manga browse results.", _compact_search_results(result, "manga") or _render(result))
 
 
 @tool(
@@ -1223,8 +1401,19 @@ async def seanime_browse_manga(
     show_result=True,
 )
 async def seanime_manga_update_progress(
-    media_id: int, chapter_number: int, total_chapters: int = 0
-) -> str:
+    media_id: Annotated[
+        int,
+        Field(gt=0, description="AniList manga media id to update."),
+    ],
+    chapter_number: Annotated[
+        int,
+        Field(ge=0, description="Chapter progress value to set."),
+    ],
+    total_chapters: Annotated[
+        int,
+        Field(default=0, ge=0, description="Known total chapter count, or 0 when unknown."),
+    ] = 0,
+) -> SeanimeOutput:
     """Mark a manga chapter as read: updates the user's AniList progress for the
     manga to `chapter_number`. This CHANGES the user's AniList list — only call
     it when the user explicitly asks to mark/update progress, and confirm the
@@ -1236,8 +1425,11 @@ async def seanime_manga_update_progress(
     }
     result = await _call("POST", "/api/v1/manga/update-progress", body)
     if _is_error(result):
-        return result
-    return f"Progress updated: manga {media_id} marked at chapter {chapter_number}."
+        return fail(result)
+    return ok(
+        f"Progress updated: manga {media_id} marked at chapter {chapter_number}.",
+        _data(media_id=media_id, chapter_number=chapter_number, total_chapters=total_chapters),
+    )
 
 
 # Use-case-shaped surface: one tool per conversational job, plus the two

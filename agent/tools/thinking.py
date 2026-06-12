@@ -13,10 +13,24 @@ Thinking OFF makes tool calls parse reliably (verified on b9550).
 """
 
 from collections.abc import Sequence
+from typing import Annotated
 
 from agno.models.base import Model
 from agno.tools import tool
 from agno.utils.log import log_info
+from pydantic import BaseModel, Field
+
+from agent.tools.outputs import ToolOutput, ok
+
+
+class ThinkingSetData(BaseModel):
+    enabled: bool = Field(description="Whether thinking/reasoning mode is enabled.")
+    applies_from: str = Field(description="When the changed setting takes effect.")
+
+
+class ThinkingStateData(BaseModel):
+    enabled: bool | None = Field(description="Current thinking state, or null when following the server default.")
+    source: str = Field(description="Where the setting came from.")
 
 
 def _kwargs_of(model: Model) -> dict:
@@ -35,7 +49,12 @@ def build_thinking_tools(models: Sequence[Model]) -> list:
         ),
         show_result=True,
     )
-    def set_thinking(enabled: bool) -> str:
+    def set_thinking(
+        enabled: Annotated[
+            bool,
+            Field(description="True to enable thinking/reasoning mode; false to disable it."),
+        ],
+    ) -> ToolOutput[ThinkingSetData]:
         """Turn the model's internal thinking/reasoning mode on or off.
 
         Use when the user asks to enable or disable thinking (also called
@@ -51,18 +70,27 @@ def build_thinking_tools(models: Sequence[Model]) -> list:
             m.extra_body = body
         log_info(f"thinking mode -> {enabled} on {len(models)} model(s)")
         state = "enabled" if enabled else "disabled"
-        return f"Thinking is now {state} (takes effect from the next reply)."
+        return ok(
+            f"Thinking is now {state} (takes effect from the next reply).",
+            ThinkingSetData(enabled=enabled, applies_from="next_reply"),
+        )
 
     @tool(
         description="Report whether model thinking/reasoning mode is enabled.",
         instructions="Use when the user asks whether thinking/reasoning is on. Takes no arguments.",
         show_result=True,
     )
-    def get_thinking() -> str:
+    def get_thinking() -> ToolOutput[ThinkingStateData]:
         """Report whether the thinking/reasoning mode is currently on or off."""
         state = _kwargs_of(models[0]).get("enable_thinking")
         if state is None:
-            return "Thinking follows the server's default (no override set)."
-        return f"Thinking is currently {'enabled' if state else 'disabled'}."
+            return ok(
+                "Thinking follows the server's default (no override set).",
+                ThinkingStateData(enabled=None, source="server_default"),
+            )
+        return ok(
+            f"Thinking is currently {'enabled' if state else 'disabled'}.",
+            ThinkingStateData(enabled=bool(state), source="override"),
+        )
 
     return [set_thinking, get_thinking]

@@ -10,7 +10,7 @@ reconfigurable.
 """
 
 from collections.abc import Callable, Sequence
-from typing import Optional
+from typing import Annotated, Any, Optional
 
 from agno.agent import Agent
 from agno.db.base import BaseDb
@@ -18,6 +18,7 @@ from agno.models.base import Model
 from agno.team import Team
 from agno.tools import tool
 from agno.utils.log import log_info
+from pydantic import Field
 
 from agent.hooks import tool_call_hook
 from agent.members import MEMBER_BUILDERS
@@ -25,6 +26,7 @@ from agent.model import build_lead_model, build_member_model
 from agent.tools.http import HTTP_TOOLS
 from agent.tools.media import MEDIA_TOOLS
 from agent.tools.memory import build_memory_tools
+from agent.tools.outputs import ok
 from agent.tools.thinking import build_thinking_tools
 from agent.tools.vision import VISION_TOOLS
 from core.config import config
@@ -45,7 +47,15 @@ def _build_introspection_tool(lead: Model, members):
         ),
         show_result=True,
     )
-    def agent_introspection(reason: Optional[str] = None) -> str:
+    def agent_introspection(
+        reason: Annotated[
+            Optional[str],
+            Field(
+                default=None,
+                description="Brief reason for introspecting the team roster and tools.",
+            ),
+        ] = None,
+    ) -> dict[str, Any]:
         lines = [
             "Self-introspection:",
             f"Reason: {reason or 'not provided'}",
@@ -53,7 +63,15 @@ def _build_introspection_tool(lead: Model, members):
             "Team members:",
         ]
         lines += [f"- {m.name}: {m.role}" for m in members]
-        return "\n".join(lines)
+        return ok(
+            "Team introspection completed.",
+            {
+                "reason": reason,
+                "lead_model": lead.id,
+                "members": [{"name": m.name, "role": m.role} for m in members],
+                "text": "\n".join(lines),
+            },
+        )
 
     return agent_introspection
 

@@ -6,9 +6,34 @@ that manager before each run, so the model calls these with content only — no 
 to pass. Docstrings are the model's contract: they tell it WHEN to keep something.
 """
 
-from agno.tools import tool
+from typing import Annotated
 
+from agno.tools import tool
+from pydantic import BaseModel, Field
+
+from agent.tools.outputs import ToolOutput, ok
 from core.memory import MemoryManager
+
+
+class FactData(BaseModel):
+    fact: str = Field(description="The durable fact that was stored.")
+
+
+class EpisodeData(BaseModel):
+    summary: str = Field(description="The episodic summary that was stored.")
+
+
+class LongTermMemoryData(BaseModel):
+    memory: str = Field(description="Recalled long-term memory text.")
+
+
+class EpisodicMemoryData(BaseModel):
+    episodes: str = Field(description="Recalled episodic summaries.")
+    limit: int = Field(description="Maximum number of summaries requested.")
+
+
+class PersonaAdjustmentData(BaseModel):
+    adjustment: str = Field(description="The persona adjustment that was stored.")
 
 
 def build_memory_tools(memory: MemoryManager) -> list:
@@ -22,13 +47,21 @@ def build_memory_tools(memory: MemoryManager) -> list:
         ),
         show_result=True,
     )
-    def remember(fact: str) -> str:
+    def remember(
+        fact: Annotated[
+            str,
+            Field(
+                min_length=3,
+                description="Standalone durable fact to remember about the current user.",
+            ),
+        ],
+    ) -> ToolOutput[FactData]:
         """Save a durable fact about the current user to long-term memory.
 
         Use for stable, reusable facts (preferences, name, projects, recurring
         needs) — not passing chatter. Phrase it as a standalone statement.
         """
-        return memory.remember(fact)
+        return ok(memory.remember(fact), FactData(fact=fact))
 
     @tool(
         description="Record a one-line episodic summary of the current interaction.",
@@ -38,31 +71,51 @@ def build_memory_tools(memory: MemoryManager) -> list:
         ),
         show_result=True,
     )
-    def record_episode(summary: str) -> str:
+    def record_episode(
+        summary: Annotated[
+            str,
+            Field(
+                min_length=5,
+                description="One-line summary of this interaction and its outcome.",
+            ),
+        ],
+    ) -> ToolOutput[EpisodeData]:
         """Log a one-line summary of what happened in this interaction (episodic memory).
 
         Use at a natural close, or after something notable, to record the gist of
         an episode you may want to recall later: what the user wanted and how it went.
         """
-        return memory.record_episode(summary)
+        return ok(memory.record_episode(summary), EpisodeData(summary=summary))
 
     @tool(
         description="Recall all long-term facts remembered about the current user.",
         instructions="Use when prior user preferences or durable facts may affect the answer. Takes no arguments.",
         show_result=True,
     )
-    def recall_memory() -> str:
+    def recall_memory() -> ToolOutput[LongTermMemoryData]:
         """Return everything you remember about the current user (long-term facts)."""
-        return memory.recall_long_term()
+        text = memory.recall_long_term()
+        return ok("Recalled long-term memory.", LongTermMemoryData(memory=text))
 
     @tool(
         description="Recall recent episodic memory summaries for the current user.",
         instructions="Use to inspect recent interaction history. The optional limit defaults to 5.",
         show_result=True,
     )
-    def recall_episodes(limit: int = 5) -> str:
+    def recall_episodes(
+        limit: Annotated[
+            int,
+            Field(
+                default=5,
+                ge=1,
+                le=20,
+                description="Maximum number of recent episodic summaries to return.",
+            ),
+        ] = 5,
+    ) -> ToolOutput[EpisodicMemoryData]:
         """Return summaries of the most recent past episodes with the current user."""
-        return memory.recall_episodes(limit)
+        text = memory.recall_episodes(limit)
+        return ok("Recalled episodic memory.", EpisodicMemoryData(episodes=text, limit=limit))
 
     @tool(
         description="Record a lasting adjustment to the assistant's persona or behavior.",
@@ -72,13 +125,21 @@ def build_memory_tools(memory: MemoryManager) -> list:
         ),
         show_result=True,
     )
-    def evolve_persona(adjustment: str) -> str:
+    def evolve_persona(
+        adjustment: Annotated[
+            str,
+            Field(
+                min_length=5,
+                description="General lasting behavior or persona rule to apply going forward.",
+            ),
+        ],
+    ) -> ToolOutput[PersonaAdjustmentData]:
         """Record a lasting adjustment to your own personality or behavior.
 
         Use when an interaction teaches you how to act better going forward (tone,
         habits, what to avoid). This evolves your persona across all users — keep it
         a deliberate, general rule, not a one-off reaction.
         """
-        return memory.evolve_persona(adjustment)
+        return ok(memory.evolve_persona(adjustment), PersonaAdjustmentData(adjustment=adjustment))
 
     return [remember, record_episode, recall_memory, recall_episodes, evolve_persona]

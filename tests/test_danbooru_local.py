@@ -13,6 +13,12 @@ import agent.tools.danbooru as danbooru
 from agent.tools.danbooru_local import LocalDanbooru
 from core.config import config, configure
 
+
+def _tool_text(result: dict) -> str:
+    data = result.get("data") or {}
+    return " ".join(str(part) for part in (result.get("message", ""), data.get("text", ""), data) if part)
+
+
 TAGS_CSV = """tag,category,count,alias
 1girl,0,4974288,"女の子,girl"
 maid,0,123456,"メイド"
@@ -131,8 +137,8 @@ async def test_search_tags_tool_serves_local_hit(local_config, monkeypatch):
 
     result = await danbooru.danbooru_search_tags.entrypoint(query="maid")
 
-    assert "(local)" in result
-    assert "- maid (general, 123456 posts)" in result
+    assert "(local)" in _tool_text(result)
+    assert "- maid (general, 123456 posts)" in _tool_text(result)
 
 
 async def test_wiki_tool_serves_local_hit(local_config, monkeypatch):
@@ -140,7 +146,7 @@ async def test_wiki_tool_serves_local_hit(local_config, monkeypatch):
 
     result = await danbooru.danbooru_wiki.entrypoint(title="list of uniforms")
 
-    assert "(local)" in result and "[[school_uniform]]" in result
+    assert "(local)" in _tool_text(result) and "[[school_uniform]]" in _tool_text(result)
 
 
 async def test_wiki_search_tool_serves_local_hit(local_config, monkeypatch):
@@ -148,7 +154,7 @@ async def test_wiki_search_tool_serves_local_hit(local_config, monkeypatch):
 
     result = await danbooru.danbooru_wiki_search.entrypoint(query="list_of_*")
 
-    assert "(local)" in result and "- list_of_uniforms" in result
+    assert "(local)" in _tool_text(result) and "- list_of_uniforms" in _tool_text(result)
 
 
 async def test_wiki_tool_suggests_close_titles_on_miss(local_config, monkeypatch):
@@ -156,8 +162,8 @@ async def test_wiki_tool_suggests_close_titles_on_miss(local_config, monkeypatch
 
     result = await danbooru.danbooru_wiki.entrypoint(title="uniforms")
 
-    assert "No wiki page titled 'uniforms'" in result
-    assert "- list_of_uniforms" in result
+    assert "No wiki page titled 'uniforms'" in _tool_text(result)
+    assert "- list_of_uniforms" in _tool_text(result)
 
 
 async def test_local_miss_falls_back_to_api(local_config, monkeypatch):
@@ -186,5 +192,5 @@ async def test_local_miss_falls_back_to_api(local_config, monkeypatch):
 
     result = await danbooru.danbooru_search_tags.entrypoint(query="obscure_tag")
 
-    assert "(local)" not in result
-    assert "- obscure_tag (general, 3 posts)" in result
+    assert "(local)" not in _tool_text(result)
+    assert "- obscure_tag (general, 3 posts)" in _tool_text(result)

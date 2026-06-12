@@ -8,12 +8,50 @@ Tools return short human-readable strings (and never raise): on failure they
 return an error line the model can relay, so a down server degrades gracefully.
 """
 
+from typing import Annotated
+
 import httpx
 from agno.tools import tool
+from pydantic import BaseModel, Field
 
+from agent.tools.outputs import ToolOutput, fail, ok
 from core.config import config
 
 _TIMEOUT = 10.0
+
+
+class OllamaModelRow(BaseModel):
+    name: str | None = None
+    parameter_size: str | None = None
+    quantization_level: str | None = None
+    size_gb: float | None = None
+
+
+class OllamaModelsData(BaseModel):
+    models: list[OllamaModelRow]
+
+
+class OllamaModelErrorData(BaseModel):
+    model: str | None = None
+
+
+class OllamaModelInfoData(BaseModel):
+    model: str
+    family: str | None = None
+    parameter_size: str | None = None
+    quantization_level: str | None = None
+    capabilities: list[str] = Field(default_factory=list)
+    native_context_length: int | None = None
+
+
+class RunningOllamaModelRow(BaseModel):
+    name: str | None = None
+    loaded_context: int | None = None
+    vram_gb: float | None = None
+
+
+class RunningOllamaModelsData(BaseModel):
+    models: list[RunningOllamaModelRow]
 
 
 def _get(path: str, timeout: float = _TIMEOUT) -> dict:
@@ -41,7 +79,7 @@ def _context_length(model_info: dict) -> int | None:
     instructions="Use when asked which local Ollama models are available. Takes no arguments.",
     show_result=True,
 )
-def list_ollama_models() -> str:
+def list_ollama_models() -> ToolOutput[OllamaModelsData]:
     """List models installed on the Ollama server.
 
     Use when asked what models Ollama has / are available locally. Returns each
@@ -50,19 +88,23 @@ def list_ollama_models() -> str:
     try:
         data = _get("/api/tags")
     except Exception as e:
-        return f"Failed to reach Ollama at {config.ollama_host}: {e}"
+        return fail(f"Failed to reach Ollama at {config.ollama_host}: {e}")
     models = data.get("models", [])
     if not models:
-        return "No models installed on Ollama."
-    lines = []
+        return ok("No models installed on Ollama.", OllamaModelsData(models=[]))
+    items = []
     for m in models:
         d = m.get("details", {}) or {}
         size_gb = (m.get("size", 0) or 0) / 1e9
-        lines.append(
-            f"- {m.get('name')}: {d.get('parameter_size', '?')} params, "
-            f"{d.get('quantization_level', '?')}, {size_gb:.1f} GB"
+        items.append(
+            OllamaModelRow(
+                name=m.get("name"),
+                parameter_size=d.get("parameter_size"),
+                quantization_level=d.get("quantization_level"),
+                size_gb=round(size_gb, 1),
+            )
         )
-    return "Ollama models:\n" + "\n".join(lines)
+    return ok("Ollama models.", OllamaModelsData(models=items))
 
 
 @tool(
@@ -70,7 +112,12 @@ def list_ollama_models() -> str:
     instructions="Use to check whether a local model supports tools, vision, or a required context window. Pass the exact Ollama model name.",
     show_result=True,
 )
-def show_ollama_model(model: str) -> str:
+def show_ollama_model(
+    model: Annotated[
+        str,
+        Field(min_length=1, description="Exact Ollama model name to inspect."),
+    ],
+) -> ToolOutput[OllamaModelInfoData | OllamaModelErrorData]:
     """Show details for one Ollama model: capabilities, context length, params.
 
     `model` is the model name (e.g. "qwen3.5-9b-uncensored" or "gemma4:e4b"). Use
@@ -80,16 +127,20 @@ def show_ollama_model(model: str) -> str:
     try:
         data = _post("/api/show", {"model": model})
     except Exception as e:
-        return f"Failed to show '{model}': {e}"
+        return fail(f"Failed to show '{model}': {e}", OllamaModelErrorData(model=model))
     caps = data.get("capabilities", []) or []
     ctx = _context_length(data.get("model_info", {}))
     d = data.get("details", {}) or {}
-    return (
-        f"Model {model}:\n"
-        f"- family: {d.get('family', '?')} "
-        f"({d.get('parameter_size', '?')}, {d.get('quantization_level', '?')})\n"
-        f"- capabilities: {', '.join(caps) or 'unknown'}\n"
-        f"- native context length: {ctx or 'unknown'}"
+    return ok(
+        f"Model {model}.",
+        OllamaModelInfoData(
+            model=model,
+            family=d.get("family"),
+            parameter_size=d.get("parameter_size"),
+            quantization_level=d.get("quantization_level"),
+            capabilities=caps,
+            native_context_length=ctx,
+        ),
     )
 
 
@@ -98,7 +149,7 @@ def show_ollama_model(model: str) -> str:
     instructions="Use to see which models are running now and what context size they loaded with. Takes no arguments.",
     show_result=True,
 )
-def list_running_ollama_models() -> str:
+def list_running_ollama_models() -> ToolOutput[RunningOllamaModelsData]:
     """List models currently loaded in Ollama memory, with loaded context size.
 
     Use to see what is running now and the context window each model was loaded
@@ -107,13 +158,13 @@ def list_running_ollama_models() -> str:
     try:
         data = _get("/api/ps")
     except Exception as e:
-        return f"Failed to reach Ollama at {config.ollama_host}: {e}"
+        return fail(f"Failed to reach Ollama at {config.ollama_host}: {e}")
     models = data.get("models", [])
     if not models:
-        return "No models currently loaded in Ollama."
-    lines = []
+        return ok("No models currently loaded in Ollama.", RunningOllamaModelsData(models=[]))
+    items = []
     for m in models:
         vram_gb = (m.get("size_vram", 0) or 0) / 1e9
         ctx = m.get("context_length")
-        lines.append(f"- {m.get('name')}: loaded_ctx={ctx or '?'}, vram={vram_gb:.1f} GB")
-    return "Loaded Ollama models:\n" + "\n".join(lines)
+        items.append(RunningOllamaModelRow(name=m.get("name"), loaded_context=ctx, vram_gb=round(vram_gb, 1)))
+    return ok("Loaded Ollama models.", RunningOllamaModelsData(models=items))

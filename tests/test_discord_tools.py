@@ -1,4 +1,5 @@
 import threading
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -15,6 +16,10 @@ from core.discord_context import (
     reset_current_discord_context,
     set_current_discord_context,
 )
+
+
+def _tool_text(result: dict) -> str:
+    return f"{result.get('message', '')} {json.dumps(result.get('data'), ensure_ascii=False)}"
 
 
 class DummyAuthor:
@@ -108,29 +113,29 @@ def discord_context():
 
 def test_describe_current_discord_context_uses_live_ids(discord_context):
     result = describe_current_discord_context.entrypoint()
-    assert "1511488658350542878" in result
-    assert "1511488659373691094" in result
-    assert "general" in result
+    assert "1511488658350542878" in _tool_text(result)
+    assert "1511488659373691094" in _tool_text(result)
+    assert "general" in _tool_text(result)
 
 
 @pytest.mark.asyncio
 async def test_list_recent_discord_messages_returns_concrete_message_ids(discord_context):
     result = await list_recent_discord_messages.entrypoint(limit=2)
-    assert '"message_id": "20"' in result
-    assert '"message_id": "30"' in result
+    assert '"message_id": "20"' in _tool_text(result)
+    assert '"message_id": "30"' in _tool_text(result)
 
 
 @pytest.mark.asyncio
 async def test_delete_discord_message_deletes_from_current_channel(discord_context):
     result = await delete_discord_message.entrypoint(message_id="20")
-    assert "Deleted message 20" in result
+    assert "Deleted message 20" in _tool_text(result)
     assert discord_context._messages[20].deleted is True
 
 
 @pytest.mark.asyncio
 async def test_delete_discord_messages_bulk_deletes_each_id(discord_context):
     result = await delete_discord_messages.entrypoint(message_ids=["10", "30"])
-    assert "Deleted 2 message(s)" in result
+    assert "Deleted 2 message(s)" in _tool_text(result)
     assert discord_context._messages[10].deleted is True
     assert discord_context._messages[30].deleted is True
     assert discord_context._messages[20].deleted is False
@@ -139,7 +144,7 @@ async def test_delete_discord_messages_bulk_deletes_each_id(discord_context):
 @pytest.mark.asyncio
 async def test_delete_recent_discord_messages_skips_current_request_and_deletes_count(discord_context):
     result = await delete_recent_discord_messages.entrypoint(count=2)
-    assert "Deleted 2 recent message(s)" in result
+    assert "Deleted 2 recent message(s)" in _tool_text(result)
     assert discord_context._messages[30].deleted is True
     assert discord_context._messages[20].deleted is True
 
@@ -180,5 +185,5 @@ async def test_delete_tools_refuse_when_request_is_not_a_delete(tool, kwargs):
     finally:
         reset_current_discord_context(token)
 
-    assert "Refusing to delete Discord messages" in result
+    assert "Refusing to delete Discord messages" in _tool_text(result)
     assert all(message.deleted is False for message in channel._messages.values())

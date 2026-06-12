@@ -17,12 +17,15 @@ the same treatment with a smaller gap.
 import asyncio
 import re
 import time
+from typing import Annotated, Any
 
 import httpx
 from agno.tools import tool
 from agno.utils.log import log_info, log_warning
+from pydantic import Field
 
 from agent.tools.danbooru_local import LocalDanbooru
+from agent.tools.outputs import FlexiblePayload, ToolOutput, fail, ok
 from core.config import config
 
 _TIMEOUT = 15.0
@@ -104,6 +107,21 @@ def _tag_line(info: dict) -> str:
     return f"- {info.get('name')} ({category}, {info.get('post_count', 0)} posts)"
 
 
+class DanbooruTextData(FlexiblePayload):
+    text: str
+
+
+DanbooruOutput = ToolOutput[DanbooruTextData | FlexiblePayload]
+
+
+def _text_ok(message: str, text: str, **data: object) -> ToolOutput[DanbooruTextData]:
+    return ok(message, DanbooruTextData(text=text, **data))
+
+
+def _text_fail(message: str, **data: object) -> ToolOutput[FlexiblePayload]:
+    return fail(message, FlexiblePayload(**data) if data else None)
+
+
 @tool(
     description="Fetch a Danbooru wiki page by exact title for tag definitions or curated tag lists.",
     instructions=(
@@ -112,7 +130,15 @@ def _tag_line(info: dict) -> str:
     ),
     show_result=True,
 )
-async def danbooru_wiki(title: str) -> str:
+async def danbooru_wiki(
+    title: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description="Danbooru wiki page title, normalized to lowercase underscores.",
+        ),
+    ],
+) -> DanbooruOutput:
     """Fetch a Danbooru wiki page by title, e.g. 'list_of_uniforms' or 'collarbone'.
 
     Use to read curated tag lists (pages named list_of_* or tag_group:*) or the
@@ -121,14 +147,20 @@ async def danbooru_wiki(title: str) -> str:
     """
     slug = (title or "").strip().lower().replace(" ", "_")
     if not slug:
-        return "No wiki title given."
+        return _text_fail("No wiki title given.")
     local = _local()
     body = await asyncio.to_thread(local.wiki, slug)
     if body is not None:
         log_info(f"danbooru_wiki '{slug}': local hit ({len(body)} chars)")
         if len(body) > _WIKI_BODY_LIMIT:
             body = body[:_WIKI_BODY_LIMIT] + "\n… (truncated)"
-        return f"Wiki '{slug}' (local):\n{body or '(empty page)'}"
+        return _text_ok(
+            f"Wiki page '{slug}' found locally.",
+            f"Wiki '{slug}' (local):\n{body or '(empty page)'}",
+            title=slug,
+            source="local",
+            body=body or "",
+        )
     if local.has_wiki:
         # No exact page — the title is probably loosely phrased; offer the
         # closest real titles instead of burning a live request on a 404.
@@ -138,20 +170,28 @@ async def danbooru_wiki(title: str) -> str:
                 f"danbooru_wiki '{slug}': no exact local page, "
                 f"suggesting {len(close)} close titles"
             )
-            return (
+            text = (
                 f"No wiki page titled '{slug}'. Closest local titles "
                 "(fetch one with danbooru_wiki):\n" + "\n".join(f"- {t}" for t in close)
             )
+            return _text_fail(text, title=slug, closest_titles=close)
     log_info(f"danbooru_wiki '{slug}': local miss → live API")
     try:
         data = await _get_json(_danbooru_throttle, f"{_DANBOORU}/wiki_pages/{slug}.json")
     except Exception as e:
-        return f"Could not fetch wiki page '{slug}': {e}"
+        return _text_fail(f"Could not fetch wiki page '{slug}': {e}", title=slug)
     log_info(f"danbooru_wiki '{slug}': fetched from live API")
     body = (data.get("body") or "").strip()
     if len(body) > _WIKI_BODY_LIMIT:
         body = body[:_WIKI_BODY_LIMIT] + "\n… (truncated)"
-    return f"Wiki '{data.get('title', slug)}':\n{body or '(empty page)'}"
+    actual_title = data.get("title", slug)
+    return _text_ok(
+        f"Wiki page '{actual_title}' fetched.",
+        f"Wiki '{actual_title}':\n{body or '(empty page)'}",
+        title=actual_title,
+        source="live",
+        body=body or "",
+    )
 
 
 @tool(
@@ -159,7 +199,15 @@ async def danbooru_wiki(title: str) -> str:
     instructions="Use when the exact wiki title is unknown. Fetch interesting returned titles with danbooru_wiki.",
     show_result=True,
 )
-async def danbooru_wiki_search(query: str) -> str:
+async def danbooru_wiki_search(
+    query: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description="Phrase or wildcard pattern to match against Danbooru wiki page titles.",
+        ),
+    ],
+) -> DanbooruOutput:
     """Find Danbooru wiki page titles loosely matching a phrase or pattern.
 
     Use when you don't know the exact wiki page name: 'uniform', 'school girl
@@ -169,11 +217,12 @@ async def danbooru_wiki_search(query: str) -> str:
     """
     q = (query or "").strip().lower().replace(" ", "_")
     if not q:
-        return "No query given."
+        return _text_fail("No query given.")
     titles = await asyncio.to_thread(_local().search_wiki_titles, q)
     if titles:
         log_info(f"danbooru_wiki_search '{q}': {len(titles)} local titles (top: {titles[0]})")
-        return f"Wiki pages matching '{q}' (local):\n" + "\n".join(f"- {t}" for t in titles)
+        text = f"Wiki pages matching '{q}' (local):\n" + "\n".join(f"- {t}" for t in titles)
+        return _text_ok(f"Found {len(titles)} local wiki title(s).", text, query=q, source="local", titles=titles)
     log_info(f"danbooru_wiki_search '{q}': local miss → live API")
     pattern = q if "*" in q else f"*{q}*"
     try:
@@ -183,10 +232,12 @@ async def danbooru_wiki_search(query: str) -> str:
             params={"search[title_matches]": pattern, "search[hide_deleted]": "yes", "limit": 30},
         )
     except Exception as e:
-        return f"Wiki search for '{q}' failed: {e}"
+        return _text_fail(f"Wiki search for '{q}' failed: {e}", query=q)
     if not data:
-        return f"No wiki pages match '{q}'."
-    return f"Wiki pages matching '{q}':\n" + "\n".join(f"- {p.get('title')}" for p in data)
+        return _text_ok(f"No wiki pages match '{q}'.", f"No wiki pages match '{q}'.", query=q, titles=[])
+    titles = [p.get("title") for p in data]
+    text = f"Wiki pages matching '{q}':\n" + "\n".join(f"- {t}" for t in titles)
+    return _text_ok(f"Found {len(titles)} wiki title(s).", text, query=q, source="live", titles=titles)
 
 
 @tool(
@@ -197,7 +248,15 @@ async def danbooru_wiki_search(query: str) -> str:
     ),
     show_result=True,
 )
-async def danbooru_search_tags(query: str) -> str:
+async def danbooru_search_tags(
+    query: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description="General, character, copyright, or meta tag phrase to verify.",
+        ),
+    ],
+) -> DanbooruOutput:
     """Search Danbooru general/character/copyright tags; use to verify a tag exists.
 
     Matching is loose: a natural phrase ('school girl uniform', 'maids') finds
@@ -209,7 +268,7 @@ async def danbooru_search_tags(query: str) -> str:
     """
     q = (query or "").strip().lower().replace(" ", "_")
     if not q:
-        return "No query given."
+        return _text_fail("No query given.")
     hits = await asyncio.to_thread(_local().search_tags, q)
     if hits:
         log_info(f"danbooru_search_tags '{q}': {len(hits)} local hits (top: {hits[0][0]})")
@@ -217,7 +276,13 @@ async def danbooru_search_tags(query: str) -> str:
             f"- {name} ({_TAG_CATEGORIES.get(cat, '?')}, {count} posts)"
             for name, cat, count in hits
         ]
-        return f"Tags matching '{q}' (local):\n" + "\n".join(lines)
+        return _text_ok(
+            f"Found {len(hits)} local tag match(es).",
+            f"Tags matching '{q}' (local):\n" + "\n".join(lines),
+            query=q,
+            source="local",
+            tags=[{"name": name, "category": _TAG_CATEGORIES.get(cat, "?"), "post_count": count} for name, cat, count in hits],
+        )
     log_info(f"danbooru_search_tags '{q}': local miss → live API")
     try:
         data = await _get_json(
@@ -231,10 +296,16 @@ async def danbooru_search_tags(query: str) -> str:
             },
         )
     except Exception as e:
-        return f"Tag search for '{q}' failed: {e}"
+        return _text_fail(f"Tag search for '{q}' failed: {e}", query=q)
     if not data:
-        return f"No tags match '{q}'."
-    return f"Tags matching '{q}':\n" + "\n".join(_tag_line(t) for t in data)
+        return _text_ok(f"No tags match '{q}'.", f"No tags match '{q}'.", query=q, tags=[])
+    return _text_ok(
+        f"Found {len(data)} tag match(es).",
+        f"Tags matching '{q}':\n" + "\n".join(_tag_line(t) for t in data),
+        query=q,
+        source="live",
+        tags=[{"name": t.get("name"), "category": _TAG_CATEGORIES.get(t.get("category"), "?"), "post_count": t.get("post_count", 0)} for t in data],
+    )
 
 
 @tool(
@@ -245,7 +316,15 @@ async def danbooru_search_tags(query: str) -> str:
     ),
     show_result=True,
 )
-async def danbooru_search_artists(query: str) -> str:
+async def danbooru_search_artists(
+    query: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description="Artist name, romanized name, fragment, or wildcard pattern.",
+        ),
+    ],
+) -> DanbooruOutput:
     """Search Danbooru ARTIST tags by name; the only tool that finds artists.
 
     Always use this for artist/style lookups ('art by wlop', 'style of …') —
@@ -257,7 +336,7 @@ async def danbooru_search_artists(query: str) -> str:
     """
     q = (query or "").strip().lower().replace(" ", "_")
     if not q:
-        return "No query given."
+        return _text_fail("No query given.")
     try:
         data = await _get_json(
             _danbooru_throttle,
@@ -271,13 +350,16 @@ async def danbooru_search_artists(query: str) -> str:
             },
         )
     except Exception as e:
-        return f"Artist search for '{q}' failed: {e}"
+        return _text_fail(f"Artist search for '{q}' failed: {e}", query=q)
     if not data:
-        return (
-            f"No artist tags match '{q}'. Try the artist's romanized name "
-            "or a shorter fragment of it."
-        )
-    return f"Artist tags matching '{q}':\n" + "\n".join(_tag_line(t) for t in data)
+        text = f"No artist tags match '{q}'. Try the artist's romanized name or a shorter fragment of it."
+        return _text_ok(text, text, query=q, tags=[])
+    return _text_ok(
+        f"Found {len(data)} artist tag match(es).",
+        f"Artist tags matching '{q}':\n" + "\n".join(_tag_line(t) for t in data),
+        query=q,
+        tags=[{"name": t.get("name"), "post_count": t.get("post_count", 0)} for t in data],
+    )
 
 
 @tool(
@@ -285,7 +367,16 @@ async def danbooru_search_artists(query: str) -> str:
     instructions="Use to expand a prompt theme from a known valid tag. Pass one tag using underscores, not a free-form phrase.",
     show_result=True,
 )
-async def danbooru_related_tags(tag: str) -> str:
+async def danbooru_related_tags(
+    tag: Annotated[
+        str,
+        Field(
+            min_length=1,
+            pattern=r"^[^\s]+$",
+            description="One valid Danbooru tag using underscores instead of spaces.",
+        ),
+    ],
+) -> DanbooruOutput:
     """List the tags that most often co-occur with `tag` on Danbooru posts.
 
     Use to expand a theme: given 'collarbone' it returns what real posts pair
@@ -293,7 +384,7 @@ async def danbooru_related_tags(tag: str) -> str:
     """
     t = (tag or "").strip().lower().replace(" ", "_")
     if not t:
-        return "No tag given."
+        return _text_fail("No tag given.")
     try:
         data = await _get_json(
             _danbooru_throttle,
@@ -301,12 +392,25 @@ async def danbooru_related_tags(tag: str) -> str:
             params={"search[query]": t, "limit": 25},
         )
     except Exception as e:
-        return f"Related-tag lookup for '{t}' failed: {e}"
+        return _text_fail(f"Related-tag lookup for '{t}' failed: {e}", tag=t)
     related = data.get("related_tags") or []
     if not related:
-        return f"No related tags found for '{t}' (is it a valid tag?)."
+        text = f"No related tags found for '{t}' (is it a valid tag?)."
+        return _text_ok(text, text, tag=t, related_tags=[])
     lines = [_tag_line(r.get("tag") or {}) for r in related]
-    return f"Tags co-occurring with '{t}':\n" + "\n".join(lines)
+    return _text_ok(
+        f"Found {len(related)} related tag(s).",
+        f"Tags co-occurring with '{t}':\n" + "\n".join(lines),
+        tag=t,
+        related_tags=[
+            {
+                "name": (r.get("tag") or {}).get("name"),
+                "category": _TAG_CATEGORIES.get((r.get("tag") or {}).get("category"), "?"),
+                "post_count": (r.get("tag") or {}).get("post_count", 0),
+            }
+            for r in related
+        ],
+    )
 
 
 @tool(
@@ -316,7 +420,15 @@ async def danbooru_related_tags(tag: str) -> str:
     ),
     show_result=True,
 )
-async def danbooru_post_tags(tags: str) -> str:
+async def danbooru_post_tags(
+    tags: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description="Danbooru post search query, normally one or two tags.",
+        ),
+    ],
+) -> DanbooruOutput:
     """Show the full tag lists of recent Danbooru posts matching a tag search.
 
     Use to see how real posts combine tags around a theme. `tags` is a Danbooru
@@ -325,7 +437,7 @@ async def danbooru_post_tags(tags: str) -> str:
     """
     q = (tags or "").strip()
     if not q:
-        return "No tags given."
+        return _text_fail("No tags given.")
     try:
         data = await _get_json(
             _danbooru_throttle,
@@ -333,9 +445,10 @@ async def danbooru_post_tags(tags: str) -> str:
             params={"tags": q, "limit": 5},
         )
     except Exception as e:
-        return f"Post search for '{q}' failed: {e}"
+        return _text_fail(f"Post search for '{q}' failed: {e}", tags=q)
     if not data:
-        return f"No posts match '{q}'."
+        text = f"No posts match '{q}'."
+        return _text_ok(text, text, tags=q, posts=[])
     blocks = []
     for p in data:
         lines = [f"Post {p.get('id')} (score {p.get('score', 0)}, rating {p.get('rating', '?')}):"]
@@ -348,7 +461,22 @@ async def danbooru_post_tags(tags: str) -> str:
             if value:
                 lines.append(f"  {label}: {value}")
         blocks.append("\n".join(lines))
-    return "\n".join(blocks)
+    return _text_ok(
+        f"Found {len(data)} post(s).",
+        "\n".join(blocks),
+        tags=q,
+        posts=[
+            {
+                "id": p.get("id"),
+                "score": p.get("score", 0),
+                "rating": p.get("rating"),
+                "characters": (p.get("tag_string_character") or "").split(),
+                "copyright": (p.get("tag_string_copyright") or "").split(),
+                "general": (p.get("tag_string_general") or "").split(),
+            }
+            for p in data
+        ],
+    )
 
 
 @tool(
@@ -359,7 +487,12 @@ async def danbooru_post_tags(tags: str) -> str:
     ),
     show_result=True,
 )
-async def civitai_model(model_id: int) -> str:
+async def civitai_model(
+    model_id: Annotated[
+        int,
+        Field(gt=0, description="Numeric Civitai model id."),
+    ],
+) -> DanbooruOutput:
     """Fetch a Civitai model page by numeric id (e.g. 994401 for MatureRitual).
 
     Returns the model's name, type, tags, the author's usage notes (recommended
@@ -369,18 +502,31 @@ async def civitai_model(model_id: int) -> str:
     try:
         data = await _get_json(_civitai_throttle, f"{_CIVITAI}/models/{int(model_id)}")
     except Exception as e:
-        return f"Could not fetch Civitai model {model_id}: {e}"
+        return _text_fail(f"Could not fetch Civitai model {model_id}: {e}", model_id=model_id)
     versions = data.get("modelVersions") or []
     version_lines = [
         f"- {v.get('id')}: {v.get('name')} (base: {v.get('baseModel', '?')})"
         for v in versions[:10]
     ]
     description = _strip_html(data.get("description", ""))[:_DESCRIPTION_LIMIT]
-    return (
+    text = (
         f"Civitai model {model_id}: {data.get('name')}\n"
         f"Type: {data.get('type')}; tags: {', '.join(data.get('tags') or []) or '-'}\n"
         "Versions:\n" + ("\n".join(version_lines) or "- none") + "\n"
         f"Description: {description or '(none)'}"
+    )
+    return _text_ok(
+        f"Fetched Civitai model {model_id}.",
+        text,
+        model_id=model_id,
+        name=data.get("name"),
+        type=data.get("type"),
+        tags=data.get("tags") or [],
+        versions=[
+            {"id": v.get("id"), "name": v.get("name"), "base_model": v.get("baseModel")}
+            for v in versions[:10]
+        ],
+        description=description or "",
     )
 
 
@@ -389,7 +535,12 @@ async def civitai_model(model_id: int) -> str:
     instructions="Use for version-specific base model, trigger words, author notes, sampler, steps, CFG, or prompt templates.",
     show_result=True,
 )
-async def civitai_model_version(version_id: int) -> str:
+async def civitai_model_version(
+    version_id: Annotated[
+        int,
+        Field(gt=0, description="Numeric Civitai model version id."),
+    ],
+) -> DanbooruOutput:
     """Fetch one Civitai model version by id (e.g. 2730987) for its usage notes.
 
     Returns base model, trained/trigger words, and the version description —
@@ -400,15 +551,25 @@ async def civitai_model_version(version_id: int) -> str:
             _civitai_throttle, f"{_CIVITAI}/model-versions/{int(version_id)}"
         )
     except Exception as e:
-        return f"Could not fetch Civitai model version {version_id}: {e}"
+        return _text_fail(f"Could not fetch Civitai model version {version_id}: {e}", version_id=version_id)
     model = data.get("model") or {}
     words = ", ".join(data.get("trainedWords") or []) or "-"
     description = _strip_html(data.get("description", ""))[:_DESCRIPTION_LIMIT]
-    return (
+    text = (
         f"Civitai version {version_id}: {model.get('name')} — {data.get('name')}\n"
         f"Base model: {data.get('baseModel', '?')}\n"
         f"Trained words: {words}\n"
         f"Notes: {description or '(none)'}"
+    )
+    return _text_ok(
+        f"Fetched Civitai model version {version_id}.",
+        text,
+        version_id=version_id,
+        model_name=model.get("name"),
+        version_name=data.get("name"),
+        base_model=data.get("baseModel"),
+        trained_words=data.get("trainedWords") or [],
+        notes=description or "",
     )
 
 

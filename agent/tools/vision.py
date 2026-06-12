@@ -43,7 +43,11 @@ _HEADERS = {
 )
 async def view_image_from_url(
     url: Annotated[
-        str, Field(description="Direct HTTP(S) URL that returns image bytes.")
+        str,
+        Field(
+            min_length=8,
+            description="Direct HTTP(S) URL that returns image bytes.",
+        ),
     ],
 ) -> ToolResult:
     """Download an image from a URL so you can actually see and reason about it.

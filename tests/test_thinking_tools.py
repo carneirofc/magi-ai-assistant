@@ -10,6 +10,10 @@ from agent.model import ModelDefinition, ModelProviderEnum, build_model
 from agent.tools.thinking import build_thinking_tools
 
 
+def _tool_text(result: dict) -> str:
+    return result.get("message", "")
+
+
 def _model(**kwargs):
     return build_model(
         ModelDefinition(
@@ -34,7 +38,7 @@ def test_disable_thinking_reaches_request_params():
 
     msg = set_thinking.entrypoint(False)
 
-    assert "disabled" in msg
+    assert "disabled" in _tool_text(msg)
     body = model.get_request_params()["extra_body"]
     assert body["chat_template_kwargs"]["enable_thinking"] is False
 
@@ -78,8 +82,8 @@ def test_get_thinking_reports_state():
     model = _model()
     set_thinking, get_thinking = _tools(model)
 
-    assert "default" in get_thinking.entrypoint()
+    assert "default" in _tool_text(get_thinking.entrypoint())
     set_thinking.entrypoint(False)
-    assert "disabled" in get_thinking.entrypoint()
+    assert "disabled" in _tool_text(get_thinking.entrypoint())
     set_thinking.entrypoint(True)
-    assert "enabled" in get_thinking.entrypoint()
+    assert "enabled" in _tool_text(get_thinking.entrypoint())

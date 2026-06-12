@@ -23,6 +23,7 @@ import time
 from inspect import isasyncgen, isgenerator
 
 from agno.utils.log import log_error, log_info, log_warning
+from pydantic import BaseModel
 
 # agno names the delegation tool differently for single vs. parallel routing.
 _MEMBER_TOOLS = {"delegate_task_to_member", "delegate_task_to_members"}
@@ -33,7 +34,11 @@ _PREVIEW_LEN = 240
 
 def _preview(value: object) -> str:
     """One-line, length-capped repr for logs."""
-    text = " ".join(str(value).split())
+    if isinstance(value, BaseModel):
+        text = value.model_dump_json()
+    else:
+        text = str(value)
+    text = " ".join(text.split())
     return text if len(text) <= _PREVIEW_LEN else f"{text[:_PREVIEW_LEN]}…"
 
 
