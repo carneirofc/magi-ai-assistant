@@ -2,7 +2,7 @@
 
 To add a capability:
   1. Write a plain function in its own module under `agent/tools/`.
-  2. Decorate with @tool (the docstring tells the model when to call it).
+  2. Decorate with @tool(show_result=True) (the docstring tells the model when to call it).
   3. Import it here and add it to DEFAULT_TOOLS.
 
 `enabled_tools` is the single place agents and members resolve their tools, so

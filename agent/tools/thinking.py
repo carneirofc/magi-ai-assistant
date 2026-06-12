@@ -15,6 +15,7 @@ Thinking OFF makes tool calls parse reliably (verified on b9550).
 from collections.abc import Sequence
 
 from agno.models.base import Model
+from agno.tools import tool
 from agno.utils.log import log_info
 
 
@@ -26,6 +27,14 @@ def _kwargs_of(model: Model) -> dict:
 def build_thinking_tools(models: Sequence[Model]) -> list:
     """Tools bound to the live model instances (lead + the shared member model)."""
 
+    @tool(
+        description="Turn the team's model thinking/reasoning mode on or off.",
+        instructions=(
+            "Use when the user asks to enable or disable thinking/reasoning. "
+            "The change is global and takes effect from the next reply."
+        ),
+        show_result=True,
+    )
     def set_thinking(enabled: bool) -> str:
         """Turn the model's internal thinking/reasoning mode on or off.
 
@@ -44,6 +53,11 @@ def build_thinking_tools(models: Sequence[Model]) -> list:
         state = "enabled" if enabled else "disabled"
         return f"Thinking is now {state} (takes effect from the next reply)."
 
+    @tool(
+        description="Report whether model thinking/reasoning mode is enabled.",
+        instructions="Use when the user asks whether thinking/reasoning is on. Takes no arguments.",
+        show_result=True,
+    )
     def get_thinking() -> str:
         """Report whether the thinking/reasoning mode is currently on or off."""
         state = _kwargs_of(models[0]).get("enable_thinking")

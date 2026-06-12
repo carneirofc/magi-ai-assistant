@@ -104,7 +104,14 @@ def _tag_line(info: dict) -> str:
     return f"- {info.get('name')} ({category}, {info.get('post_count', 0)} posts)"
 
 
-@tool
+@tool(
+    description="Fetch a Danbooru wiki page by exact title for tag definitions or curated tag lists.",
+    instructions=(
+        "Use for pages such as list_of_* or tag_group:* and for single-tag definitions. "
+        "Titles are normalized to lowercase underscores; returned [[links]] can be fetched next."
+    ),
+    show_result=True,
+)
 async def danbooru_wiki(title: str) -> str:
     """Fetch a Danbooru wiki page by title, e.g. 'list_of_uniforms' or 'collarbone'.
 
@@ -147,7 +154,11 @@ async def danbooru_wiki(title: str) -> str:
     return f"Wiki '{data.get('title', slug)}':\n{body or '(empty page)'}"
 
 
-@tool
+@tool(
+    description="Search Danbooru wiki page titles by fuzzy phrase or wildcard pattern.",
+    instructions="Use when the exact wiki title is unknown. Fetch interesting returned titles with danbooru_wiki.",
+    show_result=True,
+)
 async def danbooru_wiki_search(query: str) -> str:
     """Find Danbooru wiki page titles loosely matching a phrase or pattern.
 
@@ -178,7 +189,14 @@ async def danbooru_wiki_search(query: str) -> str:
     return f"Wiki pages matching '{q}':\n" + "\n".join(f"- {p.get('title')}" for p in data)
 
 
-@tool
+@tool(
+    description="Search Danbooru non-artist tags and verify whether a tag exists.",
+    instructions=(
+        "Use for general, character, copyright, and meta tags. Do not use for artists; "
+        "call danbooru_search_artists for artist/style tags."
+    ),
+    show_result=True,
+)
 async def danbooru_search_tags(query: str) -> str:
     """Search Danbooru general/character/copyright tags; use to verify a tag exists.
 
@@ -219,7 +237,14 @@ async def danbooru_search_tags(query: str) -> str:
     return f"Tags matching '{q}':\n" + "\n".join(_tag_line(t) for t in data)
 
 
-@tool
+@tool(
+    description="Search Danbooru artist tags by name.",
+    instructions=(
+        "Use for artist or style lookups. Query with romanized names or shorter fragments; "
+        "this is the only Danbooru tool intended to verify artist tags."
+    ),
+    show_result=True,
+)
 async def danbooru_search_artists(query: str) -> str:
     """Search Danbooru ARTIST tags by name; the only tool that finds artists.
 
@@ -255,7 +280,11 @@ async def danbooru_search_artists(query: str) -> str:
     return f"Artist tags matching '{q}':\n" + "\n".join(_tag_line(t) for t in data)
 
 
-@tool
+@tool(
+    description="List tags that commonly co-occur with one valid Danbooru tag.",
+    instructions="Use to expand a prompt theme from a known valid tag. Pass one tag using underscores, not a free-form phrase.",
+    show_result=True,
+)
 async def danbooru_related_tags(tag: str) -> str:
     """List the tags that most often co-occur with `tag` on Danbooru posts.
 
@@ -280,7 +309,13 @@ async def danbooru_related_tags(tag: str) -> str:
     return f"Tags co-occurring with '{t}':\n" + "\n".join(lines)
 
 
-@tool
+@tool(
+    description="Show full tag lists from recent Danbooru posts matching a tag query.",
+    instructions=(
+        "Use to see how real posts combine tags around a theme. Anonymous Danbooru search allows at most two tags."
+    ),
+    show_result=True,
+)
 async def danbooru_post_tags(tags: str) -> str:
     """Show the full tag lists of recent Danbooru posts matching a tag search.
 
@@ -316,7 +351,14 @@ async def danbooru_post_tags(tags: str) -> str:
     return "\n".join(blocks)
 
 
-@tool
+@tool(
+    description="Fetch a Civitai model page by numeric model id.",
+    instructions=(
+        "Use for model-level metadata, tags, author notes, and available version ids. "
+        "Use civitai_model_version for version-specific trigger words and settings."
+    ),
+    show_result=True,
+)
 async def civitai_model(model_id: int) -> str:
     """Fetch a Civitai model page by numeric id (e.g. 994401 for MatureRitual).
 
@@ -342,7 +384,11 @@ async def civitai_model(model_id: int) -> str:
     )
 
 
-@tool
+@tool(
+    description="Fetch one Civitai model version by numeric version id.",
+    instructions="Use for version-specific base model, trigger words, author notes, sampler, steps, CFG, or prompt templates.",
+    show_result=True,
+)
 async def civitai_model_version(version_id: int) -> str:
     """Fetch one Civitai model version by id (e.g. 2730987) for its usage notes.
 

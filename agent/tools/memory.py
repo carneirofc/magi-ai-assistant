@@ -14,7 +14,14 @@ from core.memory import MemoryManager
 def build_memory_tools(memory: MemoryManager) -> list:
     """Return the memory tool set bound to `memory` (dependency-injected)."""
 
-    @tool
+    @tool(
+        description="Save one durable long-term fact about the current user.",
+        instructions=(
+            "Use only for stable, reusable facts such as preferences, name, projects, "
+            "or recurring needs. Write the fact as a standalone statement."
+        ),
+        show_result=True,
+    )
     def remember(fact: str) -> str:
         """Save a durable fact about the current user to long-term memory.
 
@@ -23,7 +30,14 @@ def build_memory_tools(memory: MemoryManager) -> list:
         """
         return memory.remember(fact)
 
-    @tool
+    @tool(
+        description="Record a one-line episodic summary of the current interaction.",
+        instructions=(
+            "Use at a natural close or after a notable outcome. Summarize what the "
+            "user wanted and how the interaction went."
+        ),
+        show_result=True,
+    )
     def record_episode(summary: str) -> str:
         """Log a one-line summary of what happened in this interaction (episodic memory).
 
@@ -32,17 +46,32 @@ def build_memory_tools(memory: MemoryManager) -> list:
         """
         return memory.record_episode(summary)
 
-    @tool
+    @tool(
+        description="Recall all long-term facts remembered about the current user.",
+        instructions="Use when prior user preferences or durable facts may affect the answer. Takes no arguments.",
+        show_result=True,
+    )
     def recall_memory() -> str:
         """Return everything you remember about the current user (long-term facts)."""
         return memory.recall_long_term()
 
-    @tool
+    @tool(
+        description="Recall recent episodic memory summaries for the current user.",
+        instructions="Use to inspect recent interaction history. The optional limit defaults to 5.",
+        show_result=True,
+    )
     def recall_episodes(limit: int = 5) -> str:
         """Return summaries of the most recent past episodes with the current user."""
         return memory.recall_episodes(limit)
 
-    @tool
+    @tool(
+        description="Record a lasting adjustment to the assistant's persona or behavior.",
+        instructions=(
+            "Use only for deliberate general behavior rules learned from an interaction, "
+            "not one-off reactions or user-specific facts."
+        ),
+        show_result=True,
+    )
     def evolve_persona(adjustment: str) -> str:
         """Record a lasting adjustment to your own personality or behavior.
 

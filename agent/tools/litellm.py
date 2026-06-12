@@ -29,7 +29,11 @@ def _get(path: str, timeout: float = _TIMEOUT) -> dict:
     return r.json()
 
 
-@tool
+@tool(
+    description="List model names served by the configured LiteLLM proxy.",
+    instructions="Use when asked which LiteLLM models are configured or callable by the app. Takes no arguments.",
+    show_result=True,
+)
 def list_litellm_models() -> str:
     """List the model_names served by the LiteLLM proxy.
 
@@ -46,7 +50,11 @@ def list_litellm_models() -> str:
     return "LiteLLM models:\n" + "\n".join(f"- {i}" for i in ids)
 
 
-@tool
+@tool(
+    description="Show LiteLLM model-name to backend mappings and token limits.",
+    instructions="Use to identify which provider/backend a LiteLLM model routes to. Optional model filters by model_name.",
+    show_result=True,
+)
 def litellm_model_info(model: str | None = None) -> str:
     """Show LiteLLM model_name -> backend mapping (and per-model token limits).
 
@@ -74,7 +82,11 @@ def litellm_model_info(model: str | None = None) -> str:
     return "LiteLLM model mapping:\n" + "\n".join(lines)
 
 
-@tool
+@tool(
+    description="Check LiteLLM proxy health for configured model endpoints.",
+    instructions="Use to diagnose model-call failures through LiteLLM. This can take a few seconds. Takes no arguments.",
+    show_result=True,
+)
 def litellm_health() -> str:
     """Check LiteLLM proxy health: which model endpoints are healthy/unhealthy.
 

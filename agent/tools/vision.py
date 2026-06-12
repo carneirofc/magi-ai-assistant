@@ -12,11 +12,14 @@ appends a follow-up user message carrying that image, so the bytes land in the
 model's context for its next step — it actually looks instead of guessing.
 """
 
+from typing import Annotated
+
 import httpx
 from agno.media import Image
 from agno.tools import tool
 from agno.tools.function import ToolResult
 from agno.utils.log import log_info, log_warning
+from pydantic import Field
 
 from core.media import view_only_id
 
@@ -25,11 +28,24 @@ from core.media import view_only_id
 _MAX_IMAGE_BYTES = 20 * 1024 * 1024
 _FETCH_TIMEOUT_S = 20.0
 # A browser-ish UA: some CDNs (Discord's included) 403 the default httpx agent.
-_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; AlyssaBot/1.0; +https://discord.com)"}
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; AlyssaBot/1.0; +https://discord.com)"
+}
 
 
-@tool
-async def view_image_from_url(url: str) -> ToolResult:
+@tool(
+    description="Download a direct image URL into the model context for visual inspection.",
+    instructions=(
+        "Use for direct HTTP(S) image links the user wants analyzed. This is view-only and not delivered "
+        "to the user; use send_media_from_url to attach media in the final reply."
+    ),
+    show_result=True,
+)
+async def view_image_from_url(
+    url: Annotated[
+        str, Field(description="Direct HTTP(S) URL that returns image bytes.")
+    ],
+) -> ToolResult:
     """Download an image from a URL so you can actually see and reason about it.
 
     Use this whenever the user shares a direct link to an image (a URL ending in
@@ -57,7 +73,9 @@ async def view_image_from_url(url: str) -> ToolResult:
             resp.raise_for_status()
     except httpx.HTTPStatusError as exc:
         log_warning(f"view_image_from_url: HTTP {exc.response.status_code} for {url}")
-        return ToolResult(content=f"Could not fetch image: HTTP {exc.response.status_code} for {url}")
+        return ToolResult(
+            content=f"Could not fetch image: HTTP {exc.response.status_code} for {url}"
+        )
     except httpx.HTTPError as exc:
         log_warning(f"view_image_from_url: fetch failed for {url}: {exc}")
         return ToolResult(content=f"Could not fetch image from {url}: {exc}")
@@ -84,7 +102,9 @@ async def view_image_from_url(url: str) -> ToolResult:
         content=f"Loaded the image from {url} ({ctype}, {len(data)} bytes). It is now visible to you.",
         # view-only id: this image is model input, not a deliverable — reply
         # media collection (core/media.py) must not repost it to the user.
-        images=[Image(id=view_only_id(), content=data, mime_type=ctype, format=subtype)],
+        images=[
+            Image(id=view_only_id(), content=data, mime_type=ctype, format=subtype)
+        ],
     )
 
 

@@ -15,13 +15,14 @@ media never enters the model's context, so a vision-only backend never sees an
 
 import mimetypes
 from pathlib import Path
-from typing import Final, Optional
+from typing import Annotated, Final, Optional
 from urllib.parse import urlparse
 
 import httpx
 from agno.media import Audio, File, Image, Video
 from agno.tools import tool
 from agno.utils.log import log_info, log_warning
+from pydantic import Field
 
 from core.media import stage_media
 
@@ -46,8 +47,21 @@ def _filename(url: str, ctype: str, explicit: Optional[str]) -> str:
     return f"attachment{ext}"
 
 
-@tool
-async def send_media_from_url(url: str, filename: Optional[str] = None) -> str:
+@tool(
+    description="Fetch a direct URL and attach the file to the user's reply as real media.",
+    instructions=(
+        "Use when the deliverable is the actual file, image, audio, or video rather than a link. "
+        "This does not load the media into model context; use view_image_from_url when you need to inspect pixels."
+    ),
+    show_result=True,
+)
+async def send_media_from_url(
+    url: Annotated[str, Field(description="Direct HTTP(S) URL of the file to attach.")],
+    filename: Annotated[
+        Optional[str],
+        Field(description="Optional display filename for the delivered attachment."),
+    ] = None,
+) -> str:
     """Fetch a file from a direct URL and deliver it to the user as a real
     attachment (image, audio, video, or document) instead of a link.
 

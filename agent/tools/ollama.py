@@ -36,7 +36,11 @@ def _context_length(model_info: dict) -> int | None:
     )
 
 
-@tool
+@tool(
+    description="List models installed on the configured Ollama server.",
+    instructions="Use when asked which local Ollama models are available. Takes no arguments.",
+    show_result=True,
+)
 def list_ollama_models() -> str:
     """List models installed on the Ollama server.
 
@@ -61,7 +65,11 @@ def list_ollama_models() -> str:
     return "Ollama models:\n" + "\n".join(lines)
 
 
-@tool
+@tool(
+    description="Show capabilities, context length, and details for one Ollama model.",
+    instructions="Use to check whether a local model supports tools, vision, or a required context window. Pass the exact Ollama model name.",
+    show_result=True,
+)
 def show_ollama_model(model: str) -> str:
     """Show details for one Ollama model: capabilities, context length, params.
 
@@ -85,7 +93,11 @@ def show_ollama_model(model: str) -> str:
     )
 
 
-@tool
+@tool(
+    description="List Ollama models currently loaded in memory.",
+    instructions="Use to see which models are running now and what context size they loaded with. Takes no arguments.",
+    show_result=True,
+)
 def list_running_ollama_models() -> str:
     """List models currently loaded in Ollama memory, with loaded context size.
 
