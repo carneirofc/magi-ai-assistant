@@ -20,6 +20,7 @@ member response, which is the other way a member silently fails.
 """
 
 import time
+from inspect import isasyncgen, isgenerator
 
 from agno.utils.log import log_error, log_info, log_warning
 
@@ -36,6 +37,34 @@ def _preview(value: object) -> str:
     return text if len(text) <= _PREVIEW_LEN else f"{text[:_PREVIEW_LEN]}…"
 
 
+def _event_text(event: object) -> str:
+    content = getattr(event, "content", None)
+    if content:
+        return str(content)
+    event_type = getattr(event, "event", None) or type(event).__name__
+    return f"[{event_type}]"
+
+
+async def _materialize_result(result: object, label: str, function_name: str) -> object:
+    if isasyncgen(result):
+        parts: list[str] = []
+        async for event in result:
+            text = _event_text(event)
+            log_info(f"  {label} '{function_name}' event → {_preview(text)}")
+            if isinstance(event, str):
+                parts.append(event)
+        return "\n".join(part for part in parts if part)
+    if isgenerator(result):
+        parts = []
+        for event in result:
+            text = _event_text(event)
+            log_info(f"  {label} '{function_name}' event → {_preview(text)}")
+            if isinstance(event, str):
+                parts.append(event)
+        return "\n".join(part for part in parts if part)
+    return result
+
+
 async def tool_call_hook(function_name: str, function_call, arguments: dict):
     """Wrap one tool call: log it, time it, and turn failures into lead-visible text.
 
@@ -50,6 +79,7 @@ async def tool_call_hook(function_name: str, function_call, arguments: dict):
     started = time.perf_counter()
     try:
         result = await function_call(**arguments)
+        result = await _materialize_result(result, label, function_name)
     except Exception as exc:  # noqa: BLE001 — deliberately broad: keep the run alive.
         elapsed_ms = (time.perf_counter() - started) * 1000
         log_error(

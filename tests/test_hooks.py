@@ -32,3 +32,15 @@ async def test_hook_warns_on_empty_member_result(caplog):
 
     result = await tool_call_hook("delegate_task_to_member", empty, {"member_id": "x", "task": "t"})
     assert result == "   "  # passed through untouched
+
+
+async def test_hook_materializes_async_generator_member_result():
+    async def delegate(**kwargs):
+        async def events():
+            yield "first"
+            yield "second"
+
+        return events()
+
+    result = await tool_call_hook("delegate_task_to_member", delegate, {"member_id": "x", "task": "t"})
+    assert result == "first\nsecond"

@@ -23,6 +23,8 @@ def _model(**kwargs):
 
 def _tools(*models):
     set_thinking, get_thinking = build_thinking_tools(list(models))
+    assert set_thinking.show_result is True
+    assert get_thinking.show_result is True
     return set_thinking, get_thinking
 
 
@@ -30,7 +32,7 @@ def test_disable_thinking_reaches_request_params():
     model = _model()
     set_thinking, _ = _tools(model)
 
-    msg = set_thinking(False)
+    msg = set_thinking.entrypoint(False)
 
     assert "disabled" in msg
     body = model.get_request_params()["extra_body"]
@@ -42,7 +44,7 @@ def test_enable_thinking_overrides_env_default():
     model = _model(extra_body={"chat_template_kwargs": {"enable_thinking": False}})
     set_thinking, _ = _tools(model)
 
-    set_thinking(True)
+    set_thinking.entrypoint(True)
 
     body = model.get_request_params()["extra_body"]
     assert body["chat_template_kwargs"]["enable_thinking"] is True
@@ -53,7 +55,7 @@ def test_toggle_preserves_other_extra_body_keys():
     model = _model(extra_body={"top_k": 20, "min_p": 0})
     set_thinking, _ = _tools(model)
 
-    set_thinking(False)
+    set_thinking.entrypoint(False)
 
     body = model.get_request_params()["extra_body"]
     assert body["top_k"] == 20 and body["min_p"] == 0
@@ -65,7 +67,7 @@ def test_toggle_hits_every_model_in_the_team():
     lead, member = _model(), _model()
     set_thinking, _ = _tools(lead, member)
 
-    set_thinking(False)
+    set_thinking.entrypoint(False)
 
     for m in (lead, member):
         kwargs = m.get_request_params()["extra_body"]["chat_template_kwargs"]
@@ -76,8 +78,8 @@ def test_get_thinking_reports_state():
     model = _model()
     set_thinking, get_thinking = _tools(model)
 
-    assert "default" in get_thinking()
-    set_thinking(False)
-    assert "disabled" in get_thinking()
-    set_thinking(True)
-    assert "enabled" in get_thinking()
+    assert "default" in get_thinking.entrypoint()
+    set_thinking.entrypoint(False)
+    assert "disabled" in get_thinking.entrypoint()
+    set_thinking.entrypoint(True)
+    assert "enabled" in get_thinking.entrypoint()

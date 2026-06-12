@@ -3,9 +3,11 @@
 import json
 import re
 from datetime import UTC, datetime, timedelta
+from typing import Annotated
 
 from agno.tools import tool
 from agno.utils.log import log_info, log_warning
+from pydantic import Field
 
 from core.discord_context import get_current_discord_context
 
@@ -40,7 +42,11 @@ def _delete_intent_error(request_text: str) -> str | None:
     )
 
 
-@tool
+@tool(
+    description="Return the exact guild, channel, and message context for the current Discord conversation.",
+    instructions="Use before moderation actions or whenever exact Discord ids are needed. Never invent ids. Takes no arguments.",
+    show_result=True,
+)
 def describe_current_discord_context() -> str:
     """Return the exact guild/channel/message context for THIS Discord conversation.
 
@@ -51,8 +57,14 @@ def describe_current_discord_context() -> str:
     return json.dumps(context.as_dict(), indent=2)
 
 
-@tool
-async def list_recent_discord_messages(limit: int = 20) -> str:
+@tool(
+    description="List recent messages in the current Discord channel with concrete message ids.",
+    instructions="Use to identify message ids before deleting. Limit is clamped to 1-50; keep it small and practical.",
+    show_result=True,
+)
+async def list_recent_discord_messages(
+    limit: Annotated[int, Field(description="Number of recent messages to list, clamped to 1-50.")] = 20,
+) -> str:
     """List recent messages in the current Discord conversation with concrete ids.
 
     Use this to identify which messages the user means before deleting anything.
@@ -87,8 +99,17 @@ async def list_recent_discord_messages(limit: int = 20) -> str:
     )
 
 
-@tool
-async def delete_discord_message(message_id: str) -> str:
+@tool(
+    description="Delete one specific Discord message from the current channel by id.",
+    instructions=(
+        "Use only for explicit delete/remove/purge/clear-message requests after the target message is identified. "
+        "This cannot edit, rename, or affect other channels."
+    ),
+    show_result=True,
+)
+async def delete_discord_message(
+    message_id: Annotated[str, Field(description="Exact Discord message id to delete.")],
+) -> str:
     """Delete one specific message from the current Discord conversation by id.
 
     Use only after the user clearly identifies the target message. This tool
@@ -123,8 +144,20 @@ async def delete_discord_message(message_id: str) -> str:
         return f"Discord rejected deleting message {message_id}: {exc}."
 
 
-@tool
-async def delete_discord_messages(message_ids: list[str]) -> str:
+@tool(
+    description="Delete several specific Discord messages from the current channel by id.",
+    instructions=(
+        "Prefer over repeated single-message deletes when the user identified multiple targets. "
+        "Use only for explicit delete/remove/purge/clear-message requests."
+    ),
+    show_result=True,
+)
+async def delete_discord_messages(
+    message_ids: Annotated[
+        list[str],
+        Field(description="Exact Discord message ids to delete from the current channel."),
+    ],
+) -> str:
     """Delete several messages in the current conversation by id in one call.
 
     Prefer this over calling the single-message tool in a loop: it deletes the
@@ -157,8 +190,17 @@ async def delete_discord_messages(message_ids: list[str]) -> str:
     return f"Deleted {len(messages)} message(s) from {target}: {ids}"
 
 
-@tool
-async def delete_recent_discord_messages(count: int) -> str:
+@tool(
+    description="Delete the most recent non-pinned messages in the current Discord channel.",
+    instructions=(
+        "Use only when the user explicitly asks to clear/delete the last N recent messages in this conversation. "
+        "Count is clamped to 1-20; pinned and too-old messages are skipped."
+    ),
+    show_result=True,
+)
+async def delete_recent_discord_messages(
+    count: Annotated[int, Field(description="Number of recent non-pinned messages to delete, clamped to 1-20.")],
+) -> str:
     """Delete the most recent non-pinned messages in the current conversation.
 
     Use only when the user explicitly asks to clear the last N recent messages

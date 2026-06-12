@@ -17,7 +17,6 @@ from agno.db.base import BaseDb
 from agno.models.base import Model
 from agno.team import Team
 from agno.tools import tool
-from agno.tools.websearch import WebSearchTools
 from agno.utils.log import log_info
 
 from agent.hooks import tool_call_hook
@@ -40,6 +39,11 @@ def _build_introspection_tool(lead: Model, members):
     @tool(
         name="agent_introspection",
         description="Introspect self and the team's members and tools. Use to decide WHO to call for WHAT.",
+        instructions=(
+            "Use before delegation when routing is ambiguous or when you need the roster of specialist members. "
+            "Optional reason should briefly state what routing decision you are making."
+        ),
+        show_result=True,
     )
     def agent_introspection(reason: Optional[str] = None) -> str:
         lines = [
@@ -108,6 +112,8 @@ def build_team(
         add_member_tools_to_context=True,
         markdown=True,
         telemetry=False,
+        store_events=True,
+        store_member_responses=True,
         # Observability + robustness: log every member/tool call and convert a
         # raising tool into a lead-visible error instead of aborting the run.
         tool_hooks=[tool_call_hook],
@@ -115,7 +121,6 @@ def build_team(
         tool_call_limit=config.tool_call_limit,
         tools=[
             _build_introspection_tool(lead, members),
-            WebSearchTools(backend="duckduckgo"),
             # Lead is multimodal; this lets it pull an image URL into its own
             # context and actually look, instead of guessing from the link text.
             *VISION_TOOLS,

@@ -18,7 +18,8 @@ Safety is owned here, in our code, not delegated to the framework:
   - method is checked against an allowlist;
   - response size is capped so a huge body can't blow up the context;
   - private / loopback hosts are blocked unless `config.http_allow_private_hosts`
-    is set (SSRF guard — the model can be steered by untrusted page content).
+    is set, except GETs to Seanime's configured image-proxy endpoint (SSRF guard
+    — the model can be steered by untrusted page content).
 
 For image links use `view_image_from_url` (agent/tools/vision) instead — it loads
 pixels into context; these return text only.
@@ -27,12 +28,13 @@ pixels into context; these return text only.
 import asyncio
 import ipaddress
 import socket
-from typing import Any, Final
+from typing import Annotated, Any, Final
 from urllib.parse import urlsplit
 
 import httpx
 from agno.tools import tool
 from agno.utils.log import log_info, log_warning
+from pydantic import Field
 
 from core.config import config
 
@@ -57,14 +59,27 @@ def _scheme_ok(url: str) -> bool:
     return url.lower().startswith(("http://", "https://"))
 
 
-async def _host_allowed(url: str) -> tuple[bool, str]:
+def _is_seanime_image_proxy_get(url: str, method: str) -> bool:
+    if method.upper() != "GET":
+        return False
+    target = urlsplit(url)
+    base = urlsplit(config.seanime_base_url.rstrip("/"))
+    return (
+        target.scheme == base.scheme
+        and target.netloc == base.netloc
+        and target.path == "/api/v1/image-proxy"
+    )
+
+
+async def _host_allowed(url: str, method: str = "GET") -> tuple[bool, str]:
     """SSRF guard: resolve the URL's host and reject private/loopback targets.
 
     Returns (allowed, reason). Skipped entirely when the deployment opts into
     private hosts via `config.http_allow_private_hosts` (e.g. to reach a local
-    service on purpose).
+    service on purpose), or for GET requests to the configured Seanime image
+    proxy endpoint.
     """
-    if config.http_allow_private_hosts:
+    if config.http_allow_private_hosts or _is_seanime_image_proxy_get(url, method):
         return True, ""
     host = urlsplit(url).hostname
     if not host:
@@ -91,8 +106,20 @@ async def _host_allowed(url: str) -> tuple[bool, str]:
     return True, ""
 
 
-@tool
-async def http_get(url: str) -> str:
+@tool(
+    description="Fetch the text body of an HTTP(S) URL with a plain GET request.",
+    instructions=(
+        "Use for raw HTML, JSON, or text resources that need no auth, headers, "
+        "method, or body. For custom methods/headers/body use http_request; for image pixels use view_image_from_url."
+    ),
+    show_result=True,
+)
+async def http_get(
+    url: Annotated[
+        str,
+        Field(description="Full HTTP(S) URL to fetch with a plain GET request."),
+    ],
+) -> str:
     """Fetch the text body of an HTTP(S) URL via a GET request.
 
     Use this to read an API response (JSON), a web page's raw HTML, or any
@@ -108,7 +135,7 @@ async def http_get(url: str) -> str:
     if not _scheme_ok(url):
         return f"Refusing to fetch non-http(s) URL: {url!r}"
 
-    allowed, reason = await _host_allowed(url)
+    allowed, reason = await _host_allowed(url, method="GET")
     if not allowed:
         log_warning(f"http_get: blocked {url} ({reason})")
         return f"Refusing to fetch {url}: {reason}."
@@ -162,12 +189,28 @@ def _format_response(method: str, url: str, resp: httpx.Response) -> str:
     return "\n".join(lines)
 
 
-@tool
+@tool(
+    description="Perform one explicit HTTP request and return status, key headers, and body text.",
+    instructions=(
+        "Use only when the user supplied or clearly requested the URL and request details. "
+        "Do not invent auth headers or payloads. Mutating methods require clear user intent."
+    ),
+    show_result=True,
+)
 async def http_request(
-    url: str,
-    method: str = "GET",
-    headers: dict[str, str] | None = None,
-    body: str | None = None,
+    url: Annotated[str, Field(description="Full HTTP(S) URL to call.")],
+    method: Annotated[
+        str,
+        Field(description="HTTP method: GET, HEAD, POST, PUT, PATCH, DELETE, or OPTIONS."),
+    ] = "GET",
+    headers: Annotated[
+        dict[str, str] | None,
+        Field(description="Optional flat request headers, e.g. Authorization or Content-Type."),
+    ] = None,
+    body: Annotated[
+        str | None,
+        Field(description="Optional raw request body. For JSON, pass serialized JSON text."),
+    ] = None,
 ) -> str:
     """Perform one HTTP request the user described, returning its status and body.
 
@@ -198,7 +241,7 @@ async def http_request(
     if method not in _ALLOWED_METHODS:
         return f"Unsupported HTTP method {method!r}. Allowed: {', '.join(sorted(_ALLOWED_METHODS))}."
 
-    allowed, reason = await _host_allowed(url)
+    allowed, reason = await _host_allowed(url, method=method)
     if not allowed:
         log_warning(f"http_request: blocked {method} {url} ({reason})")
         return f"Refusing to call {url}: {reason}."
