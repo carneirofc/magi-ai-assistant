@@ -145,7 +145,10 @@ def build_team(
             f"collection={config.knowledge_collection})"
         )
 
-    instructions = load_prompt("team/lead.md")
+    # The lead's prompt is its soul (who Alyssa is) followed by the operational
+    # router (how she delegates and wields tools). SOUL.md establishes identity
+    # first so persona stays primary; lead.md supplies the hard rules and routing.
+    instructions = "\n\n".join((load_prompt("team/SOUL.md"), load_prompt("team/lead.md")))
     log_info(
         f"building team 'ChatbotTeam': lead={lead.id} (ctx={config.lead_num_ctx}, "
         f"temp={config.model_temperature}), member_model={member_model.id} "

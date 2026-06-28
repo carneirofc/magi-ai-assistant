@@ -20,7 +20,11 @@ def test_lead_routes_anime_media_to_seanime_not_generic_fetching():
 
     assert "covers, thumbnails, posters" in text
     assert "from Seanime" in text
-    assert "Do not use generic `http_get`, `send_media_from_url`, Assistant, or Researcher" in text
+    # Pin the routing guardrail by behavior, not by specific tool/member names
+    # (those live in tool docstrings and change): anime media must route to
+    # Seanime, never to generic fetching, except for an explicit non-Seanime URL.
+    assert "generic web-fetch or media-delivery tools" in text
+    assert "explicit non-Seanime URL" in text
     assert "show me a thumbnail for it" in text
 
 
