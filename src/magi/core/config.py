@@ -180,15 +180,23 @@ class Config:
     knowledge_chunk_chars: int = 1_200  # target chunk size before overlap
     knowledge_chunk_overlap: int = 150  # chars repeated between adjacent chunks
 
-    # --- Object storage (S3-compatible; see magi/core/storage + magi/agent/tools/storage).
-    # A durable file/image archive the model uses as memory: it can stash a file
+    # --- Object storage (see magi/core/storage + magi/agent/tools/storage). A
+    # durable file/image archive the model uses as memory: it can stash a file
     # under the current user's scope and recall it later by reference. Off by
-    # default; turn on per deployment via configure(). The default endpoint points
-    # at a local RustFS (S3-compatible) for testing — see docker-compose.yaml /
-    # README. Endpoint None => real AWS S3 (region used). Needs the optional `s3`
-    # extra: `uv sync --extra s3` (boto3 is lazy-imported; absent => tools off).
-    # Credentials are secrets (.env); bucket/region/endpoint live here in code. ---
-    s3_enabled: bool = False
+    # default; turn on per deployment via configure(). Two interchangeable
+    # backends, picked by `storage_backend`:
+    #   "local" — bytes on the filesystem under `storage_local_dir`. No server, no
+    #             boto3, no credentials; the zero-setup default once enabled.
+    #   "s3"    — any S3 API: real AWS S3 (endpoint None, region used) or a local
+    #             S3-compatible server like RustFS / MinIO (set the endpoint). The
+    #             default endpoint points at a local RustFS for testing — see
+    #             docker-compose.yaml / README. Needs the optional `s3` extra
+    #             (`uv sync --extra s3`; boto3 lazy-imported, absent => tools off).
+    # Credentials are secrets (.env); the rest lives here in code. The legacy
+    # `s3_enabled=True` still works (configure() maps it to storage_enabled). ---
+    storage_enabled: bool = False
+    storage_backend: str = "local"  # "local" | "s3"
+    storage_local_dir: str = "data/artifacts"
     s3_endpoint_url: str | None = "http://localhost:9000"
     s3_region: str = "us-east-1"
     s3_bucket: str = "chatbot-memory"
@@ -267,6 +275,17 @@ def configure(**overrides) -> Config:
     config` already holding the object sees the new values. The dataclass
     stays frozen so only this deliberate path can write.
     """
+    # Back-compat: object storage used to be S3-only and gated by `s3_enabled`.
+    # It's now backend-agnostic (`storage_enabled` + `storage_backend`); honor the
+    # old key so existing entrypoints keep working, and default to the S3 backend
+    # since that's what `s3_enabled` implied.
+    if "s3_enabled" in overrides:
+        legacy = overrides.pop("s3_enabled")
+        log_info("config: 's3_enabled' is deprecated — use storage_enabled + storage_backend")
+        overrides.setdefault("storage_enabled", legacy)
+        if legacy:
+            overrides.setdefault("storage_backend", "s3")
+
     valid = {f.name for f in fields(config)}
     for name, value in overrides.items():
         if name not in valid:

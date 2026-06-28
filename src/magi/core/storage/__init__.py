@@ -1,18 +1,30 @@
-"""Object storage — an S3-compatible durable file/image archive.
+"""Object storage — a durable file/image archive the model uses as memory.
 
-`magi/core/memory` keeps *text* the model decides to remember; this keeps *bytes*. The
-two are siblings: both are deliberate, scope-aware memory the model writes on
+`magi/core/memory` keeps *text* the model decides to remember; this keeps *bytes*.
+The two are siblings: both are deliberate, scope-aware memory the model writes on
 purpose, never framework auto-extraction. A file the user may want again — a
 generated image, a document, a reference picture — is stashed here under the
 current user's scope and recalled later by reference.
 
-This layer is model-free and side-effect-light: `S3Store` wraps a boto3 client
-(lazy-imported so the base install stays lean), and `build_s3_store_from_config`
-constructs it from `config`, degrading to `None` when storage is off or boto3 is
-absent. The model-facing tools (magi/agent/tools/storage.py) bind to a store + the
-memory manager for scope.
+Two interchangeable backends behind one duck-typed surface (put/get/exists/
+presign/list by raw key), selected by `config.storage_backend`:
+
+  - `LocalStore`  — bytes on the filesystem (no server, no boto3, no creds); the
+                    zero-setup default. See `local.py`.
+  - `S3Store`     — any S3-compatible bucket (AWS S3, RustFS, MinIO). See `s3.py`.
+
+`build_object_store_from_config()` is the single entry point: it returns the
+configured backend, or `None` when storage is off / unbuildable, so a deployment
+without it still boots cleanly. The model-facing tools (magi/agent/tools/storage.py)
+bind to whichever store it hands back plus the memory manager for scope.
 """
 
+from typing import Optional, Union
+
+from agno.utils.log import log_warning
+
+from magi.core.config import config
+from magi.core.storage.local import LocalStore, build_local_store_from_config
 from magi.core.storage.s3 import (
     ObjectInfo,
     S3Store,
@@ -22,9 +34,34 @@ from magi.core.storage.s3 import (
 )
 
 __all__ = [
+    "LocalStore",
     "ObjectInfo",
     "S3Store",
     "StorageError",
     "StoredObject",
+    "build_local_store_from_config",
+    "build_object_store_from_config",
     "build_s3_store_from_config",
 ]
+
+
+def build_object_store_from_config() -> Optional[Union[LocalStore, S3Store]]:
+    """The configured object store, or `None` when storage is off / unbuildable.
+
+    Dispatches on `config.storage_backend`: "local" => filesystem (always
+    buildable), "s3" => S3-compatible bucket (degrades to `None` without boto3).
+    Never raises — a misconfigured or down backend just leaves the storage tools
+    unattached so the rest of the app still boots.
+    """
+    if not config.storage_enabled:
+        return None
+    backend = (config.storage_backend or "local").strip().lower()
+    if backend == "local":
+        return build_local_store_from_config()
+    if backend == "s3":
+        return build_s3_store_from_config()
+    log_warning(
+        f"storage: unknown storage_backend {config.storage_backend!r} "
+        "(expected 'local' or 's3') — storage tools disabled"
+    )
+    return None

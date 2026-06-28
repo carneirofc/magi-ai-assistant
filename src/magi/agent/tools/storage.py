@@ -30,7 +30,7 @@ from magi.agent.tools.outputs import ToolOutput, fail, ok
 from magi.core.media import is_media_url_allowed, stage_bytes
 from magi.core.memory import MemoryManager
 from magi.core.memory.adapters import slug
-from magi.core.storage import ObjectInfo, S3Store, StorageError
+from magi.core.storage import LocalStore, ObjectInfo, S3Store, StorageError
 
 # Upload cap (a stored archive can be larger than an inline attachment); recall
 # attaches inline up to the channel-ish limit and otherwise hands back a URL.
@@ -87,8 +87,13 @@ def _filename(url: str, content_type: str, explicit: Optional[str]) -> str:
     return f"file{ext}"
 
 
-def build_storage_tools(store: S3Store, memory: MemoryManager) -> list:
-    """Return the object-storage tool set bound to `store` + `memory` (injected)."""
+def build_storage_tools(store: S3Store | LocalStore, memory: MemoryManager) -> list:
+    """Return the object-storage tool set bound to `store` + `memory` (injected).
+
+    `store` is any object-store backend (`LocalStore` or `S3Store`) — the tools
+    use only the shared duck-typed surface (put/get/presign/list), so they don't
+    care which is wired in.
+    """
 
     def _prefix() -> str:
         """Key prefix for the current user's archive (scope set by the channel)."""

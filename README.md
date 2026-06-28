@@ -1,9 +1,14 @@
-# chatbot
+# magi
 
 Personal multi-channel AI assistant on the [Agno](https://www.agno.com/) framework.
 One shared agent brain, many channel adapters. Model-agnostic — local
 llama.cpp `llama-server` by default (through the LiteLLM proxy, or direct with
 `MODEL_PROVIDER=llamacpp`); Claude via the proxy; Ollama kept as dormant fallback.
+
+> **The name.** *MAGI* is the supercomputer at the heart of NERV in *Neon Genesis
+> Evangelion* — three linked units (Melchior, Balthasar, Casper) that reason as
+> one and reach decisions by majority vote. The nod fits: one shared brain backed
+> by a roster of specialized members, speaking through many channels.
 
 ## Run
 
@@ -116,16 +121,35 @@ startup by `config.log_settings()`.
 
 ## Object storage (durable file archive)
 
-A durable, S3-compatible store the agent uses as **memory for bytes**: it can
-decide to archive a file or image the user may want again and recall it later by
-reference (`store_file` / `retrieve_file` / `list_files`). It's the byte-world
-sibling of the text memory in `magi/core/memory` — same idea, deliberate writes scoped
-per user. Code lives in `magi/core/storage` (the `S3Store`) and `magi/agent/tools/storage.py`
-(the model-facing tools). Recall delivers the actual bytes as an attachment; the
-bucket is a private archive, not a public file host.
+A durable store the agent uses as **memory for bytes**: it can decide to archive
+a file or image the user may want again and recall it later by reference
+(`store_file` / `retrieve_file` / `list_files`). It's the byte-world sibling of
+the text memory in `magi/core/memory` — same idea, deliberate writes scoped per
+user. Code lives in `magi/core/storage` and `magi/agent/tools/storage.py` (the
+model-facing tools). Recall delivers the actual bytes as an attachment; the
+archive is private, not a public file host.
 
-Off by default. Enabling it takes three things: a running S3 backend, the boto3
-extra, and credentials.
+Off by default. Two interchangeable backends, picked by `storage_backend`:
+
+- **`local`** (default once enabled) — bytes on the filesystem under
+  `storage_local_dir`. No server, no boto3, no credentials.
+- **`s3`** — any S3-compatible bucket (AWS S3, RustFS, MinIO). Needs the boto3
+  extra and credentials.
+
+### Local backend (zero setup)
+
+Nothing to install or run — just turn it on in the entrypoint (`main.py` /
+`main_api.py`):
+
+```python
+configure(
+    storage_enabled=True,
+    storage_backend="local",
+    storage_local_dir="data/artifacts",  # where the bytes land
+)
+```
+
+### S3 backend
 
 ```bash
 uv sync --extra s3        # installs boto3 (lazy-imported; absent => tools off)
@@ -143,15 +167,17 @@ Then turn it on in the entrypoint (`main.py` / `main_api.py`):
 
 ```python
 configure(
-    s3_enabled=True,
+    storage_enabled=True,
+    storage_backend="s3",
     s3_endpoint_url="http://localhost:9000",  # RustFS/MinIO; None => real AWS S3
     s3_bucket="chatbot-memory",
 )
 ```
 
-The store degrades gracefully: if `s3_enabled` is on but boto3 is missing or the
-backend is unreachable at startup, the tools are simply not attached and the bot
-boots normally.
+The store degrades gracefully: with the S3 backend selected, if boto3 is missing
+or the backend is unreachable at startup, the tools are simply not attached and
+the bot boots normally. (The legacy `s3_enabled=True` still works — `configure()`
+maps it to `storage_enabled` with the `s3` backend.)
 
 ### Launch RustFS for simple testing
 

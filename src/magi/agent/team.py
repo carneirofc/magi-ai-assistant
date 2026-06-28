@@ -36,7 +36,7 @@ from magi.core.db import get_db
 from magi.core.knowledge import build_knowledge_from_config
 from magi.core.memory import MemoryManager
 from magi.core.prompts import load_prompt
-from magi.core.storage import build_s3_store_from_config
+from magi.core.storage import build_object_store_from_config
 
 
 class IntrospectionMember(BaseModel):
@@ -65,7 +65,14 @@ def _build_introspection_tool(lead: Model, members):
             "Use before delegation when routing is ambiguous or when you need the roster of specialist members. "
             "Optional reason should briefly state what routing decision you are making."
         ),
-        show_result=True,
+        # No show_result: this is the lead's *internal* routing aid. Unlike the
+        # member data tools (whose show_result output is drained and re-summarized
+        # inside a member's stream), this tool runs at the team/lead level, so its
+        # result is yielded straight into the lead's user-facing stream. With
+        # show_result=True agno dumps the raw `str(ToolOutput(...))` envelope —
+        # `success=True status='ok' … data=IntrospectionData(…)` — as Alyssa's
+        # reply. The lead still receives the roster in its message history either
+        # way; it just no longer leaks to the user.
     )
     def agent_introspection(
         reason: Annotated[
@@ -119,19 +126,22 @@ def build_team(
         if not m.tool_hooks:
             m.tool_hooks = [tool_call_hook]
 
-    # Durable object storage (S3-compatible) — the model's byte archive. Gated by
-    # config and degrades to nothing when off / boto3 absent / backend unreachable,
-    # so a deployment without it (or with RustFS down) still boots cleanly.
+    # Durable object storage — the model's byte archive (local filesystem or an
+    # S3-compatible bucket, per config.storage_backend). Gated by config and
+    # degrades to nothing when off / boto3 absent / backend unreachable, so a
+    # deployment without it (or with its backend down) still boots cleanly.
     storage_tools: list = []
-    if config.s3_enabled:
-        store = build_s3_store_from_config()
+    if config.storage_enabled:
+        store = build_object_store_from_config()
         if store is not None:
             try:
                 store.ensure_bucket()
             except Exception as exc:  # noqa: BLE001 — a down backend must not abort startup.
-                log_info(f"storage: bucket check skipped ({type(exc).__name__}: {exc})")
+                log_info(f"storage: backend check skipped ({type(exc).__name__}: {exc})")
             storage_tools = build_storage_tools(store, memory)
-            log_info(f"storage: ENABLED ({len(storage_tools)} tools, bucket={config.s3_bucket})")
+            log_info(
+                f"storage: ENABLED ({len(storage_tools)} tools, backend={config.storage_backend})"
+            )
 
     # Knowledge layer (global RAG corpus) — read-only reference the lead can search.
     # Gated by config; degrades to nothing when off / Qdrant down / embeddings absent,
@@ -205,6 +215,9 @@ def build_team(
             # (http_request) without round-tripping through a member.
             *HTTP_TOOLS,
             *build_memory_tools(memory),
+            # Durable byte archive: keep a file/image for later, recall by
+            # reference (empty unless storage is enabled).
+            *storage_tools,
             # Search the global knowledge corpus (empty unless the feature is on).
             *knowledge_tools,
             # Bound to the live model objects: members all share `member_model`,

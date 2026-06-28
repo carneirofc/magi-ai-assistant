@@ -206,17 +206,18 @@ def build_s3_store_from_config() -> Optional[S3Store]:
     """Build the store from `config`, or `None` when storage is off / unbuildable.
 
     Returns `None` (with a warning) rather than raising, so a deployment that
-    flips `s3_enabled` without installing boto3 — or before its RustFS is up —
+    selects the S3 backend without installing boto3 — or before its RustFS is up —
     still boots; the storage tools simply aren't attached.
     """
-    if not config.s3_enabled:
+    if not config.storage_enabled:
         return None
     try:
         import boto3  # noqa: F401, PLC0415 — presence probe; real client built lazily.
     except ImportError:
         log_warning(
-            "storage: s3_enabled but boto3 is not installed — storage tools disabled. "
-            "Install the optional extra: `uv sync --extra s3`"
+            "storage: S3 backend selected but boto3 is not installed — storage tools "
+            "disabled. Install the optional extra (`uv sync --extra s3`) or set "
+            "storage_backend='local'."
         )
         return None
     store = S3Store(
