@@ -206,6 +206,12 @@ class Config:
     api_host: str = "127.0.0.1"
     api_port: int = 8000
     api_auth_token: str | None = _secret("API_AUTH_TOKEN")
+    # Browser clients are blocked by the same-origin policy unless the service
+    # returns CORS headers. List the web origins allowed to call /v1 (e.g.
+    # ["https://app.example.com"], or ["*"] to allow any). Empty = no CORS
+    # headers (same-origin / non-browser clients only). Auth is a Bearer token,
+    # not a cookie, so credentials are not allowed and "*" is safe.
+    api_cors_origins: list[str] = field(default_factory=list)
 
     def log_settings(self) -> None:
         """Dump the effective config to the console (secrets masked).
