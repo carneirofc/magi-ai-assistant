@@ -13,9 +13,9 @@ from core.config import configure
 def apply_deployment_config() -> None:
     """Deployment configuration, in code (secrets stay in .env — see core/config)."""
     configure(
-        # Same brain as the Discord bot: llama-server on :8080.
+        # Same brain as the Discord bot: llama-server on :8888.
         model_provider="llamacpp",
-        llamacpp_base_url="http://localhost:8080/v1",
+        llamacpp_base_url="http://127.0.0.1:8888/v1",
         lead_model_id="qwen3.5-9b",
         member_model_id="qwen3.5-9b",
         lead_num_ctx=128_000,  # == llama-server --ctx-size
@@ -23,13 +23,33 @@ def apply_deployment_config() -> None:
         model_temperature=None,  # defer to llama-server launch flags
         model_extra_body={"chat_template_kwargs": {"enable_thinking": False}},
         # Long-running sessions: fold turns that roll out of the live window into
-        # a rolling session summary, and condense long-term facts once they pile
-        # up — so context stays bounded over a long-lived client session.
+        # a rolling session summary so context stays bounded. Durable memory is
+        # owned by the post-turn curator (rewrites the long-term profile each turn).
         session_summary=True,
-        long_term_summary=True,
-        # HTTP binding for this service.
+        memory_curation=True,
+        # HTTP binding for this service. Bind 0.0.0.0 only behind a trusted proxy
+        # and with API_AUTH_TOKEN set.
         api_host="127.0.0.1",
         api_port=8000,
+        # Web clients: list the browser origins allowed to call /v1 (CORS). Empty
+        # = same-origin / non-browser only. Use ["*"] to allow any origin (safe
+        # here — auth is a Bearer token, not a cookie). Set the real app origins
+        # for a production web UI, e.g. ["https://app.example.com"].
+        api_cors_origins=["*"],
+        # Durable object storage — the model's private file/image archive (it can
+        # decide to stash a file and recall it later). Off by default. To turn on,
+        # run an S3-compatible backend (RustFS via docker-compose, see README),
+        # install boto3 (`uv sync --extra s3`), put S3_ACCESS_KEY_ID /
+        # S3_SECRET_ACCESS_KEY in .env, and uncomment:
+        # s3_enabled=True,
+        # s3_endpoint_url="http://localhost:9000",  # RustFS; None => AWS S3
+        # s3_bucket="chatbot-memory",
+        # Anime specialist source. False (default) = the hand-rolled Seanime HTTP
+        # tools. True = Seanime's built-in read-only MCP server at
+        # <seanime_base_url>/api/v1/mcp (enable it there via experimental.mcp, and
+        # install the optional extra: `uv sync --extra mcp`). The app opens the MCP
+        # connection at startup. One anime member either way.
+        # seanime_use_mcp=True,
     )
 
 

@@ -7,3 +7,5 @@ __pycache__/
 data/
 # Local Danbooru CSV dumps (config.danbooru_*_csv) — ~100 MB, not for git.
 artifacts/
+.claude/settings.json
+.claude/projects/C--Users-claud---Code---chatbot/memory/http-tools-ssrf-and-long-sessions.md
