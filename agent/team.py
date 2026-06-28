@@ -10,7 +10,7 @@ reconfigurable.
 """
 
 from collections.abc import Callable, Sequence
-from typing import Annotated, Any, Optional
+from typing import Annotated, Optional
 
 from agno.agent import Agent
 from agno.db.base import BaseDb
@@ -18,7 +18,7 @@ from agno.models.base import Model
 from agno.team import Team
 from agno.tools import tool
 from agno.utils.log import log_info
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from agent.hooks import tool_call_hook
 from agent.members import MEMBER_BUILDERS
@@ -26,13 +26,29 @@ from agent.model import build_lead_model, build_member_model
 from agent.tools.http import HTTP_TOOLS
 from agent.tools.media import MEDIA_TOOLS
 from agent.tools.memory import build_memory_tools
-from agent.tools.outputs import ok
+from agent.tools.outputs import ToolOutput, ok
 from agent.tools.thinking import build_thinking_tools
 from agent.tools.vision import VISION_TOOLS
 from core.config import config
 from core.db import get_db
 from core.memory import MemoryManager
 from core.prompts import load_prompt
+
+
+class IntrospectionMember(BaseModel):
+    """One specialist on the roster, as seen by the lead during introspection."""
+
+    name: str = Field(description="Member id the lead routes to.")
+    role: str = Field(description="What the member specializes in.")
+
+
+class IntrospectionData(BaseModel):
+    """Structured roster payload returned by `agent_introspection`."""
+
+    reason: str | None = Field(description="Why the lead introspected, if it said.")
+    lead_model: str = Field(description="Model id backing the lead.")
+    members: list[IntrospectionMember] = Field(description="The specialist roster.")
+    text: str = Field(description="Human-readable rendering of the roster.")
 
 
 def _build_introspection_tool(lead: Model, members):
@@ -55,7 +71,7 @@ def _build_introspection_tool(lead: Model, members):
                 description="Brief reason for introspecting the team roster and tools.",
             ),
         ] = None,
-    ) -> dict[str, Any]:
+    ) -> ToolOutput[IntrospectionData]:
         lines = [
             "Self-introspection:",
             f"Reason: {reason or 'not provided'}",
@@ -65,12 +81,12 @@ def _build_introspection_tool(lead: Model, members):
         lines += [f"- {m.name}: {m.role}" for m in members]
         return ok(
             "Team introspection completed.",
-            {
-                "reason": reason,
-                "lead_model": lead.id,
-                "members": [{"name": m.name, "role": m.role} for m in members],
-                "text": "\n".join(lines),
-            },
+            IntrospectionData(
+                reason=reason,
+                lead_model=lead.id,
+                members=[IntrospectionMember(name=m.name, role=m.role) for m in members],
+                text="\n".join(lines),
+            ),
         )
 
     return agent_introspection
