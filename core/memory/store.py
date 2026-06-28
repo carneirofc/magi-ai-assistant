@@ -7,14 +7,14 @@ so the raw conversation (role + content per turn) round-trips losslessly. Layout
       persona.md                         # evolved behavior (base: prompts/team/lead.md)
       users/<user>/
         long_term.md                     # durable facts learned about the user
-        long_term_summary.md             # durable profile (rewritten by the curator)
+        long_term_facts.json             # curated profile: id-addressable facts (curator)
         episodic.md                      # summaries of past interactions (episodes)
         sessions/<session>.json          # short-term: recent turns (capped), JSON
         sessions/<session>.summary.md    # rolling summary of this session so far
         sessions/<session>.pending.json  # evicted turns awaiting session summary
 
-This layer is pure IO: each file is one of three shapes (`BulletLog`, `Blob`,
-`JsonWindow` — see `adapters`), constructed with a resolved path. The global
+This layer is pure IO: each file is one of four shapes (`BulletLog`, `Blob`,
+`JsonWindow`, `JsonFacts` — see `adapters`), constructed with a resolved path. The global
 persona lives on the store; per-(user, session) files come from `scoped()`, which
 hands back a `ScopedMemory` bundle bound to that scope. No model calls, no scoping
 policy, no context assembly here — `MemoryManager` layers those on top.
@@ -22,7 +22,7 @@ policy, no context assembly here — `MemoryManager` layers those on top.
 
 from pathlib import Path
 
-from core.memory.adapters import Blob, BulletLog, JsonWindow, slug
+from core.memory.adapters import Blob, BulletLog, JsonFacts, JsonWindow, slug
 
 _PERSONA_HEADER = "Persona & evolved behavior"
 
@@ -37,9 +37,8 @@ class ScopedMemory:
         sessions = users / "sessions"
         sid = slug(session_id)
         self.long_term = BulletLog(users / "long_term.md", f"Long-term memory — user {user_id}")
-        self.long_term_summary = Blob(
-            users / "long_term_summary.md", f"Long-term summary — user {user_id}"
-        )
+        # The curated profile: id-addressable facts the curator mutates per-fact.
+        self.long_term_facts = JsonFacts(users / "long_term_facts.json")
         self.episodes = BulletLog(users / "episodic.md", f"Episodic memory — user {user_id}")
         self.live_turns = JsonWindow(sessions / f"{sid}.json")
         self.session_summary = Blob(

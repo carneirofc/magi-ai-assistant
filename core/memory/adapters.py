@@ -170,3 +170,82 @@ class JsonWindow:
 
     def delete(self) -> None:
         self.path.unlink(missing_ok=True)
+
+
+class JsonFacts:
+    """A JSON list of id-addressable facts: `[{"id", "text", "ts"}, ...]`.
+
+    Backs the curated long-term profile. Unlike `Blob` (replaced whole each turn),
+    facts are mutated individually so the curator can ADD / UPDATE / DELETE one at a
+    time without re-emitting the rest — the per-fact model. Ids are short, stable,
+    and never reused, so an UPDATE/DELETE the curator emits keeps targeting the same
+    fact across turns. Order is insertion order (oldest first).
+    """
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+
+    def read(self) -> list[dict]:
+        if not self.path.exists():
+            return []
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            # A corrupt/unreadable fact sheet must not break a chat — but silently
+            # dropping the whole profile would hide real data loss, so warn.
+            log_warning(
+                f"memory: unreadable fact sheet {self.path.name}, dropping it "
+                f"({type(exc).__name__}: {exc})"
+            )
+            return []
+        return data if isinstance(data, list) else []
+
+    def texts(self) -> list[str]:
+        """The fact bodies, in order (no ids) — for rendering into context."""
+        return [str(f.get("text", "")) for f in self.read() if f.get("text")]
+
+    def _write(self, facts: list[dict]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(facts, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def add(self, text: str) -> str:
+        """Append one fact with a fresh id; return that id."""
+        facts = self.read()
+        fact_id = uuid.uuid4().hex[:8]
+        facts.append({"id": fact_id, "text": text, "ts": _now()})
+        self._write(facts)
+        return fact_id
+
+    def update(self, fact_id: str, text: str) -> bool:
+        """Replace the text of `fact_id` in place. Returns whether it existed."""
+        facts = self.read()
+        for fact in facts:
+            if fact.get("id") == fact_id:
+                fact["text"] = text
+                fact["ts"] = _now()
+                self._write(facts)
+                return True
+        return False
+
+    def remove(self, fact_id: str) -> bool:
+        """Drop `fact_id`. Returns whether it existed."""
+        facts = self.read()
+        kept = [f for f in facts if f.get("id") != fact_id]
+        if len(kept) == len(facts):
+            return False
+        self._write(kept)
+        return True
+
+    def trim(self, max_entries: int) -> int:
+        """Keep only the newest `max_entries` facts (<= 0 disables). Returns dropped."""
+        if max_entries <= 0:
+            return 0
+        facts = self.read()
+        if len(facts) <= max_entries:
+            return 0
+        dropped = len(facts) - max_entries
+        self._write(facts[-max_entries:])
+        return dropped
+
+    def delete(self) -> None:
+        self.path.unlink(missing_ok=True)
