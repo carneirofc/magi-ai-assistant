@@ -1,6 +1,6 @@
-"""Three file-shape adapters the memory store is built from.
+"""Four file-shape adapters the memory store is built from.
 
-Every memory file is one of three shapes; each adapter is constructed with a path
+Every memory file is one of these shapes; each adapter is constructed with a path
 and owns the on-disk format for that shape. Nothing here knows about *kinds*
 (long-term vs episodes vs ...) or scope — that lives one layer up in the store's
 scope-bound bundle. Keeping the IO dumb is what makes memory auditable.
@@ -8,12 +8,16 @@ scope-bound bundle. Keeping the IO dumb is what makes memory auditable.
   - `BulletLog`   — append-only `- <ts> :: <content>` markdown (logs)
   - `Blob`        — single header + body, whole-file replace (summaries)
   - `JsonWindow`  — a JSON list of turn dicts (live window + pending buffer)
+  - `JsonFacts`   — a JSON list of id-addressable facts (the curated profile)
 """
 
 import json
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
+
+from agno.utils.log import log_warning
 
 
 def slug(value: object) -> str:
@@ -125,9 +129,15 @@ class JsonWindow:
             return []
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-            return data if isinstance(data, list) else []
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as exc:
+            # A corrupt/unreadable window must not break a chat — but silently
+            # dropping the whole turn history would hide real data loss, so warn.
+            log_warning(
+                f"memory: unreadable JSON window {self.path.name}, dropping it "
+                f"({type(exc).__name__}: {exc})"
+            )
             return []
+        return data if isinstance(data, list) else []
 
     def count(self) -> int:
         return len(self.read())

@@ -7,7 +7,7 @@ so the raw conversation (role + content per turn) round-trips losslessly. Layout
       persona.md                         # evolved behavior (base: prompts/team/lead.md)
       users/<user>/
         long_term.md                     # durable facts learned about the user
-        long_term_summary.md             # LLM-condensed profile of long_term.md
+        long_term_summary.md             # durable profile (rewritten by the curator)
         episodic.md                      # summaries of past interactions (episodes)
         sessions/<session>.json          # short-term: recent turns (capped), JSON
         sessions/<session>.summary.md    # rolling summary of this session so far
