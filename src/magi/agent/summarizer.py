@@ -1,11 +1,11 @@
 """LLM session summarizer — fold raw memory into compact form.
 
-The deliberate memory (core/memory) caps the live window; without summarization
+The deliberate memory (magi/core/memory) caps the live window; without summarization
 the turns that roll out of it are lost. This callable folds those evicted
 conversation turns into a rolling session summary. (Durable per-user memory is
-owned by the curator — see agent/curator.py — not summarized here.)
+owned by the curator — see magi/agent/curator.py — not summarized here.)
 
-It lives in the agent layer because it needs a model. `core/memory` stays
+It lives in the agent layer because it needs a model. `magi/core/memory` stays
 model-free and receives it only as an injected async callable (`SummarizeFn`).
 """
 

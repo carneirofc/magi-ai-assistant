@@ -12,12 +12,12 @@ python main.py          # Discord bot (needs DISCORD_BOT_TOKEN)
 python main_api.py      # standalone HTTP service for external clients
 ```
 
-Both serve the same brain (`channels/bootstrap.py`); only the transport differs.
+Both serve the same brain (`magi/channels/bootstrap.py`); only the transport differs.
 
 ## HTTP API
 
 For a desktop app or any other client. JSON over HTTP, session-scoped
-(see `channels/api.py` for the contract):
+(see `magi/channels/api.py` for the contract):
 
 ```
 GET  /healthz
@@ -108,7 +108,7 @@ conversation maps to its own server-side session automatically.
 ## Configuration
 
 Code-first: each entrypoint sets its deployment in `apply_deployment_config()`
-(see `main.py` / `main_api.py`); defaults live in `core/config.py`. Only
+(see `main.py` / `main_api.py`); defaults live in `magi/core/config.py`. Only
 secrets come from `.env` (`DISCORD_BOT_TOKEN`, `LITELLM_MASTER_KEY`,
 `LLAMACPP_API_KEY`, `QDRANT_API_KEY`, `API_AUTH_TOKEN` — the last gates `/v1`
 with `Authorization: Bearer <token>`). The effective values are printed at
@@ -119,8 +119,8 @@ startup by `config.log_settings()`.
 A durable, S3-compatible store the agent uses as **memory for bytes**: it can
 decide to archive a file or image the user may want again and recall it later by
 reference (`store_file` / `retrieve_file` / `list_files`). It's the byte-world
-sibling of the text memory in `core/memory` — same idea, deliberate writes scoped
-per user. Code lives in `core/storage` (the `S3Store`) and `agent/tools/storage.py`
+sibling of the text memory in `magi/core/memory` — same idea, deliberate writes scoped
+per user. Code lives in `magi/core/storage` (the `S3Store`) and `magi/agent/tools/storage.py`
 (the model-facing tools). Recall delivers the actual bytes as an attachment; the
 bucket is a private archive, not a public file host.
 

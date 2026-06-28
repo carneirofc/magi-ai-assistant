@@ -1,7 +1,7 @@
 """Memory curator — the post-turn pass that decides what durable memory to keep.
 
-Lives in the agent layer because it needs a model; `core/memory` receives it as
-an injected `CurateFn` (the same seam the summarizers use, see agent/summarizer).
+Lives in the agent layer because it needs a model; `magi/core/memory` receives it as
+an injected `CurateFn` (the same seam the summarizers use, see magi/agent/summarizer).
 Given one finished turn plus the user's current durable facts (each tagged with an
 id) and the persona, it returns a `CurationResult`: a list of per-fact operations
 (ADD/UPDATE/DELETE) when something durable changed, an optional episode at a

@@ -1,6 +1,6 @@
 """Knowledge tool — how the lead retrieves from the global reference corpus.
 
-The knowledge layer (core/knowledge) is a read-only RAG corpus, distinct from
+The knowledge layer (magi/core/knowledge) is a read-only RAG corpus, distinct from
 memory: memory is what the assistant knows about *this user*; knowledge is what
 the corpus says about a *topic*. Retrieval is a tool (a workflow the model invokes
 when it needs reference material) rather than always-injected context, so the

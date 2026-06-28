@@ -3,11 +3,11 @@
 Two paths bring media into a `ConversationReply`:
 
 1. The media outbox — a ContextVar holding this run's outgoing media. Tools
-   (agent/tools/media.py) *stage* deliverables here deliberately: the bytes
+   (magi/agent/tools/media.py) *stage* deliverables here deliberately: the bytes
    never enter the model's context (a vision-only backend chokes on audio
    parts, and a big image would burn tokens for nothing) — they ride straight
    to the channel with the reply. Same per-run ContextVar pattern as
-   `core.discord_context`.
+   `magi.core.discord_context`.
 2. Run-output media — whatever agno aggregated onto the RunOutput (tool-result
    media, member-run media, model-generated media). `view_image_from_url`
    marks its images VIEW-ONLY (the model loads them to *look*, not to repost),

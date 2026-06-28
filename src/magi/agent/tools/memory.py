@@ -1,7 +1,7 @@
 """Memory skills — how the lead deliberately *reads* its own memory.
 
 Durable memory is no longer written by the lead inline: the post-turn curator
-(agent/curator.py) owns it, rewriting the long-term profile and recording episodes
+(magi/agent/curator.py) owns it, rewriting the long-term profile and recording episodes
 off the reply path. So the lead keeps only read tools here — and it rarely needs
 even these, since `MemoryManager.build_context` already injects the current
 profile, episodes, and short-term window into every run. They exist for explicit,

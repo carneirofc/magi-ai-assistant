@@ -4,7 +4,7 @@ A Team has a lead model that reads each member's `role`, routes the message to t
 right specialist (or coordinates several), then merges their work into one reply
 in its own voice. Drop-in for a single Agent: `DiscordClient(team=build_team())`.
 
-Members live in `agent/members/` and are listed in `MEMBER_BUILDERS`. Everything
+Members live in `magi/agent/members/` and are listed in `MEMBER_BUILDERS`. Everything
 here is injectable (model via config, db via arg) so the team is testable and
 reconfigurable.
 """
@@ -169,7 +169,7 @@ def build_team(
         db=db or get_db(),
         # Memory is handled deliberately, not by the framework: we inject our own
         # short-term window + long-term + episodic + persona per run (see
-        # core/memory) and the lead writes back only via the memory tools. So we
+        # magi/core/memory) and the lead writes back only via the memory tools. So we
         # turn off agno's automatic history-stuffing and memory extraction.
         add_history_to_context=False,
         update_memory_on_run=False,
@@ -183,7 +183,7 @@ def build_team(
         store_member_responses=True,
         # Don't re-emit each member's granular run events (tool calls, reasoning,
         # run lifecycle) up through the delegate tool. They flood the logs — the
-        # tool hook drains and logs the delegate's stream (see agent/hooks.py) —
+        # tool hook drains and logs the delegate's stream (see magi/agent/hooks.py) —
         # and add nothing: a member's own tool calls are already logged by the
         # tool_hook we attach to every member above. The member's answer (its
         # RunContent deltas) still streams through; only the noise is dropped.
@@ -199,7 +199,7 @@ def build_team(
             # context and actually look, instead of guessing from the link text.
             *VISION_TOOLS,
             # Deliver a URL's actual bytes to the user as an attachment (image,
-            # audio, file) instead of pasting a link (see core/media.py outbox).
+            # audio, file) instead of pasting a link (see magi/core/media.py outbox).
             *MEDIA_TOOLS,
             # Read a URL (http_get) and perform an explicit user-described request
             # (http_request) without round-tripping through a member.

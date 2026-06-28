@@ -12,8 +12,8 @@ emits a small set of per-fact operations — ADD a new fact, UPDATE one that
 changed, DELETE one that's now wrong, or NOOP (the empty list) — instead of
 re-emitting the whole profile every turn. The latter grows unbounded with the
 profile and risks the model silently dropping facts on rewrite; the per-fact model
-touches only what the turn actually changed. `core/memory` stays model-free: the
-actual model call is an injected `CurateFn` built in `agent/curator.py`, the same
+touches only what the turn actually changed. `magi/core/memory` stays model-free: the
+actual model call is an injected `CurateFn` built in `magi/agent/curator.py`, the same
 seam the summarizers use. The manager applies the returned operations deterministically.
 """
 
@@ -70,5 +70,5 @@ class CurationResult:
 
 
 # An async curator: reads a turn + current durable memory, returns the changes.
-# Injected by the agent layer (agent/curator.py) so `core` stays model-free.
+# Injected by the agent layer (magi/agent/curator.py) so `core` stays model-free.
 CurateFn = Callable[[CurationInput], Awaitable[CurationResult]]

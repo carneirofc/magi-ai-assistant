@@ -2,7 +2,7 @@
 
 These let the lead treat an S3-compatible bucket as *memory for bytes*: stash a
 file the user may want again, recall it later, list what's kept. They are the
-byte-world sibling of the text memory tools (agent/tools/memory.py) and share its
+byte-world sibling of the text memory tools (magi/agent/tools/memory.py) and share its
 shape: `build_storage_tools(store, memory)` binds them to an injected `S3Store`
 plus the `MemoryManager`, and every object lives under a key prefix scoped to the
 current user — the channel sets that scope once per message, so the model calls

@@ -1,7 +1,7 @@
 """Text → vector via the LiteLLM proxy — the one place embedding happens.
 
-Both semantic memory (`core/memory/semantic`) and the knowledge layer
-(`core/knowledge`) turn text into vectors through the same proxy route, so the
+Both semantic memory (`magi/core/memory/semantic`) and the knowledge layer
+(`magi/core/knowledge`) turn text into vectors through the same proxy route, so the
 call lives here once rather than being copied into each. `core` stays model-free
 in spirit: this is an HTTP call to *our* proxy (the `litellm_proxy/` prefix routes
 it there, mirroring the model factory), not provider-SDK logic.

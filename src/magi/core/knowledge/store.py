@@ -1,6 +1,6 @@
 """The knowledge store — a Qdrant-backed RAG corpus the agent retrieves from.
 
-This is the *knowledge* sibling of semantic *memory* (`core/memory/semantic`),
+This is the *knowledge* sibling of semantic *memory* (`magi/core/memory/semantic`),
 and deliberately separate from it:
 
   - memory   : per-user, conversation-derived, mutated by the curator.

@@ -1,6 +1,6 @@
 """Seanime tools over MCP — the alternative anime specialist's tool surface.
 
-Where `agent/tools/seanime.py` hand-rolls HTTP calls against the Seanime REST
+Where `magi/agent/tools/seanime.py` hand-rolls HTTP calls against the Seanime REST
 API, this module instead connects to Seanime's *built-in* Model Context Protocol
 server (Streamable HTTP at `<seanime_base_url>/api/v1/mcp`, opt-in there via
 `experimental.mcp`). Seanime publishes a small, read-only tool set there —
@@ -57,7 +57,7 @@ def build_seanime_mcp_tools() -> "MCPTools":
     """The Seanime MCP toolkit, pointed at `config.seanime_mcp_url`.
 
     Returns an unconnected `MCPTools`; agno connects it on the owning agent's
-    first run (and the API pre-connects it at startup — see channels/api.py), at
+    first run (and the API pre-connects it at startup — see magi/channels/api.py), at
     which point the server's tools are discovered and registered.
     """
     try:

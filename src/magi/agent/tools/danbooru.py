@@ -5,7 +5,7 @@ precise. Tools return short human-readable strings and never raise: a down or
 rate-limiting site degrades to an error line the model can relay.
 
 Tag and wiki lookups are local-first: the CSV dumps in config.danbooru_tags_csv
-/ danbooru_wiki_csv (see agent/tools/danbooru_local) answer most queries with
+/ danbooru_wiki_csv (see magi/agent/tools/danbooru_local) answer most queries with
 no network at all; only a local miss (or missing files) hits the live site.
 
 Danbooru 429-bans impatient anonymous clients, so every call to a host goes

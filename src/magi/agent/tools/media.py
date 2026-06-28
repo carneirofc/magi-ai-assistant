@@ -4,7 +4,7 @@ The model often ends a task holding only a *link* to the thing the user asked
 for — an icon URL from a member agent, a cover from Seanime, a sound file. A
 link is not the deliverable; the user expects the image/audio itself in the
 chat. This tool fetches the bytes here and stages them in the per-run media
-outbox (core/media.py); the channel then posts them natively (Discord uploads
+outbox (magi/core/media.py); the channel then posts them natively (Discord uploads
 an attachment, the API serializes them).
 
 Staging — not returning the media in the ToolResult — is deliberate: outbox

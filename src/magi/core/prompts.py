@@ -10,7 +10,7 @@ supplies its *own* prompts without editing the public tree: it calls
 there wins over the bundled demo `prompts/`. Lookups fall back to the bundled
 copy, so the engine still boots out of the box with its neutral demo persona.
 
-Precedence for the system prompt lives in `core.config`: an explicit env var
+Precedence for the system prompt lives in `magi.core.config`: an explicit env var
 wins over the file. That keeps deploys overridable via env while making local
 editing a matter of touching markdown.
 """

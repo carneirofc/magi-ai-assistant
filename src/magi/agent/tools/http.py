@@ -21,7 +21,7 @@ Safety is owned here, in our code, not delegated to the framework:
     is set, except GETs to Seanime's configured image-proxy endpoint (SSRF guard
     — the model can be steered by untrusted page content).
 
-For image links use `view_image_from_url` (agent/tools/vision) instead — it loads
+For image links use `view_image_from_url` (magi/agent/tools/vision) instead — it loads
 pixels into context; these return text only.
 """
 

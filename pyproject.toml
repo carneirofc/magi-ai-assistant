@@ -24,22 +24,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Semantic memory search (SEMANTIC_MEMORY=1). Optional: core.memory.semantic
+# Semantic memory search (SEMANTIC_MEMORY=1). Optional: magi.core.memory.semantic
 # lazy-imports qdrant_client and no-ops when it's absent, so the base install
 # stays lean. Enable with: uv sync --extra semantic
 semantic = [
     "qdrant-client>=1.12.0",
 ]
-# Seanime-over-MCP (seanime_use_mcp=True). Optional: agent.tools.seanime_mcp
+# Seanime-over-MCP (seanime_use_mcp=True). Optional: magi.agent.tools.seanime_mcp
 # lazy-imports agno's MCPTools (which needs `mcp`) and only the MCP-backed anime
 # specialist touches it, so the base install stays lean. Enable with:
 # uv sync --extra mcp
 mcp = [
     "mcp>=1.9.0",
 ]
-# Object storage (s3_enabled=True). Optional: core.storage.s3 lazy-imports boto3
+# Object storage (s3_enabled=True). Optional: magi.core.storage.s3 lazy-imports boto3
 # and the factory no-ops when it's absent, so the base install stays lean. Backs
-# the model's durable file/image archive (agent.tools.storage) against any
+# the model's durable file/image archive (magi.agent.tools.storage) against any
 # S3-compatible server — RustFS/MinIO locally, or AWS S3. Enable with:
 # uv sync --extra s3
 s3 = [

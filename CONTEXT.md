@@ -48,7 +48,7 @@ fact sheet PER FACT — ADD / UPDATE / DELETE / NOOP — so it can update/supers
 not just append, without re-emitting the whole profile each turn. Optionally
 records an episode or evolves the persona. Runs off the reply path on a cheap
 model; replaces the lead's old inline write tools and the long-term fold.
-Model-free `core/memory` calls it as an injected `CurateFn` (`agent/curator.py`),
+Model-free `magi/core/memory` calls it as an injected `CurateFn` (`magi/agent/curator.py`),
 the same seam the summarizers use.
 _Avoid_: remember (the retired append-only lead tool).
 
@@ -62,12 +62,12 @@ Turns evicted from the live window, held until the next session fold consumes th
 The (user, session) a memory operation belongs to. Set once per message, read via
 a process-global ContextVar — never threaded as a tool argument.
 
-**Knowledge** (`core/knowledge`):
+**Knowledge** (`magi/core/knowledge`):
 A global, read-only RAG corpus the agent searches via the `search_knowledge` tool
 — distinct from **memory**: memory is per-user and conversation-derived (the
 curator owns it); knowledge is a shared *document* corpus, chunked + embedded
 *faithfully* (no LLM extraction, so retrieval returns source text) into its own
-Qdrant collection. Reuses the shared proxy embedder (`core/embeddings`) and the
+Qdrant collection. Reuses the shared proxy embedder (`magi/core/embeddings`) and the
 Qdrant endpoint. Populated out-of-band (`scripts/ingest_knowledge.py`); gated by
 `knowledge_enabled`; degrades to no tool when off / Qdrant down. Chunks carry a
 `scope` field (`"global"` today) — `store.search(scopes=…)` is the seam for

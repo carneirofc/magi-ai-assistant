@@ -2,7 +2,7 @@
 
 Owns the run + memory flow for one inbound message, free of any channel concern
 (no `discord` import, no formatting): scope the memory, assemble context, record
-the turn, run the agent/team, record the reply, and fold summaries. Channels feed
+the turn, run the magi/agent/team, record the reply, and fold summaries. Channels feed
 plain inputs in and render the plain `ConversationReply` out.
 
 `runner` is an agno `Agent` or `Team`; `memory` is a `MemoryManager`. Both are
@@ -65,7 +65,7 @@ class ConversationReply:
     """The result of handling one message, in channel-neutral terms.
 
     Media tuples hold agno media objects (`agno.media.Image` etc.) gathered
-    from the run output and the per-run outbox (see core/media.py); each
+    from the run output and the per-run outbox (see magi/core/media.py); each
     channel renders them its own way (Discord uploads attachments, the API
     serializes them).
     """

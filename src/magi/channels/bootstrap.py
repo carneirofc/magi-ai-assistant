@@ -36,7 +36,7 @@ def build_conversation_service(
     """Assemble the full conversation stack behind one channel-neutral service."""
     config.log_settings()
 
-    # The session summarizer needs a model, so the agent layer builds it; core/memory
+    # The session summarizer needs a model, so the agent layer builds it; magi/core/memory
     # stays model-free and receives it as an injected callable. Gated by config.
     session_fn = None
     if config.session_summary:
@@ -49,7 +49,7 @@ def build_conversation_service(
 
     # The curator owns durable memory when on (it supersedes the long-term
     # summarizer and the lead's write tools). Needs a model, so the agent layer
-    # builds it; core/memory receives it as an injected callable.
+    # builds it; magi/core/memory receives it as an injected callable.
     curate_fn = None
     if config.memory_curation:
         from magi.agent.curator import build_memory_curator

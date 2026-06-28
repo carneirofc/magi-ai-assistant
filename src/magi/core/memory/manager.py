@@ -19,8 +19,8 @@ that run resolves the right files. `build_context` assembles the block injected
 into the run so the model actually *sees* its memory.
 
 This layer is model-free: the two summarizers are injected as async callables by
-the agent layer (see `agent/summarizer.py`). Construction is done by `build_memory`
-(core/memory/__init__) — nothing is built inside `__init__`.
+the agent layer (see `magi/agent/summarizer.py`). Construction is done by `build_memory`
+(magi/core/memory/__init__) — nothing is built inside `__init__`.
 """
 
 from contextvars import ContextVar
@@ -35,7 +35,7 @@ from magi.core.memory.kinds import Episodes, LongTerm, Session, SummarizeFn
 from magi.core.memory.semantic import MemoryRetriever
 from magi.core.memory.store import FileMemoryStore, ScopedMemory
 
-# Re-exported for the agent layer (agent/summarizer.py, agent/curator.py) and
+# Re-exported for the agent layer (magi/agent/summarizer.py, magi/agent/curator.py) and
 # __init__; the canonical definitions live next to the code that consumes them.
 __all__ = ["MemoryManager", "MemoryScope", "SummarizeFn", "CurateFn"]
 
@@ -84,7 +84,7 @@ class MemoryManager:
         # Post-turn durable-memory curator (injected; None disables it). Owns the
         # long-term fact sheet when on — it revises it per-fact each turn (ADD/
         # UPDATE/DELETE) instead of the lead appending raw facts. See
-        # core/memory/curation.py + agent/curator.py.
+        # magi/core/memory/curation.py + magi/agent/curator.py.
         self._curate_fn = curate_fn
         # When set, long-term/episodes are also embedded into a vector store so a kind
         # render can retrieve only the top-k relevant entries instead of the whole

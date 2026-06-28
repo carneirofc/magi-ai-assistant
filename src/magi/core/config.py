@@ -4,7 +4,7 @@ Settings are plain Python: the `Config` dataclass below holds the defaults, and
 each entrypoint (main.py, main_discord.py, main_api.py) overrides what its
 deployment needs via `configure(...)` before building anything. To find out
 what a value is, read the entrypoint and this file — no env-var archaeology.
-The startup banner (`config.log_settings()`, called from channels/bootstrap.py)
+The startup banner (`config.log_settings()`, called from magi/channels/bootstrap.py)
 prints the effective values at runtime.
 
 Only *secrets* come from the environment / `.env` (tokens and API keys never
@@ -59,7 +59,7 @@ class Config:
     # Lead / router brain. For the proxy the id is a litellm model_name
     # (litellm.config.yaml); for direct llama-server it is cosmetic.
     lead_model_id: str = "qwen3.5-9b-llamacpp"
-    # Context budget for assembly/guardrails (core/memory). llama-server fixes
+    # Context budget for assembly/guardrails (magi/core/memory). llama-server fixes
     # the real window at launch — keep this equal to its --ctx-size; it is never
     # transmitted per-request (that was an Ollama runtime option).
     lead_num_ctx: int = 128_000
@@ -83,13 +83,13 @@ class Config:
     # --- Persistence (sessions + long-term user memories) ---
     db_file: str = "data/chatbot.db"
 
-    # --- Local Danbooru data (agent/tools/danbooru). CSV dumps that answer tag
+    # --- Local Danbooru data (magi/agent/tools/danbooru). CSV dumps that answer tag
     # and wiki lookups offline before falling back to the rate-limited live
     # site. Missing files are fine — tools then go straight to the API. ---
     danbooru_tags_csv: str = "artifacts/danbooru_tags.csv"
     danbooru_wiki_csv: str = "artifacts/danbooru_wiki_pages.csv"
 
-    # --- Deliberate memory (see core/memory). Plain markdown files the model
+    # --- Deliberate memory (see magi/core/memory). Plain markdown files the model
     # reads/writes on purpose via tools — NOT framework auto-extraction. ---
     memory_dir: str = "data/memory"
     short_term_max: int = 20  # turns kept per session
@@ -108,7 +108,7 @@ class Config:
     # loop forever delegating. None/0 = no limit.
     tool_call_limit: int = 12
 
-    # --- HTTP request tool (agent/tools/http). SSRF guard: the model can be
+    # --- HTTP request tool (magi/agent/tools/http). SSRF guard: the model can be
     # steered by untrusted page content, so by default it may not call private /
     # loopback hosts. Flip to True only for a deployment that must reach a local
     # service on purpose (keep the bind trusted). ---
@@ -139,7 +139,7 @@ class Config:
     # curation pass folds them in. ---
     long_term_recent_raw: int = 5  # raw facts kept alongside the curated profile
 
-    # --- Memory curator (see core/memory/curation + agent/curator). A cheap
+    # --- Memory curator (see magi/core/memory/curation + magi/agent/curator). A cheap
     # post-turn pass that owns durable memory: instead of the lead appending
     # facts inline (append-only, on the reply path), the curator reads each
     # finished turn and revises the long-term fact sheet PER FACT — ADD a new fact,
@@ -165,7 +165,7 @@ class Config:
     qdrant_api_key: str | None = _secret("QDRANT_API_KEY")
     semantic_top_k: int = 5
 
-    # --- Knowledge layer (RAG; see core/knowledge + agent/tools/knowledge). A
+    # --- Knowledge layer (RAG; see magi/core/knowledge + magi/agent/tools/knowledge). A
     # global, read-only reference corpus the agent retrieves from via the
     # search_knowledge tool — distinct from memory (per-user, conversation-derived).
     # Documents are chunked + embedded faithfully (NO LLM extraction) into a Qdrant
@@ -180,7 +180,7 @@ class Config:
     knowledge_chunk_chars: int = 1_200  # target chunk size before overlap
     knowledge_chunk_overlap: int = 150  # chars repeated between adjacent chunks
 
-    # --- Object storage (S3-compatible; see core/storage + agent/tools/storage).
+    # --- Object storage (S3-compatible; see magi/core/storage + magi/agent/tools/storage).
     # A durable file/image archive the model uses as memory: it can stash a file
     # under the current user's scope and recall it later by reference. Off by
     # default; turn on per deployment via configure(). The default endpoint points
@@ -198,14 +198,14 @@ class Config:
     # too large to attach inline.
     s3_presign_expiry: int = 3600
 
-    # --- Seanime media server (agent/tools/seanime). A dedicated client with a
+    # --- Seanime media server (magi/agent/tools/seanime). A dedicated client with a
     # fixed base URL — the model never chooses the host, so the http-tool SSRF
     # guard doesn't apply here. Token only needed when the server has a password
     # (sent as X-Seanime-Token). ---
     seanime_base_url: str = "http://127.0.0.1:43211"
     seanime_token: str | None = _secret("SEANIME_TOKEN")
 
-    # --- Seanime via MCP (agent/tools/seanime_mcp). An alternative anime
+    # --- Seanime via MCP (magi/agent/tools/seanime_mcp). An alternative anime
     # specialist that talks to Seanime's built-in read-only Model Context
     # Protocol server (Streamable HTTP at <base>/api/v1/mcp; opt-in there via
     # experimental.mcp) instead of the hand-rolled HTTP tools above. When
@@ -219,7 +219,7 @@ class Config:
     # --- Discord bot ---
     DISCORD_BOT_TOKEN: str | None = _secret("DISCORD_BOT_TOKEN")
 
-    # --- HTTP API service (channels/api). The standalone integration point for
+    # --- HTTP API service (magi/channels/api). The standalone integration point for
     # external clients (desktop app, web UI, ...). Bound to localhost by
     # default; api_auth_token (secret) gates /v1 with `Authorization: Bearer`. ---
     api_host: str = "127.0.0.1"
@@ -263,7 +263,7 @@ def configure(**overrides) -> Config:
     """Set deployment configuration in code — call once, at the entrypoint,
     before building any channel/team (values are read at build/run time).
 
-    Mutates the shared singleton in place so every `from core.config import
+    Mutates the shared singleton in place so every `from magi.core.config import
     config` already holding the object sees the new values. The dataclass
     stays frozen so only this deliberate path can write.
     """

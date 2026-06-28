@@ -124,7 +124,7 @@ async def view_image_from_url(
     return ToolResult(
         content=f"Loaded the image from {url} ({ctype}, {len(data)} bytes). It is now visible to you.",
         # view-only id: this image is model input, not a deliverable — reply
-        # media collection (core/media.py) must not repost it to the user.
+        # media collection (magi/core/media.py) must not repost it to the user.
         images=[
             Image(id=view_only_id(), content=data, mime_type=ctype, format=subtype)
         ],

@@ -29,8 +29,8 @@ def build_discord_client(db: BaseDb | None = None) -> DiscordClient:
 
     conversation = build_conversation_service(
         # Discord-only output rules, kept out of the base prompt so it stays
-        # channel-agnostic (see prompts/channels/discord.md).
-        channel_guidance=load_prompt("channels/discord.md"),
+        # channel-agnostic (see prompts/magi/channels/discord.md).
+        channel_guidance=load_prompt("magi/channels/discord.md"),
         db=db,
     )
 
