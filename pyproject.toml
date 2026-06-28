@@ -26,6 +26,13 @@ dependencies = [
 semantic = [
     "qdrant-client>=1.12.0",
 ]
+# Seanime-over-MCP (seanime_use_mcp=True). Optional: agent.tools.seanime_mcp
+# lazy-imports agno's MCPTools (which needs `mcp`) and only the MCP-backed anime
+# specialist touches it, so the base install stays lean. Enable with:
+# uv sync --extra mcp
+mcp = [
+    "mcp>=1.9.0",
+]
 
 [dependency-groups]
 dev = [

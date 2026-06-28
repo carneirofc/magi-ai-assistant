@@ -168,6 +168,17 @@ class Config:
     seanime_base_url: str = "http://127.0.0.1:43211"
     seanime_token: str | None = _secret("SEANIME_TOKEN")
 
+    # --- Seanime via MCP (agent/tools/seanime_mcp). An alternative anime
+    # specialist that talks to Seanime's built-in read-only Model Context
+    # Protocol server (Streamable HTTP at <base>/api/v1/mcp; opt-in there via
+    # experimental.mcp) instead of the hand-rolled HTTP tools above. When
+    # `seanime_use_mcp` is True the anime specialist is built from the MCP tools
+    # (search/collection/details/viewer-stats, read-only) — one anime member
+    # either way, selected at build time. Needs the optional `mcp` extra
+    # (uv sync --extra mcp); the same SEANIME_TOKEN rides as X-Seanime-Token. ---
+    seanime_use_mcp: bool = False
+    seanime_mcp_url: str = "http://127.0.0.1:43211/api/v1/mcp"
+
     # --- Discord bot ---
     DISCORD_BOT_TOKEN: str | None = _secret("DISCORD_BOT_TOKEN")
 
