@@ -9,7 +9,9 @@ user's collection, and viewer stats — and agno's `MCPTools` toolkit discovers
 them at connect time, so we don't redeclare any schemas here.
 
 Only one anime specialist runs at a time: `config.seanime_use_mcp` selects this
-MCP-backed variant over the direct-HTTP one (see `agent/members/seanime.py`).
+MCP-backed variant over the direct-HTTP one. The Seanime *member* that wires
+this surface is a persona specialist (e.g. alyssa.members.seanime), not an engine
+one — the engine ships only the read-only tool mechanism here.
 The trade-off is deliberate — the MCP surface is read-only and narrower (no
 library files, missing-episode/schedule/continuity views, browse filters, or
 progress mutations), but it rides Seanime's own contract instead of ours.

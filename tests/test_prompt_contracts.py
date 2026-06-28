@@ -15,17 +15,9 @@ def _prompt(path: str) -> str:
     return (ROOT / "prompts" / path).read_text(encoding="utf-8")
 
 
-def test_lead_routes_anime_media_to_seanime_not_generic_fetching():
-    text = _prompt("team/lead.md")
-
-    assert "covers, thumbnails, posters" in text
-    assert "from Seanime" in text
-    # Pin the routing guardrail by behavior, not by specific tool/member names
-    # (those live in tool docstrings and change): anime media must route to
-    # Seanime, never to generic fetching, except for an explicit non-Seanime URL.
-    assert "generic web-fetch or media-delivery tools" in text
-    assert "explicit non-Seanime URL" in text
-    assert "show me a thumbnail for it" in text
+# Persona-specific routing contracts (anime → Seanime, etc.) live with the
+# persona that owns those members — see alyssa/tests. The engine keeps only the
+# generic, persona-free guardrails its neutral demo lead.md still carries.
 
 
 def test_lead_forbids_unsourced_and_stale_media_urls():
@@ -41,15 +33,6 @@ def test_lead_forbids_inventing_urls_for_attached_images():
 
     assert "already in your context" in text
     assert "never mention a file-upload" in text.lower()
-
-
-def test_seanime_cover_contract_requires_current_tool_urls():
-    text = _prompt("team/seanime.md")
-
-    assert "thumbnail / cover / poster / image" in text
-    assert "Use only the cover URLs returned by Seanime tools" in text
-    assert "Do not reuse an image URL from an earlier assistant turn" in text
-    assert "from the same Seanime result" in text
 
 
 def test_media_tool_contract_is_delivery_only_not_search():
