@@ -33,6 +33,14 @@ semantic = [
 mcp = [
     "mcp>=1.9.0",
 ]
+# Object storage (s3_enabled=True). Optional: core.storage.s3 lazy-imports boto3
+# and the factory no-ops when it's absent, so the base install stays lean. Backs
+# the model's durable file/image archive (agent.tools.storage) against any
+# S3-compatible server — RustFS/MinIO locally, or AWS S3. Enable with:
+# uv sync --extra s3
+s3 = [
+    "boto3>=1.35.0",
+]
 
 [dependency-groups]
 dev = [

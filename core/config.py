@@ -161,6 +161,24 @@ class Config:
     qdrant_api_key: str | None = _secret("QDRANT_API_KEY")
     semantic_top_k: int = 5
 
+    # --- Object storage (S3-compatible; see core/storage + agent/tools/storage).
+    # A durable file/image archive the model uses as memory: it can stash a file
+    # under the current user's scope and recall it later by reference. Off by
+    # default; turn on per deployment via configure(). The default endpoint points
+    # at a local RustFS (S3-compatible) for testing — see docker-compose.yaml /
+    # README. Endpoint None => real AWS S3 (region used). Needs the optional `s3`
+    # extra: `uv sync --extra s3` (boto3 is lazy-imported; absent => tools off).
+    # Credentials are secrets (.env); bucket/region/endpoint live here in code. ---
+    s3_enabled: bool = False
+    s3_endpoint_url: str | None = "http://localhost:9000"
+    s3_region: str = "us-east-1"
+    s3_bucket: str = "chatbot-memory"
+    s3_access_key_id: str | None = _secret("S3_ACCESS_KEY_ID")
+    s3_secret_access_key: str | None = _secret("S3_SECRET_ACCESS_KEY")
+    # Lifetime (seconds) of presigned recall URLs handed back when a stored file is
+    # too large to attach inline.
+    s3_presign_expiry: int = 3600
+
     # --- Seanime media server (agent/tools/seanime). A dedicated client with a
     # fixed base URL — the model never chooses the host, so the http-tool SSRF
     # guard doesn't apply here. Token only needed when the server has a password
@@ -196,7 +214,7 @@ class Config:
         backend urls, model ids, context windows, paths — in one place.
         """
         # Secrets that must never hit the log verbatim.
-        masked = {"litellm_api_key", "llamacpp_api_key", "DISCORD_BOT_TOKEN", "qdrant_api_key", "api_auth_token", "seanime_token"}
+        masked = {"litellm_api_key", "llamacpp_api_key", "DISCORD_BOT_TOKEN", "qdrant_api_key", "api_auth_token", "seanime_token", "s3_access_key_id", "s3_secret_access_key"}
         # Long prose: log the length, not the body.
         prose = {"system_prompt", "persona_seed"}
 

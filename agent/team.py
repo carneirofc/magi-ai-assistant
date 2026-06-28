@@ -27,12 +27,14 @@ from agent.tools.http import HTTP_TOOLS
 from agent.tools.media import MEDIA_TOOLS
 from agent.tools.memory import build_memory_tools
 from agent.tools.outputs import ToolOutput, ok
+from agent.tools.storage import build_storage_tools
 from agent.tools.thinking import build_thinking_tools
 from agent.tools.vision import VISION_TOOLS
 from core.config import config
 from core.db import get_db
 from core.memory import MemoryManager
 from core.prompts import load_prompt
+from core.storage import build_s3_store_from_config
 
 
 class IntrospectionMember(BaseModel):
@@ -114,6 +116,20 @@ def build_team(
     for m in members:
         if not m.tool_hooks:
             m.tool_hooks = [tool_call_hook]
+
+    # Durable object storage (S3-compatible) — the model's byte archive. Gated by
+    # config and degrades to nothing when off / boto3 absent / backend unreachable,
+    # so a deployment without it (or with RustFS down) still boots cleanly.
+    storage_tools: list = []
+    if config.s3_enabled:
+        store = build_s3_store_from_config()
+        if store is not None:
+            try:
+                store.ensure_bucket()
+            except Exception as exc:  # noqa: BLE001 — a down backend must not abort startup.
+                log_info(f"storage: bucket check skipped ({type(exc).__name__}: {exc})")
+            storage_tools = build_storage_tools(store, memory)
+            log_info(f"storage: ENABLED ({len(storage_tools)} tools, bucket={config.s3_bucket})")
 
     instructions = load_prompt("team/lead.md")
     log_info(

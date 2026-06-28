@@ -75,13 +75,62 @@ services:
       QDRANT__SERVICE__HTTP_PORT: 6333
       QDRANT__SERVICE__GRPC_PORT: 6334
 
+  # RustFS — S3-compatible object storage. Backs the chatbot's durable file/image
+  # archive (core/storage + agent/tools/storage, gated by config.s3_enabled). Holds
+  # the canonical S3 ports 9000 (API) / 9001 (console) on the host so the chatbot's
+  # default endpoint (http://localhost:9000) just works. Default creds rustfsadmin
+  # /rustfsadmin — override with S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY in .env.
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: chatbot-rustfs
+    restart: unless-stopped
+    ports:
+      - "9000:9000"  # S3 API
+      - "9001:9001"  # web console
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY_ID:-rustfsadmin}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:-rustfsadmin}
+    volumes:
+      - rustfs_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # One-shot bucket creation for the chatbot archive (mc speaks S3 to any backend).
+  rustfs-init:
+    image: minio/mc:latest
+    container_name: chatbot-rustfs-init
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set rustfs http://rustfs:9000 $${S3_ACCESS_KEY_ID:-rustfsadmin} $${S3_SECRET_ACCESS_KEY:-rustfsadmin} &&
+      mc mb --ignore-existing rustfs/$${S3_BUCKET:-chatbot-memory} &&
+      exit 0
+      "
+    environment:
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-rustfsadmin}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-rustfsadmin}
+      S3_BUCKET: ${S3_BUCKET:-chatbot-memory}
+
+  # MinIO — separate object store dedicated to LiteLLM's logs (litellm reaches it
+  # by the internal name minio:9000, unaffected by host ports). Host ports moved to
+  # 9100/9101 so RustFS can own the canonical 9000/9001 for the chatbot archive.
   minio:
     image: minio/minio:latest
     container_name: chatbot-minio
     restart: unless-stopped
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9100:9000"
+      - "9101:9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
@@ -130,4 +179,5 @@ volumes:
   postgres_data:
   qdrant_storage:
   minio_data:
+  rustfs_data:
   prometheus_data:
