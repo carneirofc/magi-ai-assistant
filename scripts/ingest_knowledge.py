@@ -20,7 +20,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from core.knowledge import GLOBAL_SCOPE, KnowledgeStore
+from magi.core.knowledge import GLOBAL_SCOPE, KnowledgeStore
 
 _TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".rst", ".text"}
 

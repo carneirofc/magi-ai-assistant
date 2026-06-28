@@ -7,8 +7,8 @@ pins the result to a concrete, serializable payload.
 
 from types import SimpleNamespace
 
-from agent.team import IntrospectionData, _build_introspection_tool
-from agent.tools.outputs import ToolOutput
+from magi.agent.team import IntrospectionData, _build_introspection_tool
+from magi.agent.tools.outputs import ToolOutput
 
 
 def test_introspection_returns_serializable_payload():

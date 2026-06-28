@@ -6,8 +6,8 @@ lands in the outgoing request params, existing extra_body keys survive, and
 every model in the team (lead + shared member model) is updated together.
 """
 
-from agent.model import ModelDefinition, ModelProviderEnum, build_model
-from agent.tools.thinking import build_thinking_tools
+from magi.agent.model import ModelDefinition, ModelProviderEnum, build_model
+from magi.agent.tools.thinking import build_thinking_tools
 
 
 def _tool_text(result: dict) -> str:

@@ -13,7 +13,7 @@ These guard the two bugs that made the Discord team crash with
 
 import pytest
 
-from agent.model import (
+from magi.agent.model import (
     LITELLM_PROXY_PREFIX,
     ModelDefinition,
     ModelProviderEnum,
@@ -22,7 +22,7 @@ from agent.model import (
     lead_model_def,
     member_model_def,
 )
-from core.config import config
+from magi.core.config import config
 
 
 def test_provider_resolves_known_names():

@@ -12,12 +12,12 @@ import pytest
 
 pytest.importorskip("mcp", reason="needs the optional `mcp` extra (uv sync --extra mcp)")
 
-from agent.tools.seanime_mcp import (  # noqa: E402
+from magi.agent.tools.seanime_mcp import (  # noqa: E402
     SEANIME_MCP_TOOL_NAMES,
     build_seanime_mcp_tools,
     is_mcp_toolkit,
 )
-from core.config import config, configure  # noqa: E402
+from magi.core.config import config, configure  # noqa: E402
 
 
 def _restore_seanime_config():

@@ -5,8 +5,8 @@ call through unchanged, and it must turn a raising tool into a lead-visible
 ERROR string instead of letting the exception abort the run.
 """
 
-from agent.hooks import _preview, tool_call_hook
-from agent.tools.outputs import FlexiblePayload, ok
+from magi.agent.hooks import _preview, tool_call_hook
+from magi.agent.tools.outputs import FlexiblePayload, ok
 
 
 async def test_hook_passes_through_success():

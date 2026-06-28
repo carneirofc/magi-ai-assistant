@@ -9,9 +9,9 @@ tests; the tool-facing contract lives in test_knowledge_tools.py.
 
 import dataclasses
 
-import core.knowledge.store as store_mod
-from core.knowledge import KnowledgeStore, build_knowledge_from_config, chunk_text
-from core.knowledge.store import KnowledgeHit
+import magi.core.knowledge.store as store_mod
+from magi.core.knowledge import KnowledgeStore, build_knowledge_from_config, chunk_text
+from magi.core.knowledge.store import KnowledgeHit
 
 
 # --- chunking ---------------------------------------------------------------

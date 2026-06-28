@@ -8,11 +8,11 @@ the manager test injects a fake `CurateFn`.
 
 import pytest
 
-from agent.curator import _format_input, _parse
-from core.memory import CurationInput, CurationResult, FactOp
-from core.memory import manager as manager_mod
-from core.memory.manager import MemoryManager
-from core.memory.store import FileMemoryStore
+from magi.agent.curator import _format_input, _parse
+from magi.core.memory import CurationInput, CurationResult, FactOp
+from magi.core.memory import manager as manager_mod
+from magi.core.memory.manager import MemoryManager
+from magi.core.memory.store import FileMemoryStore
 
 
 # --- parsing ----------------------------------------------------------------

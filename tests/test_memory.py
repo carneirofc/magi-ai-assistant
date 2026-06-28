@@ -7,9 +7,9 @@ files, scope routes them to the right user/session, short-term stays capped, and
 
 import pytest
 
-from core.memory import manager as manager_mod
-from core.memory.manager import MemoryManager
-from core.memory.store import FileMemoryStore
+from magi.core.memory import manager as manager_mod
+from magi.core.memory.manager import MemoryManager
+from magi.core.memory.store import FileMemoryStore
 
 
 @pytest.fixture(autouse=True)

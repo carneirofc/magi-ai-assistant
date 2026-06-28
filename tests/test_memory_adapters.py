@@ -4,8 +4,8 @@ These pin the on-disk formats byte-for-byte so existing memory files round-trip
 unchanged after the store was refactored onto adapters.
 """
 
-from core.memory.adapters import BulletLog, Blob, JsonFacts, JsonWindow
-from core.memory.store import FileMemoryStore
+from magi.core.memory.adapters import BulletLog, Blob, JsonFacts, JsonWindow
+from magi.core.memory.store import FileMemoryStore
 
 
 def test_scoped_memory_exposes_its_identity(tmp_path):

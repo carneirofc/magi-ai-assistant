@@ -4,15 +4,12 @@ These tests do not prove an LLM will obey every instruction, but they prevent
 the guardrails for known failure modes from being edited away unnoticed.
 """
 
-from pathlib import Path
-
-from agent.tools.media import send_media_from_url
-
-ROOT = Path(__file__).resolve().parents[1]
+from magi.agent.tools.media import send_media_from_url
+from magi.core.prompts import BUNDLED_PROMPTS_DIR
 
 
 def _prompt(path: str) -> str:
-    return (ROOT / "prompts" / path).read_text(encoding="utf-8")
+    return (BUNDLED_PROMPTS_DIR / path).read_text(encoding="utf-8")
 
 
 # Persona-specific routing contracts (anime → Seanime, etc.) live with the

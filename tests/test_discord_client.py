@@ -2,7 +2,7 @@ import pytest
 from agno.media import Audio, Image
 
 from clients.mydiscord import DiscordClient
-from core.conversation import ConversationReply
+from magi.core.conversation import ConversationReply
 
 
 class DummyTyping:

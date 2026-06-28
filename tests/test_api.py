@@ -10,8 +10,8 @@ import json
 
 from fastapi.testclient import TestClient
 
-from channels.api import create_app
-from core.conversation import ConversationDelta, ConversationReply
+from magi.channels.api import create_app
+from magi.core.conversation import ConversationDelta, ConversationReply
 
 
 class _FakeConversation:

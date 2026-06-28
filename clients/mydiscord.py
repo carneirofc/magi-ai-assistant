@@ -24,8 +24,8 @@ from agno.media import Audio, File, Image, Video
 from agno.utils.log import log_info, log_warning
 
 from clients.chunking import DISCORD_MESSAGE_LIMIT, chunk
-from core.conversation import ConversationReply, ConversationService
-from core.discord_context import (
+from magi.core.conversation import ConversationReply, ConversationService
+from magi.core.discord_context import (
     DiscordRunContext,
     reset_current_discord_context,
     set_current_discord_context,

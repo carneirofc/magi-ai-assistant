@@ -11,8 +11,8 @@ def check() -> None:
     """Phase 1 — raw discord.py, no agno. See channels/discord_check.py for event handlers."""
     import asyncio
 
-    from core.config import config
-    from channels import discord_check
+    from magi.core.config import config
+    from magi.channels import discord_check
 
     if not config.DISCORD_BOT_TOKEN:
         print("ERROR: DISCORD_BOT_TOKEN not set in environment")
@@ -27,7 +27,7 @@ def serve() -> None:
 
     apply_deployment_config()
 
-    from channels.discord import build_discord_client
+    from magi.channels.discord import build_discord_client
 
     print("[serve] Building agno Discord client...")
     discord_client = build_discord_client()

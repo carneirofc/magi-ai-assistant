@@ -1,6 +1,6 @@
 """Entrypoint — run the Discord bot backed by the multimodal agent team."""
 
-from core.config import configure
+from magi.core.config import configure
 
 
 def apply_deployment_config() -> None:
@@ -43,7 +43,7 @@ def apply_deployment_config() -> None:
 def main() -> None:
     apply_deployment_config()
 
-    from channels.discord import build_discord_client
+    from magi.channels.discord import build_discord_client
 
     build_discord_client().serve()
 

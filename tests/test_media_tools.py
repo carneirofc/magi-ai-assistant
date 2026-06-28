@@ -9,10 +9,10 @@ when no outbox is open.
 
 import httpx
 
-import agent.tools.media as media_tools
-from agent.tools.media import send_media_from_url
-from agent.tools.outputs import ToolOutput
-from core.media import (
+import magi.agent.tools.media as media_tools
+from magi.agent.tools.media import send_media_from_url
+from magi.agent.tools.outputs import ToolOutput
+from magi.core.media import (
     allow_media_url,
     close_allowed_media_urls,
     close_media_outbox,

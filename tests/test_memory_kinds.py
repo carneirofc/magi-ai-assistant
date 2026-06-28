@@ -6,8 +6,8 @@ kind seam directly: which kinds fold and the session→episode close hand-off.
 
 import pytest
 
-from core.memory.kinds import Episodes, Folds, LongTerm, Renders, Session
-from core.memory.store import FileMemoryStore
+from magi.core.memory.kinds import Episodes, Folds, LongTerm, Renders, Session
+from magi.core.memory.store import FileMemoryStore
 
 
 def _scope(tmp_path):

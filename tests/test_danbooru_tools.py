@@ -12,8 +12,8 @@ import time
 import httpx
 import pytest
 
-import agent.tools.danbooru as danbooru
-from core.config import config, configure
+import magi.agent.tools.danbooru as danbooru
+from magi.core.config import config, configure
 
 
 def _tool_text(result: dict) -> str:

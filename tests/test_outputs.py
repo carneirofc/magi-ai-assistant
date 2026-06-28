@@ -9,7 +9,7 @@ must fail loudly at construction, and concrete payloads must round-trip.
 
 import pytest
 
-from agent.tools.outputs import FlexiblePayload, fail, ok
+from magi.agent.tools.outputs import FlexiblePayload, fail, ok
 
 
 def test_ok_rejects_raw_dict_payload():

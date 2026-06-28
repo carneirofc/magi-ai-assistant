@@ -4,14 +4,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from agent.tools.discord import (
+from magi.agent.tools.discord import (
     delete_discord_message,
     delete_discord_messages,
     delete_recent_discord_messages,
     describe_current_discord_context,
     list_recent_discord_messages,
 )
-from core.discord_context import (
+from magi.core.discord_context import (
     DiscordRunContext,
     reset_current_discord_context,
     set_current_discord_context,

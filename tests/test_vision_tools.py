@@ -10,8 +10,8 @@ import httpx
 import pytest
 from agno.tools.function import ToolResult
 
-import agent.tools.vision as vision
-from agent.tools.vision import view_image_from_url
+import magi.agent.tools.vision as vision
+from magi.agent.tools.vision import view_image_from_url
 
 
 class _FakeResponse:
@@ -78,7 +78,7 @@ async def test_success_returns_image_bytes(monkeypatch):
     assert image.format == "png"
     # Marked view-only: model input, never reposted to the user by the reply
     # media collection (core/media.py).
-    from core.media import is_view_only
+    from magi.core.media import is_view_only
 
     assert is_view_only(image)
 
@@ -131,7 +131,7 @@ async def test_surfaces_network_error(monkeypatch):
 
 async def test_refuses_unsourced_url_in_conversation(monkeypatch):
     """A URL the model invented is on no allowlist → refuse before the network."""
-    from core.media import close_allowed_media_urls, open_allowed_media_urls
+    from magi.core.media import close_allowed_media_urls, open_allowed_media_urls
 
     # Never reached if the guard works; make any fetch loudly wrong.
     _patch_client(monkeypatch, raise_exc=AssertionError("should not fetch"))
@@ -149,7 +149,7 @@ async def test_refuses_unsourced_url_in_conversation(monkeypatch):
 
 async def test_allows_user_supplied_url_in_conversation(monkeypatch):
     """A URL the user typed (seeded into the allowlist) fetches normally."""
-    from core.media import close_allowed_media_urls, open_allowed_media_urls
+    from magi.core.media import close_allowed_media_urls, open_allowed_media_urls
 
     allowed = "https://cdn.example/user.png"
     _patch_client(
@@ -167,7 +167,7 @@ async def test_allows_user_supplied_url_in_conversation(monkeypatch):
 
 async def test_allows_attached_by_reference_url(monkeypatch):
     """An image attached by reference (seeded via extra_urls) stays viewable."""
-    from core.media import close_allowed_media_urls, open_allowed_media_urls
+    from magi.core.media import close_allowed_media_urls, open_allowed_media_urls
 
     attached = "https://cdn.example/attached.png"
     _patch_client(

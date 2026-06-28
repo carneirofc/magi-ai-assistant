@@ -10,16 +10,16 @@ gates archiving exactly as it gates delivery.
 
 import httpx
 
-import agent.tools.storage as storage_tools
-from agent.tools.storage import build_storage_tools
-from core.media import (
+import magi.agent.tools.storage as storage_tools
+from magi.agent.tools.storage import build_storage_tools
+from magi.core.media import (
     close_allowed_media_urls,
     close_media_outbox,
     open_allowed_media_urls,
     open_media_outbox,
 )
-from core.memory.adapters import slug
-from core.storage import ObjectInfo, StorageError, StoredObject
+from magi.core.memory.adapters import slug
+from magi.core.storage import ObjectInfo, StorageError, StoredObject
 
 
 # --- fakes -------------------------------------------------------------------

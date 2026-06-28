@@ -8,7 +8,7 @@ is recorded to memory and passed through untouched.
 
 from types import SimpleNamespace
 
-from core.conversation import (
+from magi.core.conversation import (
     _EMPTY_REPLY,
     _ERROR_REPLY,
     ConversationDelta,
@@ -147,7 +147,7 @@ async def test_reasoning_only_is_not_overridden_by_fallback():
 async def test_run_output_media_rides_the_reply_minus_view_only():
     from agno.media import Image
 
-    from core.media import view_only_id
+    from magi.core.media import view_only_id
 
     viewed = Image(id=view_only_id(), content=b"viewed")
     delivered = Image(content=b"delivered")
@@ -169,7 +169,7 @@ async def test_outbox_media_staged_during_run_rides_the_reply():
     """A tool staging media mid-run (send_media_from_url) must reach the reply."""
     from agno.media import Audio
 
-    from core.media import stage_media
+    from magi.core.media import stage_media
 
     class _StagingRunner:
         async def arun(self, **kwargs):

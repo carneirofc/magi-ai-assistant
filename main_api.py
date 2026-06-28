@@ -7,7 +7,7 @@ see channels/api.py for the endpoint contract. All settings are set in code
 below; only secrets (API_AUTH_TOKEN, ...) come from .env.
 """
 
-from core.config import configure
+from magi.core.config import configure
 
 
 def apply_deployment_config() -> None:
@@ -58,8 +58,8 @@ def main() -> None:
 
     import uvicorn
 
-    from channels.api import build_api_app
-    from core.config import config
+    from magi.channels.api import build_api_app
+    from magi.core.config import config
 
     uvicorn.run(build_api_app(), host=config.api_host, port=config.api_port)
 

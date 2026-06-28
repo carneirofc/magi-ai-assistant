@@ -1,7 +1,7 @@
 [project]
-name = "chatbot"
+name = "magi"
 version = "0.1.0"
-description = "Add your description here"
+description = "magi — an assistant-core engine: a lead routing to a specialist team, with memory, knowledge, and tools."
 readme = "README.md"
 requires-python = ">=3.14"
 # Engine packages a persona (private repo, e.g. alyssa) installs and extends.
@@ -50,14 +50,13 @@ s3 = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# The engine is a set of flat top-level packages (no src/ layout). List them
-# explicitly so a `pip install`/editable build of the persona repo picks up the
-# whole engine. `prompts/` is intentionally not packaged: an editable path source
-# resolves PROMPTS_DIR from __file__ to this tree's prompts/, and a persona ships
-# its own prompts via the overlay (see core/prompts.py). For a non-editable wheel,
-# add prompts/ as wheel data here.
+# Single src-layout package `magi` (core/agent/channels live under it). Its
+# bundled `prompts/` ride along as package data — they sit inside the package
+# (magi/prompts), so an editable or wheel install resolves BUNDLED_PROMPTS_DIR
+# from __file__ either way; a persona ships its own prompts via the overlay
+# (see magi/core/prompts.py).
 [tool.hatch.build.targets.wheel]
-packages = ["core", "agent", "channels"]
+packages = ["src/magi"]
 
 [dependency-groups]
 dev = [

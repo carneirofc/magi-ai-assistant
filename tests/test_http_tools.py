@@ -2,8 +2,8 @@
 
 from urllib.parse import quote
 
-import agent.tools.http as http_tools
-from core.config import config
+import magi.agent.tools.http as http_tools
+from magi.core.config import config
 
 
 async def test_host_guard_allows_configured_seanime_image_proxy_get():

@@ -9,9 +9,9 @@ never constructs an HTTP client, and a local miss falls back to the API.
 
 import pytest
 
-import agent.tools.danbooru as danbooru
-from agent.tools.danbooru_local import LocalDanbooru
-from core.config import config, configure
+import magi.agent.tools.danbooru as danbooru
+from magi.agent.tools.danbooru_local import LocalDanbooru
+from magi.core.config import config, configure
 
 
 def _tool_text(result: dict) -> str:

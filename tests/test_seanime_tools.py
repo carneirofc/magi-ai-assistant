@@ -16,8 +16,8 @@ import pytest
 from urllib.parse import quote
 from pydantic import ValidationError
 
-import agent.tools.seanime as seanime
-from core.config import config, configure
+import magi.agent.tools.seanime as seanime
+from magi.core.config import config, configure
 
 
 def _tool_text(result: dict) -> str:

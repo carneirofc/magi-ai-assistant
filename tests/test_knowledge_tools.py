@@ -6,9 +6,9 @@ their sources as structured data; an empty corpus answer is reported honestly (n
 dressed up as a confirmation); the searcher is asked for `config.knowledge_top_k`.
 """
 
-from agent.tools.knowledge import build_knowledge_tools
-from core.config import config
-from core.knowledge import GLOBAL_SCOPE, KnowledgeHit
+from magi.agent.tools.knowledge import build_knowledge_tools
+from magi.core.config import config
+from magi.core.knowledge import GLOBAL_SCOPE, KnowledgeHit
 
 
 class _FakeSearcher:
