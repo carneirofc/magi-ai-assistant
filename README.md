@@ -2,13 +2,57 @@
 
 Personal multi-channel AI assistant on the [Agno](https://www.agno.com/) framework.
 One shared agent brain, many channel adapters. Model-agnostic — local
-llama.cpp `llama-server` by default (through the LiteLLM proxy, or direct with
-`MODEL_PROVIDER=llamacpp`); Claude via the proxy; Ollama kept as dormant fallback.
+llama.cpp `llama-server` by default (direct with `model_provider="llamacpp"`, or
+through the LiteLLM proxy); Claude via the proxy; Ollama kept as dormant fallback.
 
 > **The name.** *MAGI* is the supercomputer at the heart of NERV in *Neon Genesis
 > Evangelion* — three linked units (Melchior, Balthasar, Casper) that reason as
 > one and reach decisions by majority vote. The nod fits: one shared brain backed
 > by a roster of specialized members, speaking through many channels.
+
+## What it is
+
+magi is the **reusable core of a personal AI assistant** — not one bot, but the
+engine several bots share. Its goals:
+
+- **One shared brain, many channels.** A Discord bot, an HTTP API, and an
+  OpenAI-compatible shim all drive the *same* assembled stack; only the transport
+  differs.
+- **Deliberate memory.** The assistant's durable knowledge of a user lives in
+  inspectable files written *on purpose* by a post-turn curator — never silently
+  auto-extracted. You can open them and read what it remembers.
+- **Model-agnostic.** Local `llama-server` by default; Claude (via LiteLLM) and
+  Ollama drop in without touching the team code.
+- **Engine + persona.** Boots and chats with a neutral demo persona; a private
+  persona repo overlays prompts and registers its own specialists without forking.
+
+```mermaid
+flowchart LR
+    D[Discord] --> CS[ConversationService]
+    A[HTTP API + OpenAI shim] --> CS
+    CS --> MEM[(Deliberate memory)]
+    CS --> TEAM{{Agent team<br/>lead → specialists}}
+    TEAM --> BK[llama-server / LiteLLM / Ollama]
+    MEM --> ST[(files · Qdrant · SQLite)]
+    TEAM --> OBJ[(byte archive · knowledge)]
+```
+
+## Documentation
+
+Full docs live in [`docs/`](docs/):
+
+| Topic | Doc |
+|---|---|
+| Install & run, first chat, Open WebUI | [getting-started.md](docs/getting-started.md) |
+| Design, request lifecycle, diagrams | [architecture.md](docs/architecture.md) |
+| Deliberate memory (the centerpiece) | [memory.md](docs/memory.md) |
+| Discord / HTTP / OpenAI shim contracts | [channels.md](docs/channels.md) |
+| Every configuration field | [configuration.md](docs/configuration.md) |
+| Team, members, tool catalog | [agent-and-tools.md](docs/agent-and-tools.md) |
+| Docker services, ports, ingestion | [infrastructure.md](docs/infrastructure.md) |
+
+The rest of this README is a quick operational reference. Domain vocabulary is
+defined in [CONTEXT.md](CONTEXT.md); architecture decisions in [docs/adr/](docs/adr/).
 
 ## Run
 
