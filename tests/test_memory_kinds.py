@@ -1,8 +1,7 @@
 """Tests for the scoped memory kinds through their protocols (core/memory/kinds).
 
 The manager-level tests in test_memory.py cover behavior end-to-end; these pin the
-kind seam directly: which kinds fold, the session→episode close hand-off, and the
-long-term fold marker.
+kind seam directly: which kinds fold and the session→episode close hand-off.
 """
 
 import pytest
@@ -15,13 +14,13 @@ def _scope(tmp_path):
     return FileMemoryStore(tmp_path / "mem").scoped("u1", "s1")
 
 
-def test_only_session_and_long_term_fold():
-    lt = LongTerm(None, 5, 2, None, 3)
+def test_only_session_folds():
+    lt = LongTerm(None, 5, 2)
     ep = Episodes(None, 5, 5)
     se = Session(3, None, 2)
 
-    assert isinstance(lt, Renders) and isinstance(lt, Folds)
     assert isinstance(se, Renders) and isinstance(se, Folds)
+    assert isinstance(lt, Renders) and not isinstance(lt, Folds)  # curator owns durable memory
     assert isinstance(ep, Renders)
     assert not isinstance(ep, Folds)  # episodes never fold
 
@@ -37,21 +36,3 @@ def test_session_close_returns_dropped_and_wipes(tmp_path):
     assert dropped == 3
     assert carried is None  # no summarizer => no rolling summary to carry
     assert mem.live_turns.read() == []
-
-
-async def test_long_term_fold_marker_blocks_refold_until_threshold_again(tmp_path):
-    calls = []
-
-    async def fake(text: str) -> str:
-        calls.append(text)
-        return "profile"
-
-    mem = _scope(tmp_path)
-    lt = LongTerm(None, 5, 2, summarize_fn=fake, summarize_every=3)
-    for i in range(3):
-        lt.remember(mem, f"fact {i}")
-
-    assert await lt.maybe_fold(mem) == "profile"
-    # Marker advanced — a second immediate fold is a no-op (no new facts crossed it).
-    assert await lt.maybe_fold(mem) is None
-    assert len(calls) == 1

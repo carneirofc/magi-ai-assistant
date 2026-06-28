@@ -133,12 +133,22 @@ class Config:
     session_pending_max: int = 30
     session_summary_max_chars: int = 4_000
 
-    # --- Long-term summarization. Once enough durable facts pile up, condense
-    # long_term.md with an LLM into long_term_summary.md and inject the summary
-    # plus the most recent raw facts (instead of the whole file). ---
-    long_term_summary: bool = False
-    long_term_summarize_every: int = 20  # facts per re-summary
-    long_term_recent_raw: int = 5  # raw facts kept alongside summary
+    # --- Long-term rendering. The durable profile (long_term_summary.md) is owned
+    # by the curator below; alongside it, build_context injects the most recent raw
+    # facts written via `remember` so freshly-learned facts surface before the next
+    # curation pass folds them in. ---
+    long_term_recent_raw: int = 5  # raw facts kept alongside the curated profile
+
+    # --- Memory curator (see core/memory/curation + agent/curator). A cheap
+    # post-turn pass that owns durable memory: instead of the lead appending
+    # facts inline (append-only, on the reply path), the curator reads each
+    # finished turn and REWRITES the long-term profile (so it can update/supersede),
+    # optionally logging an episode or evolving the persona. Runs off the reply
+    # path; one member-model call per turn. The lead keeps only read tools. ---
+    memory_curation: bool = False
+    # Hard cap on the rewritten profile so a runaway curator can't park a huge
+    # blob that's replayed into every later run (<= 0 disables the clamp).
+    long_term_summary_max_chars: int = 8_000
 
     # --- Semantic memory search (Qdrant + an embedding model via the proxy).
     # When off, build_context injects long-term/episodic whole; when on, it

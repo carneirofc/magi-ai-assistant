@@ -1,12 +1,12 @@
-"""LLM summarizers — fold raw memory into compact form.
+"""LLM session summarizer — fold raw memory into compact form.
 
-The deliberate memory (core/memory) caps the live window and lets durable facts
-pile up; both would otherwise grow without bound. These callables compress the
-overflow: one folds evicted conversation turns into a rolling session summary,
-the other condenses accumulated long-term facts into a deduplicated profile.
+The deliberate memory (core/memory) caps the live window; without summarization
+the turns that roll out of it are lost. This callable folds those evicted
+conversation turns into a rolling session summary. (Durable per-user memory is
+owned by the curator — see agent/curator.py — not summarized here.)
 
-They live in the agent layer because they need a model. `core/memory` stays
-model-free and receives them only as injected async callables (`SummarizeFn`).
+It lives in the agent layer because it needs a model. `core/memory` stays
+model-free and receives it only as an injected async callable (`SummarizeFn`).
 """
 
 from agno.agent import Agent
@@ -21,13 +21,6 @@ _SESSION_SYSTEM = (
     "newer raw conversation turns, write an updated running summary in a few short "
     "lines: what the user wanted, key facts surfaced, and how it's going. No "
     "preamble, no markdown headings — just the summary text."
-)
-
-_LONG_TERM_SYSTEM = (
-    "You maintain a durable user profile. Given a list of facts learned about one "
-    "user over time, merge them into a concise, deduplicated profile grouped by "
-    "topic (preferences, projects, identity, recurring needs). Drop redundancy and "
-    "resolve contradictions in favor of the most recent. No preamble — just the profile."
 )
 
 
@@ -51,8 +44,3 @@ def _build(name: str, system: str) -> SummarizeFn:
 def build_session_summarizer() -> SummarizeFn:
     """An async callable folding `(old summary + raw turns) -> updated summary`."""
     return _build("SessionSummarizer", _SESSION_SYSTEM)
-
-
-def build_long_term_summarizer() -> SummarizeFn:
-    """An async callable folding accumulated long-term facts into one profile."""
-    return _build("LongTermSummarizer", _LONG_TERM_SYSTEM)

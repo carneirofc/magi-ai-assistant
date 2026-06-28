@@ -36,28 +36,32 @@ def build_conversation_service(
     """Assemble the full conversation stack behind one channel-neutral service."""
     config.log_settings()
 
-    # Summarizers need a model, so the agent layer builds them; core/memory stays
-    # model-free and receives them as injected callables. Each is gated by config.
+    # The session summarizer needs a model, so the agent layer builds it; core/memory
+    # stays model-free and receives it as an injected callable. Gated by config.
     session_fn = None
-    long_term_fn = None
-    if config.session_summary or config.long_term_summary:
-        from agent.summarizer import build_long_term_summarizer, build_session_summarizer
+    if config.session_summary:
+        from agent.summarizer import build_session_summarizer
 
-        if config.session_summary:
-            session_fn = build_session_summarizer()
-            log_info(f"memory: session summary ENABLED (every {config.summarize_every} turns)")
-        if config.long_term_summary:
-            long_term_fn = build_long_term_summarizer()
-            log_info(
-                f"memory: long-term summary ENABLED (every {config.long_term_summarize_every} facts, "
-                f"+{config.long_term_recent_raw} recent raw)"
-            )
+        session_fn = build_session_summarizer()
+        log_info(f"memory: session summary ENABLED (every {config.summarize_every} turns)")
     else:
-        log_info("memory: summarization DISABLED")
+        log_info("memory: session summary DISABLED")
+
+    # The curator owns durable memory when on (it supersedes the long-term
+    # summarizer and the lead's write tools). Needs a model, so the agent layer
+    # builds it; core/memory receives it as an injected callable.
+    curate_fn = None
+    if config.memory_curation:
+        from agent.curator import build_memory_curator
+
+        curate_fn = build_memory_curator()
+        log_info("memory: curation ENABLED (post-turn durable-memory pass)")
+    else:
+        log_info("memory: curation DISABLED")
 
     memory = build_memory_from_config(
         summarize_session_fn=session_fn,
-        summarize_long_term_fn=long_term_fn,
+        curate_fn=curate_fn,
     )
     team = build_team(memory, db, member_builders)
     return ConversationService(

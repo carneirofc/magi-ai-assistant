@@ -58,13 +58,16 @@ def clamp(text: str, max_chars: int, label: str) -> str:
 
     This is the size guardrail: the window caps *how many* turns are kept, this
     caps *how big* each piece may be — without it one pasted blob or a runaway
-    summarizer output is replayed into every later run.
+    summarizer output is replayed into every later run. The truncation marker
+    counts against the budget, so the result never exceeds `max_chars`.
     """
     if max_chars <= 0 or len(text) <= max_chars:
         return text
     cut = len(text) - max_chars
-    log_warning(f"memory: {label} clamped to {max_chars} chars ({cut} dropped)")
-    return text[:max_chars] + f"\n…[truncated {cut} chars]"
+    log_warning(f"memory: {label} clamped to {max_chars} chars ({cut}+ dropped)")
+    marker = f"\n…[truncated {cut}+ chars]"
+    keep = max(0, max_chars - len(marker))
+    return text[:keep] + marker
 
 
 def index(retriever: Optional[MemoryRetriever], user_id: str, key: str, text: str) -> None:
@@ -118,8 +121,8 @@ async def guarded_fold(
 
 # --- the kinds --------------------------------------------------------------
 class LongTerm:
-    """Durable per-user facts: rendered as a condensed profile + recent raw facts,
-    folded into that profile once enough accumulate."""
+    """Durable per-user facts: rendered as a condensed profile (owned by the
+    post-turn curator) plus any recent raw facts written via `remember`."""
 
     section_header = "## What you remember about this user (global)"
     retriever_key = "long_term"
@@ -129,16 +132,10 @@ class LongTerm:
         retriever: Optional[MemoryRetriever],
         top_k: int,
         recent_raw: int,
-        summarize_fn: Optional[SummarizeFn],
-        summarize_every: int,
     ):
         self.retriever = retriever
         self.top_k = top_k
         self.recent_raw = recent_raw
-        self.summarize_fn = summarize_fn
-        self.summarize_every = summarize_every
-        # Per-user fact count at the last fold (keyed by user — safe across scopes).
-        self._summarized_at: dict[str, int] = {}
 
     def render(self, mem: ScopedMemory, query: Optional[str]) -> str:
         return retrieved_or(
@@ -162,25 +159,6 @@ class LongTerm:
 
     def recall(self, mem: ScopedMemory) -> str:
         return mem.long_term.read()
-
-    async def maybe_fold(self, mem: ScopedMemory) -> Optional[str]:
-        if self.summarize_fn is None:
-            return None
-        count = mem.long_term.count()
-        last = self._summarized_at.get(mem.user_id, 0)
-        payload = None
-        if count >= self.summarize_every and count - last >= self.summarize_every:
-            facts = mem.long_term.read()
-            if facts.strip():
-                payload = facts
-
-        def write_back(summary: str) -> None:
-            mem.long_term_summary.write(summary)
-            self._summarized_at[mem.user_id] = count
-
-        return await guarded_fold(
-            self.summarize_fn, payload, write_back, f"long-term for user {mem.user_id}"
-        )
 
 
 class Episodes:

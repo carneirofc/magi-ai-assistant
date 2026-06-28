@@ -30,13 +30,14 @@ from typing import Optional
 from agno.utils.log import log_info, log_warning
 
 from core.config import config
-from core.memory.kinds import Episodes, LongTerm, Session, SummarizeFn
+from core.memory.curation import CurateFn, CurationInput
+from core.memory.kinds import Episodes, LongTerm, Session, SummarizeFn, clamp
 from core.memory.semantic import MemoryRetriever
 from core.memory.store import FileMemoryStore, ScopedMemory
 
-# Re-exported for the agent layer (agent/summarizer.py) and __init__; the canonical
-# definition lives next to the kinds that consume it.
-__all__ = ["MemoryManager", "MemoryScope", "SummarizeFn"]
+# Re-exported for the agent layer (agent/summarizer.py, agent/curator.py) and
+# __init__; the canonical definitions live next to the code that consumes them.
+__all__ = ["MemoryManager", "MemoryScope", "SummarizeFn", "CurateFn"]
 
 # Rough provider-agnostic token estimate. We never see the real tokenizer through
 # the proxy, so ~4 chars/token is the standard ballpark — good enough to monitor
@@ -68,17 +69,22 @@ class MemoryManager:
         short_term_max: int,
         persona_seed: str = "",
         summarize_session_fn: Optional[SummarizeFn] = None,
-        summarize_long_term_fn: Optional[SummarizeFn] = None,
         summarize_every: int = 10,
-        long_term_summarize_every: int = 20,
         long_term_recent_raw: int = 5,
         retriever: Optional[MemoryRetriever] = None,
         semantic_top_k: int = 5,
         short_term_turn_max_chars: int = 4_000,
         session_pending_max: int = 30,
         session_summary_max_chars: int = 4_000,
+        curate_fn: Optional[CurateFn] = None,
+        long_term_summary_max_chars: int = 8_000,
     ):
         self.store = store
+        # Post-turn durable-memory curator (injected; None disables it). Owns the
+        # long-term profile when on — it rewrites it each turn instead of the lead
+        # appending raw facts. See core/memory/curation.py + agent/curator.py.
+        self._curate_fn = curate_fn
+        self.long_term_summary_max_chars = long_term_summary_max_chars
         # When set, long-term/episodes are also embedded into a vector store so a kind
         # render can retrieve only the top-k relevant entries instead of the whole
         # file. None => whole-file injection (default). Owned by the kinds, not here.
@@ -86,7 +92,6 @@ class MemoryManager:
         # policy; this manager orchestrates them and handles the global persona.
         self.long_term = LongTerm(
             retriever, semantic_top_k, max(0, long_term_recent_raw),
-            summarize_long_term_fn, max(1, long_term_summarize_every),
         )
         self.episodes = Episodes(retriever, semantic_top_k, short_term_max)
         self.session = Session(
@@ -139,13 +144,45 @@ class MemoryManager:
         """
         return await self.session.maybe_fold(self.mem)
 
-    async def maybe_summarize_long_term(self) -> Optional[str]:
-        """Condense long-term facts into a profile once enough accumulate.
+    async def maybe_curate(self, user_message: str, assistant_reply: str) -> Optional[list[str]]:
+        """Post-turn durable-memory pass: let the curator revise the profile, log an
+        episode, or evolve the persona based on the turn just completed.
 
-        Channel awaits this after each turn; no-op unless the long-term summarizer is
-        set and enough new facts have landed. (Delegates to `LongTerm`.)
+        Channel awaits this after each turn (like the summarizers). No-op unless a
+        curator is configured. Any failure is swallowed — curation must never break a
+        chat — and a malformed/empty result simply changes nothing. Returns the list
+        of applied changes (subset of profile/episode/persona), or None.
         """
-        return await self.long_term.maybe_fold(self.mem)
+        if self._curate_fn is None:
+            return None
+        mem = self.mem
+        inp = CurationInput(
+            user_message=user_message,
+            assistant_reply=assistant_reply,
+            current_profile=self.long_term.render(mem, None),
+            persona=self.store.persona.read(),
+        )
+        try:
+            result = await self._curate_fn(inp)
+        except Exception as exc:  # noqa: BLE001 — curation must never break a chat.
+            log_warning(f"memory: curation failed: {type(exc).__name__}: {exc}")
+            return None
+
+        applied: list[str] = []
+        if result.profile and result.profile.strip():
+            mem.long_term_summary.write(
+                clamp(result.profile.strip(), self.long_term_summary_max_chars, "long-term profile")
+            )
+            applied.append("profile")
+        if result.episode and result.episode.strip():
+            self.episodes.record_episode(mem, result.episode.strip())
+            applied.append("episode")
+        if result.persona_adjustment and result.persona_adjustment.strip():
+            self.store.persona.append(result.persona_adjustment.strip())
+            applied.append("persona")
+        if applied:
+            log_info(f"memory: curated [{', '.join(applied)}] for user {mem.user_id}")
+        return applied or None
 
     # --- flush / close (called by the channel) ------------------------------
     def flush_session(self) -> int:
@@ -182,7 +219,9 @@ class MemoryManager:
 
     # --- reads --------------------------------------------------------------
     def recall_long_term(self) -> str:
-        return self.long_term.recall(self.mem) or "(no long-term memory yet)"
+        # Render the curated profile (what the curator maintains), falling back to
+        # raw facts when no profile has been written yet.
+        return self.long_term.render(self.mem, None) or "(no long-term memory yet)"
 
     def recall_episodes(self, limit: int = 5) -> str:
         return self.episodes.recall(self.mem, limit) or "(no episodes recorded yet)"
@@ -219,12 +258,21 @@ class MemoryManager:
             sections.append(f"{self.episodes.section_header}\n{parts['episodes']}")
         if parts["short_term"]:
             sections.append(f"{self.session.section_header}\n{parts['short_term']}")
-        sections.append(
-            "You decide what persists — nothing is saved automatically:\n"
-            "- `remember(fact)` — keep a durable fact about this user (global)\n"
-            "- `record_episode(summary)` — log how an interaction went (global)\n"
-            "- `evolve_persona(adjustment)` — change how you behave, for everyone"
-        )
+        if self._curate_fn is not None:
+            sections.append(
+                "This memory persists across sessions and is kept current for you "
+                "automatically after each turn — you never save anything yourself. "
+                "Rely on it for continuity instead of asking the user to repeat "
+                "themselves. Any deeper-recall tools you have are described in their "
+                "own contracts."
+            )
+        else:
+            sections.append(
+                "This memory persists across sessions; nothing here is written "
+                "automatically. Rely on it for continuity instead of asking the user "
+                "to repeat themselves. Any deeper-recall tools you have are described "
+                "in their own contracts."
+            )
         context = "\n\n".join(sections)
         self._log_context_size(context, parts)
         return context

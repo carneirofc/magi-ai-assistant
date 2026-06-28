@@ -37,8 +37,18 @@ kind.
 **Fold**:
 Compressing overflow into compact form: session turns → a rolling summary,
 accumulated long-term facts → a condensed profile. Only session and long-term
-fold; episodes and persona do not.
+fold; episodes and persona do not. Long-term folding is the no-curator path —
+when the **curator** is on it owns the profile and this fold never fires.
 _Avoid_: summarize (the model call is one step of a fold), compact.
+
+**Curate**:
+The post-turn pass that owns durable memory: it reads the finished turn against
+the current profile + persona and rewrites the long-term profile (so it can
+update/supersede, not just append), optionally records an episode or evolves the
+persona. Runs off the reply path on a cheap model; replaces the lead's old inline
+write tools and the long-term fold. Model-free `core/memory` calls it as an
+injected `CurateFn` (`agent/curator.py`), the same seam the summarizers use.
+_Avoid_: remember (the retired append-only lead tool).
 
 **Live window**:
 The capped, JSON list of the session's most recent turns.

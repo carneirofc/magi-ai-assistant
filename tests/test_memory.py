@@ -181,24 +181,6 @@ async def test_session_summary_failure_never_breaks_the_chat(tmp_path):
     assert mgr.mem.pending.count() >= 2
 
 
-async def test_long_term_summary_failure_never_breaks_the_chat(tmp_path):
-    async def boom(text: str) -> str:
-        raise RuntimeError("summarizer down")
-
-    mgr = MemoryManager(
-        store=FileMemoryStore(tmp_path / "mem"),
-        short_term_max=5,
-        summarize_long_term_fn=boom,
-        long_term_summarize_every=3,
-    )
-    mgr.set_scope(user_id="u1", session_id="s1")
-    for i in range(3):
-        mgr.remember(f"fact {i}")
-
-    assert await mgr.maybe_summarize_long_term() is None
-    assert mgr.mem.long_term_summary.read() == ""
-
-
 # --- size guards (short-term must not explode the context) ------------------
 
 
@@ -264,29 +246,24 @@ def test_eviction_without_summarizer_just_drops(manager):
     assert manager.recall_episodes() == "(no episodes recorded yet)"
 
 
-async def test_long_term_summary_written_and_injected(tmp_path):
-    async def fake_summarize(text: str) -> str:
-        return "condensed profile"
-
+def test_long_term_profile_and_recent_raw_injected(tmp_path):
+    """build_context renders the curated profile (long_term_summary, owned by the
+    curator) plus only the most-recent raw facts written via remember()."""
     mgr = MemoryManager(
         store=FileMemoryStore(tmp_path / "mem"),
         short_term_max=5,
-        summarize_long_term_fn=fake_summarize,
-        long_term_summarize_every=3,
         long_term_recent_raw=2,
     )
     mgr.set_scope(user_id="u1", session_id="s1")
     for i in range(3):
         mgr.remember(f"fact {i}")
+    # The curator owns this file; simulate a curation pass writing the profile.
+    mgr.mem.long_term_summary.write("condensed profile")
 
-    out = await mgr.maybe_summarize_long_term()
-    assert out == "condensed profile"
-    assert "condensed profile" in mgr.mem.long_term_summary.read()
-
-    # Context injects the summary plus only the most-recent raw facts.
     ctx = mgr.build_context()
     assert "condensed profile" in ctx
     assert "fact 2" in ctx  # within recent-raw tail (last 2)
+    assert "fact 0" not in ctx  # older raw fact trimmed
     assert "fact 0" not in ctx  # older facts live only in the summary now
 
 
