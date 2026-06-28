@@ -211,10 +211,32 @@ async def test_library_manga_kind_compacts_with_chapters(monkeypatch):
     assert client.calls[0][1].endswith("/api/v1/manga/collection")
 
 
-async def test_library_rejects_null_group_by_from_tool_call(monkeypatch):
-    _patch_client(monkeypatch, [])
-    with pytest.raises(ValidationError, match="group_by"):
-        await seanime.seanime_library.entrypoint(kind="anime", group_by=None)
+async def test_library_tolerates_null_defaulted_args_from_tool_call(monkeypatch):
+    # The schema advertises clean enums and the prompt says to omit defaults, but
+    # the model still sends explicit null for defaulted args. That must normalize
+    # to the default (null kind → anime, null group_by → ungrouped) instead of
+    # raising a ValidationError that aborts the whole run.
+    collection = {
+        "lists": [
+            {
+                "type": "CURRENT",
+                "entries": [
+                    {
+                        "mediaId": 21,
+                        "media": {"title": {"userPreferred": "One Piece"}, "episodes": 1100},
+                        "listData": {"progress": 1090, "score": 9},
+                    }
+                ],
+            }
+        ]
+    }
+    client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": collection})])
+    result = await seanime.seanime_library.entrypoint(kind=None, group_by=None)
+    payload = _tool_payload(result)
+    assert payload["type"] == "library"
+    assert payload["lists"][0]["entries"][0]["title"] == "One Piece"
+    # null kind defaulted to anime.
+    assert client.calls[0][1].endswith("/api/v1/library/collection")
 
 
 def test_library_tool_schema_uses_enum_annotations():
@@ -320,7 +342,7 @@ async def test_library_flags_adult_titles(monkeypatch):
     assert entry["adult"] is True
 
 
-# --- seanime_browse_anime / seanime_browse_manga ---------------------------------
+# --- seanime_browse (anime + manga, one tool) ------------------------------------
 async def test_browse_anime_compacts_page(monkeypatch):
     page = {
         "Page": {
@@ -338,7 +360,7 @@ async def test_browse_anime_compacts_page(monkeypatch):
         }
     }
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    result = await seanime.seanime_browse_anime.entrypoint(search="titan")
+    result = await seanime.seanime_browse.entrypoint(kind="anime",search="titan")
     assert "16498" in _tool_text(result) and "Attack on Titan" in _tool_text(result)
     method, url, body = client.calls[0]
     assert method == "POST" and url.endswith("/api/v1/anilist/list-anime")
@@ -356,7 +378,7 @@ async def test_browse_anime_adult_include_omits_filter_and_flags_results(monkeyp
         }
     }
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    result = await seanime.seanime_browse_anime.entrypoint(search="title", adult="include")
+    result = await seanime.seanime_browse.entrypoint(kind="anime",search="title", adult="include")
     _, _, body = client.calls[0]
     # Key omitted entirely: AniList then returns both adult and non-adult
     # (isAdult=true would mean adult-ONLY and is coerced by a server setting).
@@ -368,7 +390,7 @@ async def test_browse_anime_adult_include_omits_filter_and_flags_results(monkeyp
 async def test_browse_anime_adult_only_sends_true(monkeypatch):
     page = {"Page": {"media": [{"id": 99, "title": {"romaji": "X"}, "isAdult": True}]}}
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    await seanime.seanime_browse_anime.entrypoint(search="x", adult="only")
+    await seanime.seanime_browse.entrypoint(kind="anime",search="x", adult="only")
     _, _, body = client.calls[0]
     assert body["isAdult"] is True
 
@@ -378,7 +400,7 @@ async def test_browse_anime_filters_ride_in_the_body(monkeypatch):
     AniList casing, status/sort as arrays, empty search omitted)."""
     page = {"Page": {"media": []}}
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    await seanime.seanime_browse_anime.entrypoint(
+    await seanime.seanime_browse.entrypoint(kind="anime",
         search="",
         genres=["Romance", "Sci-Fi"],
         season="WINTER",
@@ -400,15 +422,15 @@ async def test_browse_anime_filters_ride_in_the_body(monkeypatch):
 async def test_browse_anime_rejects_unknown_filter_values(monkeypatch):
     _patch_client(monkeypatch, [])
     with pytest.raises(ValidationError, match="genres"):
-        await seanime.seanime_browse_anime.entrypoint(search="x", genres=["isekai"])
+        await seanime.seanime_browse.entrypoint(kind="anime",search="x", genres=["isekai"])
     with pytest.raises(ValidationError, match="season"):
-        await seanime.seanime_browse_anime.entrypoint(search="x", season="autumn")
+        await seanime.seanime_browse.entrypoint(kind="anime",search="x", season="autumn")
     with pytest.raises(ValidationError, match="sort"):
-        await seanime.seanime_browse_anime.entrypoint(search="x", sort="BEST_FIRST")
+        await seanime.seanime_browse.entrypoint(kind="anime",search="x", sort="BEST_FIRST")
     with pytest.raises(ValidationError, match="adult"):
-        await seanime.seanime_browse_anime.entrypoint(search="x", adult="maybe")
+        await seanime.seanime_browse.entrypoint(kind="anime",search="x", adult="maybe")
     # Hentai while excluding adult contradicts itself — the tool says how to fix it.
-    result = await seanime.seanime_browse_anime.entrypoint(search="", genres=["Hentai"])
+    result = await seanime.seanime_browse.entrypoint(kind="anime",search="", genres=["Hentai"])
     assert 'adult="only"' in _tool_text(result)
 
 
@@ -427,7 +449,7 @@ async def test_browse_results_carry_genres_year_and_cover(monkeypatch):
         }
     }
     _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    result = await seanime.seanime_browse_manga.entrypoint(search="t")
+    result = await seanime.seanime_browse.entrypoint(kind="manga",search="t")
     assert f'"cover":"{_proxy("https://img/cover.jpg")}"' in _tool_text(result)
     assert '"cover_original":"https://img/cover.jpg"' in _tool_text(result)
     assert '"year":2019' in _tool_text(result)
@@ -436,7 +458,7 @@ async def test_browse_results_carry_genres_year_and_cover(monkeypatch):
 
 async def test_browse_empty_page_suggests_widening(monkeypatch):
     _patch_client(monkeypatch, [_FakeResponse(json_data={"data": {"Page": {"media": []}}})])
-    result = await seanime.seanime_browse_anime.entrypoint(search="zzz")
+    result = await seanime.seanime_browse.entrypoint(kind="anime",search="zzz")
     assert "no results" in _tool_text(result)
 
 
@@ -456,7 +478,7 @@ async def test_browse_manga_defaults_filter_adult_and_compact_chapters(monkeypat
         }
     }
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    result = await seanime.seanime_browse_manga.entrypoint(search="berserk")
+    result = await seanime.seanime_browse.entrypoint(kind="manga",search="berserk")
     method, url, body = client.calls[0]
     assert method == "POST" and url.endswith("/api/v1/manga/anilist/list")
     assert body == {"search": "berserk", "page": 1, "perPage": 10, "isAdult": False}

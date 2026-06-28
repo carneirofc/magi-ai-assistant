@@ -42,6 +42,7 @@ from pydantic import Field
 
 from agent.tools.outputs import FlexiblePayload, ToolOutput, fail, ok
 from core.config import config
+from core.media import allow_media_url
 
 _TIMEOUT_S: Final[float] = 30.0
 # Cap on what a tool returns to the model. ~3k tokens — enough for any single
@@ -211,7 +212,10 @@ def _image_proxy_url(url: str | None) -> Optional[str]:
 
 def _cover_delivery_urls(media: dict) -> tuple[Optional[str], Optional[str]]:
     original = _cover_url(media)
-    return _image_proxy_url(original), original
+    cover = _image_proxy_url(original)
+    allow_media_url(cover)
+    allow_media_url(original)
+    return cover, original
 
 
 # --- search filter normalization ------------------------------------------------
@@ -806,6 +810,12 @@ AdultMode = Literal["exclude", "include", "only"]
 AnimeSeason = Literal["WINTER", "SPRING", "SUMMER", "FALL"]
 AnimeFormat = Literal["TV", "TV_SHORT", "MOVIE", "SPECIAL", "OVA", "ONA", "MUSIC"]
 MangaFormat = Literal["MANGA", "NOVEL", "ONE_SHOT"]
+# Union the kind-specific formats for the one browse tool's schema; `_build_search_body`
+# validates the value against the right vocabulary for the chosen kind.
+AnyFormat = Literal[
+    "TV", "TV_SHORT", "MOVIE", "SPECIAL", "OVA", "ONA", "MUSIC",
+    "MANGA", "NOVEL", "ONE_SHOT",
+]
 MediaStatus = Literal["FINISHED", "RELEASING", "NOT_YET_RELEASED", "CANCELLED", "HIATUS"]
 MediaSort = Literal[
     "SCORE_DESC",
@@ -861,11 +871,11 @@ AniListGenre = Literal[
 )
 async def seanime_library(
     kind: Annotated[
-        LibraryKind,
+        LibraryKind | None,
         Field(default="anime", description="Library type to read from Seanime."),
     ] = "anime",
     group_by: Annotated[
-        LibraryGroupBy,
+        LibraryGroupBy | None,
         Field(default="none", description="Optional grouping for library summaries."),
     ] = "none",
 ) -> SeanimeOutput:
@@ -937,7 +947,7 @@ async def seanime_media_info(
         Field(gt=0, description="AniList media id from seanime_find or seanime_library."),
     ],
     kind: Annotated[
-        MediaKind,
+        MediaKind | None,
         Field(default="anime", description="Whether the media id is anime or manga."),
     ] = "anime",
 ) -> SeanimeOutput:
@@ -947,6 +957,7 @@ async def seanime_media_info(
     facts (description, genres, score, studios, relations, recommendations,
     cover URL). Get the id from `seanime_find` or `seanime_library` — never
     guess it. `kind` must match what the id is: "anime" (default) or "manga"."""
+    kind = (kind or "anime").strip().lower()
     if kind not in ("anime", "manga"):
         return fail('Unknown kind; use "anime" or "manga".', _data(kind=kind))
     return _tool_result("Seanime media info.", await _media_info(int(media_id), kind))
@@ -1104,7 +1115,7 @@ async def seanime_find(
         Field(min_length=1, description="Anime or manga title as the user named it."),
     ],
     kind: Annotated[
-        FindKind,
+        FindKind | None,
         Field(default="all", description="Search anime, manga, or both."),
     ] = "all",
 ) -> SeanimeOutput:
@@ -1131,6 +1142,7 @@ async def seanime_find(
     normalized = (title or "").strip().casefold()
     if not normalized:
         return fail("Provide a non-empty title.", _data(title=title))
+    kind = (kind or "all").strip().lower()
     if kind not in ("all", "anime", "manga"):
         return fail('Unknown kind; use "all" (default), "anime", or "manga".', _data(kind=kind))
     words = normalized.split()
@@ -1198,14 +1210,18 @@ async def seanime_find(
 
 # --- tools: discover in the global AniList catalog -------------------------------
 @tool(
-    description="Browse the global AniList anime catalog with search and filters.",
+    description="Browse/discover the global AniList catalog (anime or manga) with search and filters.",
     instructions=(
-        "Use for discovery and recommendations, not for the user's own library or a specific named title. "
-        'Results are global catalog items; adult is "exclude", "include", or "only".'
+        "Use for discovery and recommendations, not the user's own library or a specific named title. "
+        'kind is "anime" or "manga"; results are global catalog items; adult is "exclude", "include", or "only".'
     ),
     show_result=True,
 )
-async def seanime_browse_anime(
+async def seanime_browse(
+    kind: Annotated[
+        MediaKind | None,
+        Field(default="anime", description='Catalog to browse: "anime" or "manga".'),
+    ] = "anime",
     search: Annotated[
         str,
         Field(default="", description="Optional keyword search term; leave empty for filter-only browsing."),
@@ -1221,60 +1237,69 @@ async def seanime_browse_anime(
     ] = None,
     season: Annotated[
         AnimeSeason | None,
-        Field(default=None, description="Optional anime airing season."),
+        Field(default=None, description="Optional airing season (anime only; ignored for manga)."),
     ] = None,
     year: Annotated[
         int | None,
-        Field(default=None, ge=1900, le=2100, description="Optional airing season year."),
+        Field(default=None, ge=1900, le=2100, description="Optional year: airing season (anime) or publication start (manga)."),
     ] = None,
     format: Annotated[
-        AnimeFormat | None,
-        Field(default=None, description="Optional anime format."),
+        AnyFormat | None,
+        Field(
+            default=None,
+            description="Optional format. Anime: TV/TV_SHORT/MOVIE/SPECIAL/OVA/ONA/MUSIC. Manga: MANGA/NOVEL/ONE_SHOT.",
+        ),
     ] = None,
     status: Annotated[
         MediaStatus | None,
-        Field(default=None, description="Optional anime release status."),
+        Field(default=None, description="Optional release/publication status."),
     ] = None,
     sort: Annotated[
         MediaSort | None,
         Field(default=None, description="Optional AniList sort mode."),
     ] = None,
     adult: Annotated[
-        AdultMode,
+        AdultMode | None,
         Field(default="exclude", description="Adult-content filtering mode."),
     ] = "exclude",
 ) -> SeanimeOutput:
-    """DISCOVER anime in the global AniList catalog by filters — "top rated
-    2024 TV anime", "romance anime from winter 2024", trending, seasonal
-    browsing. Results are recommendations from the whole catalog, NOT the
-    user's library — say so when relaying them. To resolve a specific title
-    the user named, use `seanime_find` instead, never this. Returns media with
-    ids, formats, airing status, genres, and cover image URLs.
+    """DISCOVER anime or manga in the global AniList catalog by filters — "top
+    rated 2024 TV anime", "romance from winter 2024", "finished novels from
+    2024", trending, seasonal browsing. Results are recommendations from the
+    whole catalog, NOT the user's library — say so when relaying them. To
+    resolve a specific title the user named, use `seanime_find` instead, never
+    this. Returns media with ids, formats, airing/publishing status, episode or
+    chapter/volume counts, genres, and cover image URLs.
 
     Arguments:
+      - kind: "anime" (default) or "manga".
       - search: optional keyword for themes AniList has no genre for (e.g.
         "isekai"). Leave empty when filters alone describe the request.
     Filters (combine freely; every one is honored by the API):
       - genres: AniList genre names, e.g. ["Romance", "Comedy"].
-      - season: WINTER | SPRING | SUMMER | FALL (with `year` = that airing season).
-      - year: airing season year, e.g. 2024.
-      - format: TV | TV_SHORT | MOVIE | SPECIAL | OVA | ONA | MUSIC.
+      - season: WINTER | SPRING | SUMMER | FALL (anime only, with `year`).
+      - year: airing season year (anime) or publication start year (manga).
+      - format: anime TV | TV_SHORT | MOVIE | SPECIAL | OVA | ONA | MUSIC;
+        manga MANGA | NOVEL | ONE_SHOT (must match `kind`).
       - status: FINISHED | RELEASING | NOT_YET_RELEASED | CANCELLED | HIATUS.
       - sort: e.g. SCORE_DESC, POPULARITY_DESC, TRENDING_DESC, START_DATE_DESC.
       - adult: "exclude" (default — 18+ titles won't appear), "include" (both),
         or "only" (18+ only). Use "only" exactly when the user explicitly asks
         for adult content."""
+    kind = (kind or "anime").strip().lower()
+    if kind not in ("anime", "manga"):
+        return fail('Unknown kind; use "anime" or "manga".', _data(kind=kind))
     body, error = _build_search_body(
-        kind="anime", search=search, page=page, per_page=per_page, genres=genres,
-        season=season, year=year, media_format=format, status=status, sort=sort,
-        adult=adult,
+        kind=kind, search=search, page=page, per_page=per_page, genres=genres,
+        season=season if kind == "anime" else None, year=year,
+        media_format=format, status=status, sort=sort, adult=adult,
     )
     if error:
         return fail(error)
-    result = await _call("POST", _BROWSE_PATHS["anime"], body)
+    result = await _call("POST", _BROWSE_PATHS[kind], body)
     if _is_error(result):
         return fail(result)
-    return _tool_result("Seanime anime browse results.", _compact_search_results(result, "anime") or _render(result))
+    return _tool_result(f"Seanime {kind} browse results.", _compact_search_results(result, kind) or _render(result))
 
 
 @tool(
@@ -1315,81 +1340,6 @@ async def seanime_update_progress(
         f"Progress updated: media {media_id} marked at episode {episode_number}.",
         _data(media_id=media_id, episode_number=episode_number, total_episodes=total_episodes),
     )
-
-
-@tool(
-    description="Browse the global AniList manga catalog with search and filters.",
-    instructions=(
-        "Use for discovery and recommendations, not for the user's own library or a specific named title. "
-        'Results are global catalog items; adult is "exclude", "include", or "only".'
-    ),
-    show_result=True,
-)
-async def seanime_browse_manga(
-    search: Annotated[
-        str,
-        Field(default="", description="Optional keyword search term; leave empty for filter-only browsing."),
-    ] = "",
-    page: Annotated[int, Field(default=1, ge=1, description="AniList result page number.")] = 1,
-    per_page: Annotated[
-        int,
-        Field(default=10, ge=1, le=25, description="Number of results to return."),
-    ] = 10,
-    genres: Annotated[
-        list[AniListGenre] | None,
-        Field(default=None, description="Optional AniList genres to filter by."),
-    ] = None,
-    year: Annotated[
-        int | None,
-        Field(default=None, ge=1900, le=2100, description="Optional publication start year."),
-    ] = None,
-    format: Annotated[
-        MangaFormat | None,
-        Field(default=None, description="Optional manga format."),
-    ] = None,
-    status: Annotated[
-        MediaStatus | None,
-        Field(default=None, description="Optional manga publication status."),
-    ] = None,
-    sort: Annotated[
-        MediaSort | None,
-        Field(default=None, description="Optional AniList sort mode."),
-    ] = None,
-    adult: Annotated[
-        AdultMode,
-        Field(default="exclude", description="Adult-content filtering mode."),
-    ] = "exclude",
-) -> SeanimeOutput:
-    """DISCOVER manga in the global AniList catalog by filters — "top rated
-    romance manga", "finished novels from 2024", trending. Results are
-    recommendations from the whole catalog, NOT the user's library — say so
-    when relaying them. To resolve a specific title the user named, use
-    `seanime_find` instead, never this. Returns media with ids, formats,
-    chapter/volume counts, publishing status, genres, and cover image URLs.
-
-    Arguments:
-      - search: optional keyword for themes AniList has no genre for (e.g.
-        "isekai"). Leave empty when filters alone describe the request.
-    Filters (combine freely; every one is honored by the API):
-      - genres: AniList genre names, e.g. ["Romance", "Drama"].
-      - year: publication start year, e.g. 2024.
-      - format: MANGA | NOVEL | ONE_SHOT.
-      - status: FINISHED | RELEASING | NOT_YET_RELEASED | CANCELLED | HIATUS.
-      - sort: e.g. SCORE_DESC, POPULARITY_DESC, TRENDING_DESC, START_DATE_DESC.
-      - adult: "exclude" (default — 18+ titles won't appear), "include" (both),
-        or "only" (18+ only). Use "only" exactly when the user explicitly asks
-        for adult content."""
-    body, error = _build_search_body(
-        kind="manga", search=search, page=page, per_page=per_page, genres=genres,
-        season=None, year=year, media_format=format, status=status, sort=sort,
-        adult=adult,
-    )
-    if error:
-        return fail(error)
-    result = await _call("POST", _BROWSE_PATHS["manga"], body)
-    if _is_error(result):
-        return fail(result)
-    return _tool_result("Seanime manga browse results.", _compact_search_results(result, "manga") or _render(result))
 
 
 @tool(
@@ -1439,8 +1389,7 @@ SEANIME_TOOLS: Final[list[Any]] = [
     seanime_library,
     seanime_find,
     seanime_media_info,
-    seanime_browse_anime,
-    seanime_browse_manga,
+    seanime_browse,
     seanime_episode_collection,
     seanime_missing_episodes,
     seanime_upcoming_schedule,
