@@ -33,11 +33,17 @@ _PREVIEW_LEN = 240
 
 
 def _preview(value: object) -> str:
-    """One-line, length-capped repr for logs."""
-    if isinstance(value, BaseModel):
-        text = value.model_dump_json()
-    else:
-        text = str(value)
+    """One-line, length-capped repr for logs.
+
+    Must never raise: previewing a result is pure observability, so a value with
+    a broken serializer (e.g. a not-fully-built pydantic model whose serializer
+    is still a ``MockValSer``) must degrade to ``repr`` instead of aborting the
+    very tool call this hook exists to keep alive.
+    """
+    try:
+        text = value.model_dump_json() if isinstance(value, BaseModel) else str(value)
+    except Exception:  # noqa: BLE001 — a broken serializer must not kill the run.
+        text = repr(value)
     text = " ".join(text.split())
     return text if len(text) <= _PREVIEW_LEN else f"{text[:_PREVIEW_LEN]}…"
 
