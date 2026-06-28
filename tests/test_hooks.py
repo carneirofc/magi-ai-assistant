@@ -47,6 +47,36 @@ async def test_hook_materializes_async_generator_member_result():
     assert result == "first\nsecond"
 
 
+async def test_hook_reassembles_streamed_member_content_deltas():
+    """Streaming path: the member's reply arrives as RunContent token deltas.
+
+    agno yields event objects (not strings) here; the hook must concatenate
+    their content into the answer instead of dropping it (which would feed the
+    lead an empty delegation) and must not log one line per token.
+    """
+
+    class _Delta:
+        def __init__(self, content):
+            self.event = "RunContent"
+            self.content = content
+
+    class _Lifecycle:
+        event = "RunCompleted"
+        content = None
+
+    async def delegate(**kwargs):
+        async def events():
+            yield _Delta("Hello")
+            yield _Delta(", ")
+            yield _Lifecycle()  # non-content event: ignored for the answer text
+            yield _Delta("world")
+
+        return events()
+
+    result = await tool_call_hook("delegate_task_to_member", delegate, {"member_id": "x", "task": "t"})
+    assert result == "Hello, world"
+
+
 def test_preview_serializes_pydantic_outputs_as_json():
     result = ok("done", FlexiblePayload(text="payload"))
 

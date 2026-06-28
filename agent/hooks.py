@@ -56,23 +56,59 @@ def _event_text(event: object) -> str:
     return f"[{event_type}]"
 
 
+class _StreamedAnswer:
+    """Rebuilds a delegated member's reply from its drained event stream.
+
+    With a tool hook attached, agno hands us the member's generator instead of
+    streaming it itself (see ``Function.aexecute``), so the answer must be
+    reassembled here. It arrives one of two ways: as plain strings (the
+    non-streaming delegate path yields the whole reply as a block) or as a run
+    of ``RunContent`` events (the streaming path yields the reply token by
+    token). We keep the two apart so blocks stay newline-separated while token
+    deltas concatenate seamlessly.
+
+    Token deltas are accumulated *silently*: logging one line per token was the
+    flood this used to cause (worst on the chattiest member, the Prompt Artist).
+    Only the rare non-content events — run lifecycle, errors — get a line, so a
+    member failure can't vanish.
+    """
+
+    def __init__(self, label: str, function_name: str) -> None:
+        self._label = label
+        self._function_name = function_name
+        self._blocks: list[str] = []
+        self._deltas: list[str] = []
+
+    def add(self, event: object) -> None:
+        if isinstance(event, str):
+            self._blocks.append(event)
+            return
+        if str(getattr(event, "event", "")).endswith("RunContent"):
+            content = getattr(event, "content", None)
+            if isinstance(content, str):
+                self._deltas.append(content)
+            return
+        log_info(f"  {self._label} '{self._function_name}' event → {_preview(_event_text(event))}")
+
+    def text(self) -> str:
+        blocks = [block for block in self._blocks if block]
+        delta_text = "".join(self._deltas)
+        if delta_text:
+            blocks.append(delta_text)
+        return "\n".join(blocks)
+
+
 async def _materialize_result(result: object, label: str, function_name: str) -> object:
     if isasyncgen(result):
-        parts: list[str] = []
+        answer = _StreamedAnswer(label, function_name)
         async for event in result:
-            text = _event_text(event)
-            log_info(f"  {label} '{function_name}' event → {_preview(text)}")
-            if isinstance(event, str):
-                parts.append(event)
-        return "\n".join(part for part in parts if part)
+            answer.add(event)
+        return answer.text()
     if isgenerator(result):
-        parts = []
+        answer = _StreamedAnswer(label, function_name)
         for event in result:
-            text = _event_text(event)
-            log_info(f"  {label} '{function_name}' event → {_preview(text)}")
-            if isinstance(event, str):
-                parts.append(event)
-        return "\n".join(part for part in parts if part)
+            answer.add(event)
+        return answer.text()
     return result
 
 

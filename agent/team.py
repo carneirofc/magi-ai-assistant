@@ -164,6 +164,13 @@ def build_team(
         telemetry=False,
         store_events=True,
         store_member_responses=True,
+        # Don't re-emit each member's granular run events (tool calls, reasoning,
+        # run lifecycle) up through the delegate tool. They flood the logs — the
+        # tool hook drains and logs the delegate's stream (see agent/hooks.py) —
+        # and add nothing: a member's own tool calls are already logged by the
+        # tool_hook we attach to every member above. The member's answer (its
+        # RunContent deltas) still streams through; only the noise is dropped.
+        stream_member_events=False,
         # Observability + robustness: log every member/tool call and convert a
         # raising tool into a lead-visible error instead of aborting the run.
         tool_hooks=[tool_call_hook],
