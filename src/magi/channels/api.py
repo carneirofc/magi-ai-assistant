@@ -592,7 +592,7 @@ def build_api_app(db: Optional[BaseDb] = None) -> FastAPI:
 
     log_info(f"building api app (db={'injected' if db else 'default'})")
     conversation = build_conversation_service(
-        channel_guidance=load_prompt("magi/channels/api.md"),
+        channel_guidance=load_prompt("channels/api.md"),
         db=db,
         # The Discord specialist needs a live Discord conversation context; over
         # the API there is none, so it's left off the roster.
