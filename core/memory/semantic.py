@@ -20,10 +20,7 @@ from typing import Optional, Protocol
 from agno.utils.log import log_info, log_warning
 
 from core.config import config
-
-# LiteLLM SDK prefix that routes an embedding call through our proxy (mirrors the
-# model factory). Without it the SDK tries to infer a provider and fails.
-_PROXY_PREFIX = "litellm_proxy/"
+from core.embeddings import embed_text
 
 
 class MemoryRetriever(Protocol):
@@ -41,23 +38,10 @@ class SemanticIndex:
         self.collection = collection
         self._client = None  # lazily built; None means "unavailable, no-op"
         self._dim: Optional[int] = None
-        self._embed_model = f"{_PROXY_PREFIX}{config.embedding_model_id.removeprefix(_PROXY_PREFIX)}"
 
     # --- embedding ----------------------------------------------------------
     def _embed(self, text: str) -> Optional[list[float]]:
-        try:
-            import litellm
-
-            resp = litellm.embedding(
-                model=self._embed_model,
-                input=[text],
-                api_base=config.litellm_base_url,
-                api_key=config.litellm_api_key,
-            )
-            return list(resp.data[0]["embedding"])
-        except Exception as exc:  # noqa: BLE001
-            log_warning(f"semantic: embedding failed ({type(exc).__name__}: {exc})")
-            return None
+        return embed_text(text)  # shared proxy embedder; None on any failure
 
     # --- qdrant client (lazy) ----------------------------------------------
     def _ensure_client(self, dim: int):
