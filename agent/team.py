@@ -24,6 +24,7 @@ from agent.hooks import tool_call_hook
 from agent.members import MEMBER_BUILDERS
 from agent.model import build_lead_model, build_member_model
 from agent.tools.http import HTTP_TOOLS
+from agent.tools.knowledge import build_knowledge_tools
 from agent.tools.media import MEDIA_TOOLS
 from agent.tools.memory import build_memory_tools
 from agent.tools.outputs import ToolOutput, ok
@@ -32,6 +33,7 @@ from agent.tools.thinking import build_thinking_tools
 from agent.tools.vision import VISION_TOOLS
 from core.config import config
 from core.db import get_db
+from core.knowledge import build_knowledge_from_config
 from core.memory import MemoryManager
 from core.prompts import load_prompt
 from core.storage import build_s3_store_from_config
@@ -131,6 +133,18 @@ def build_team(
             storage_tools = build_storage_tools(store, memory)
             log_info(f"storage: ENABLED ({len(storage_tools)} tools, bucket={config.s3_bucket})")
 
+    # Knowledge layer (global RAG corpus) — read-only reference the lead can search.
+    # Gated by config; degrades to nothing when off / Qdrant down / embeddings absent,
+    # so a deployment without it still boots cleanly.
+    knowledge_tools: list = []
+    knowledge = build_knowledge_from_config()
+    if knowledge is not None:
+        knowledge_tools = build_knowledge_tools(knowledge)
+        log_info(
+            f"knowledge: ENABLED ({len(knowledge_tools)} tool, "
+            f"collection={config.knowledge_collection})"
+        )
+
     instructions = load_prompt("team/lead.md")
     log_info(
         f"building team 'ChatbotTeam': lead={lead.id} (ctx={config.lead_num_ctx}, "
@@ -188,6 +202,8 @@ def build_team(
             # (http_request) without round-tripping through a member.
             *HTTP_TOOLS,
             *build_memory_tools(memory),
+            # Search the global knowledge corpus (empty unless the feature is on).
+            *knowledge_tools,
             # Bound to the live model objects: members all share `member_model`,
             # so one mutation flips the whole team.
             *build_thinking_tools([lead, member_model]),

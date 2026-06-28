@@ -61,3 +61,15 @@ Turns evicted from the live window, held until the next session fold consumes th
 **Scope**:
 The (user, session) a memory operation belongs to. Set once per message, read via
 a process-global ContextVar — never threaded as a tool argument.
+
+**Knowledge** (`core/knowledge`):
+A global, read-only RAG corpus the agent searches via the `search_knowledge` tool
+— distinct from **memory**: memory is per-user and conversation-derived (the
+curator owns it); knowledge is a shared *document* corpus, chunked + embedded
+*faithfully* (no LLM extraction, so retrieval returns source text) into its own
+Qdrant collection. Reuses the shared proxy embedder (`core/embeddings`) and the
+Qdrant endpoint. Populated out-of-band (`scripts/ingest_knowledge.py`); gated by
+`knowledge_enabled`; degrades to no tool when off / Qdrant down. Chunks carry a
+`scope` field (`"global"` today) — `store.search(scopes=…)` is the seam for
+per-user/session knowledge later.
+_Avoid_: conflating with memory (different lifecycle, different store).

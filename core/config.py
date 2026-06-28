@@ -165,6 +165,21 @@ class Config:
     qdrant_api_key: str | None = _secret("QDRANT_API_KEY")
     semantic_top_k: int = 5
 
+    # --- Knowledge layer (RAG; see core/knowledge + agent/tools/knowledge). A
+    # global, read-only reference corpus the agent retrieves from via the
+    # search_knowledge tool — distinct from memory (per-user, conversation-derived).
+    # Documents are chunked + embedded faithfully (NO LLM extraction) into a Qdrant
+    # collection separate from semantic memory, reusing the same embedding model +
+    # Qdrant endpoint above. Populated out-of-band (scripts/ingest_knowledge.py).
+    # Off by default; degrades to no tool when Qdrant/embeddings are unreachable.
+    # Documents are stored under scope "global"; the store's search(scopes=...) is
+    # the hook for narrowing to per-user/session origin later. ---
+    knowledge_enabled: bool = False
+    knowledge_collection: str = "chatbot_knowledge"
+    knowledge_top_k: int = 5
+    knowledge_chunk_chars: int = 1_200  # target chunk size before overlap
+    knowledge_chunk_overlap: int = 150  # chars repeated between adjacent chunks
+
     # --- Object storage (S3-compatible; see core/storage + agent/tools/storage).
     # A durable file/image archive the model uses as memory: it can stash a file
     # under the current user's scope and recall it later by reference. Off by
