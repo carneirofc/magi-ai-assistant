@@ -13,9 +13,12 @@ import agent.tools.media as media_tools
 from agent.tools.media import send_media_from_url
 from agent.tools.outputs import ToolOutput
 from core.media import (
+    allow_media_url,
+    close_allowed_media_urls,
     close_media_outbox,
     collect_reply_media,
     is_view_only,
+    open_allowed_media_urls,
     open_media_outbox,
     stage_media,
     view_only_id,
@@ -121,6 +124,57 @@ async def test_surfaces_http_and_network_errors(monkeypatch):
     _patch_client(monkeypatch, raise_exc=httpx.ConnectError("boom"))
     result = await send_media_from_url.entrypoint(url="https://x/a.png")
     assert "Could not fetch" in _tool_text(result)
+
+
+async def test_conversation_allowlist_refuses_unsourced_media_url(monkeypatch):
+    _patch_client(
+        monkeypatch,
+        response=_FakeResponse(content=b"png", headers={"content-type": "image/png"}),
+    )
+    token = open_allowed_media_urls("thumbnail from seanime")
+    try:
+        result = await send_media_from_url.entrypoint(url="https://i.imgur.com/stale.png")
+    finally:
+        close_allowed_media_urls(token)
+
+    assert "unsourced media URL" in _tool_text(result)
+
+
+async def test_conversation_allowlist_allows_user_supplied_media_url(monkeypatch):
+    _patch_client(
+        monkeypatch,
+        response=_FakeResponse(content=b"png", headers={"content-type": "image/png"}),
+    )
+    allowed = "https://cdn.example/user.png"
+    allow_token = open_allowed_media_urls(f"send this {allowed}")
+    outbox_token = open_media_outbox()
+    try:
+        result = await send_media_from_url.entrypoint(url=allowed)
+        outbox = close_media_outbox(outbox_token)
+    finally:
+        close_allowed_media_urls(allow_token)
+
+    assert "Attached the image" in _tool_text(result)
+    assert len(outbox.images) == 1
+
+
+async def test_conversation_allowlist_allows_source_registered_media_url(monkeypatch):
+    _patch_client(
+        monkeypatch,
+        response=_FakeResponse(content=b"png", headers={"content-type": "image/png"}),
+    )
+    allowed = "https://cdn.example/seanime-cover.png"
+    allow_token = open_allowed_media_urls("thumbnail from seanime")
+    outbox_token = open_media_outbox()
+    try:
+        allow_media_url(allowed)
+        result = await send_media_from_url.entrypoint(url=allowed)
+        outbox = close_media_outbox(outbox_token)
+    finally:
+        close_allowed_media_urls(allow_token)
+
+    assert "Attached the image" in _tool_text(result)
+    assert len(outbox.images) == 1
 
 
 async def test_oversized_file_is_rejected(monkeypatch):

@@ -19,13 +19,12 @@ from typing import Annotated, Any, Final, Optional
 from urllib.parse import urlparse
 
 import httpx
-from agno.media import Audio, File, Image, Video
 from agno.tools import tool
 from agno.utils.log import log_info, log_warning
 from pydantic import BaseModel, Field
 
 from agent.tools.outputs import ToolOutput, ok, fail
-from core.media import stage_media
+from core.media import is_media_url_allowed, stage_bytes
 
 # Generous fetch cap — the channel applies its own upload limits (and falls
 # back to the link when a file exceeds them).
@@ -62,8 +61,13 @@ def _filename(url: str, ctype: str, explicit: Optional[str]) -> str:
 @tool(
     description="Fetch a direct URL and attach the file to the user's reply as real media.",
     instructions=(
+        "This delivers a file the user asked for; it does NOT fetch an image for you to see. An image already "
+        "attached to this turn is in your context — never call this (or invent a URL) to 're-send' or re-fetch it. "
         "Use when the deliverable is the actual file, image, audio, or video rather than a link. "
-        "This does not load the media into model context; use view_image_from_url when you need to inspect pixels."
+        "Only use URLs supplied by the user or returned by a successful source-specific tool in the current turn; "
+        "never invent, guess, repair, or reuse a stale media URL. For source-specific media such as Seanime covers, "
+        "call that source tool first and pass through its exact URL. This does not load the media into model "
+        "context; use view_image_from_url when you need to inspect pixels."
     ),
     show_result=True,
 )
@@ -81,9 +85,14 @@ async def send_media_from_url(
     attachment (image, audio, video, or document) instead of a link.
 
     Use this whenever the user wants the actual media — an icon, a cover, a
-    picture, a sound — and you only have its URL (from a team member, a search
-    result, an API response). Posting the URL as text is NOT delivering the
-    media; call this tool and the host attaches the real file to your reply.
+    picture, a sound — and you have its URL from the user or from a successful
+    source-specific tool result in the current turn. Posting the URL as text is
+    NOT delivering the media; call this tool and the host attaches the real file
+    to your reply.
+
+    Do not use this to search for media and do not pass guessed, reconstructed,
+    or stale URLs. For source-specific media (for example, Seanime thumbnails),
+    call the source tool first and pass through the exact URL it returned.
 
     The file is sent to the user but NOT loaded into your own context — to look
     at an image yourself, use `view_image_from_url`. `filename` optionally
@@ -93,6 +102,12 @@ async def send_media_from_url(
     url = (url or "").strip()
     if not url.lower().startswith(("http://", "https://")):
         return fail(f"Refusing to fetch non-http(s) URL: {url!r}", MediaFetchData(url=url))
+    if not is_media_url_allowed(url):
+        return fail(
+            "Refusing to attach an unsourced media URL. Use a URL from the user "
+            "or from a successful source-specific tool result in this turn.",
+            MediaFetchData(url=url, delivered=False),
+        )
 
     try:
         async with httpx.AsyncClient(
@@ -122,21 +137,8 @@ async def send_media_from_url(
 
     ctype = (resp.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
     ctype = ctype or "application/octet-stream"
-    subtype = ctype.split("/", 1)[1] if "/" in ctype else None
     name = _filename(url, ctype, filename)
-
-    if ctype.startswith("image/"):
-        kind = "image"
-        staged = stage_media(images=(Image(content=data, mime_type=ctype, format=subtype),))
-    elif ctype.startswith("audio/"):
-        kind = "audio"
-        staged = stage_media(audio=(Audio(content=data, mime_type=ctype, format=subtype),))
-    elif ctype.startswith("video/"):
-        kind = "video"
-        staged = stage_media(videos=(Video(content=data, mime_type=ctype, format=subtype),))
-    else:
-        kind = "file"
-        staged = stage_media(files=(File(content=data, mime_type=ctype, filename=name),))
+    kind, staged = stage_bytes(data, ctype, name)
 
     if not staged:
         # No outbox open (bare run outside ConversationService) — be honest.

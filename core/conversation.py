@@ -16,7 +16,13 @@ from typing import Any, Optional, Protocol
 from agno.utils.log import log_error, log_info, log_warning
 from agno.utils.message import get_text_from_message
 
-from core.media import close_media_outbox, collect_reply_media, open_media_outbox
+from core.media import (
+    close_allowed_media_urls,
+    close_media_outbox,
+    collect_reply_media,
+    open_allowed_media_urls,
+    open_media_outbox,
+)
 from core.memory import MemoryManager
 
 
@@ -27,6 +33,23 @@ class Runner(Protocol):
     def arun(
         self, *, input: str, user_id: str, session_id: str, **kwargs: Any
     ) -> Any: ...
+
+def _inbound_media_urls(media: dict[str, Any]) -> list[str]:
+    """The http(s) URLs of inbound media passed by reference (not inline bytes).
+
+    These let `view_image_from_url` fetch an image the user attached as a link
+    rather than typed into the text, while still rejecting URLs the model
+    invented (which appear on no inbound media object). Inline-byte media has no
+    URL and is already visible to the model, so it contributes nothing here.
+    """
+    urls: list[str] = []
+    for items in media.values():
+        for item in items or ():
+            url = getattr(item, "url", None)
+            if url:
+                urls.append(url)
+    return urls
+
 
 _ERROR_REPLY = "Sorry, there was an error processing your message. Please try again later."
 # Run finished cleanly but the lead emitted nothing — e.g. a tool failed and it
@@ -93,15 +116,20 @@ class ConversationService:
         return f"<context>\n{context}\n</context>\n\n{text}" if context else text
 
     async def _finish_turn(
-        self, reply: str, reasoning: Optional[str], media: Optional[dict] = None
+        self,
+        reply: str,
+        reasoning: Optional[str],
+        media: Optional[dict] = None,
+        user_text: str = "",
     ) -> ConversationReply:
-        """Record the reply + fold memory; the one tail both run modes share."""
+        """Record the reply + fold/curate memory; the one tail both run modes share."""
         media = media or {}
         if reply:
             self.memory.record_assistant_turn(reply)
-            # Fold rolled-off turns + accumulated facts (no-ops unless enabled).
+            # Fold rolled-off turns (no-op unless enabled), then let the post-turn
+            # curator revise durable memory from this turn (no-op unless enabled).
             await self.memory.maybe_summarize_session()
-            await self.memory.maybe_summarize_long_term()
+            await self.memory.maybe_curate(user_text, reply)
         elif not reasoning and not any(media.values()):
             # Completed with neither answer, reasoning, nor media: the lead went
             # silent (commonly after a tool error). Return an honest fallback
@@ -125,6 +153,7 @@ class ConversationService:
         log_info(f"conversation: handling (session={session_id}, user={user_id})")
 
         run_input = self._prepare_input(user_id, session_id, text, extra_context)
+        allowed_urls_token = open_allowed_media_urls(text, _inbound_media_urls(media))
         outbox_token = open_media_outbox()
         try:
             response = await self.runner.arun(
@@ -132,6 +161,7 @@ class ConversationService:
             )
         finally:
             outbox = close_media_outbox(outbox_token)
+            close_allowed_media_urls(allowed_urls_token)
         log_info(
             f"conversation: status={response.status}, "
             f"content_len={len(response.content or '')}"
@@ -146,6 +176,7 @@ class ConversationService:
             reply,
             getattr(response, "reasoning_content", None),
             collect_reply_media(response, outbox),
+            user_text=text,
         )
 
     async def handle_stream(
@@ -171,6 +202,7 @@ class ConversationService:
         run_input = self._prepare_input(user_id, session_id, text, extra_context)
         chunks: list[str] = []
         final = None
+        allowed_urls_token = open_allowed_media_urls(text, _inbound_media_urls(media))
         outbox_token = open_media_outbox()
         try:
             stream = self.runner.arun(
@@ -200,6 +232,7 @@ class ConversationService:
             return
         finally:
             outbox = close_media_outbox(outbox_token)
+            close_allowed_media_urls(allowed_urls_token)
 
         if final is not None and final.status == "ERROR":
             log_error(final.content)
@@ -213,7 +246,9 @@ class ConversationService:
             reply = get_text_from_message(final.content)
         reply = reply or "".join(chunks)
         reasoning = getattr(final, "reasoning_content", None) if final is not None else None
-        yield await self._finish_turn(reply, reasoning, collect_reply_media(final, outbox))
+        yield await self._finish_turn(
+            reply, reasoning, collect_reply_media(final, outbox), user_text=text
+        )
 
     # --- control commands (channel formats the reply text) ------------------
     def flush(self, user_id: str | int, session_id: str) -> int:

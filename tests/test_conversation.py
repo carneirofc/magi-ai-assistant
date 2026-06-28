@@ -14,7 +14,19 @@ from core.conversation import (
     ConversationDelta,
     ConversationReply,
     ConversationService,
+    _inbound_media_urls,
 )
+
+
+def test_inbound_media_urls_extracts_by_reference_urls_only():
+    by_ref = SimpleNamespace(url="https://cdn.example/a.png")
+    by_bytes = SimpleNamespace(url=None)  # inline-byte image: already visible
+    media = {"images": [by_ref, by_bytes], "videos": [], "audio": []}
+    assert _inbound_media_urls(media) == ["https://cdn.example/a.png"]
+
+
+def test_inbound_media_urls_empty_for_no_media():
+    assert _inbound_media_urls({}) == []
 
 
 class _FakeMemory:
@@ -38,8 +50,8 @@ class _FakeMemory:
     async def maybe_summarize_session(self):
         pass
 
-    async def maybe_summarize_long_term(self):
-        pass
+    async def maybe_curate(self, user_message, assistant_reply):
+        self.curated = (user_message, assistant_reply)
 
 
 class _FakeRunner:

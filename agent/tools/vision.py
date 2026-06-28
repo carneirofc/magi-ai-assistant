@@ -21,7 +21,7 @@ from agno.tools.function import ToolResult
 from agno.utils.log import log_info, log_warning
 from pydantic import Field
 
-from core.media import view_only_id
+from core.media import is_media_url_allowed, view_only_id
 
 # Don't pull a whole movie into context because a link happened to resolve to
 # one. 20 MB comfortably covers any real image; bigger almost certainly isn't one.
@@ -36,8 +36,10 @@ _HEADERS = {
 @tool(
     description="Download a direct image URL into the model context for visual inspection.",
     instructions=(
-        "Use for direct HTTP(S) image links the user wants analyzed. This is view-only and not delivered "
-        "to the user; use send_media_from_url to attach media in the final reply."
+        "An image attached to this turn is ALREADY in your context — look at it directly; do not call this tool "
+        "for it. Use this ONLY for a direct HTTP(S) image link the user typed in their message or that a source "
+        "tool returned this turn — never invent, guess, reconstruct, or re-fetch a URL. "
+        "This is view-only and not delivered to the user; use send_media_from_url to attach media in the final reply."
     ),
     show_result=True,
 )
@@ -52,10 +54,17 @@ async def view_image_from_url(
 ) -> ToolResult:
     """Download an image from a URL so you can actually see and reason about it.
 
-    Use this whenever the user shares a direct link to an image (a URL ending in
+    An image already attached to this turn is in your context — just look at it
+    and describe it; do NOT call this tool for it, and never invent or reconstruct
+    a URL to "re-fetch" it. There is no upload service in this stack.
+
+    Use this only when the user shares a direct link to an image (a URL ending in
     .png/.jpg/.jpeg/.gif/.webp, or a CDN/attachment link that serves an image)
     and wants you to look at it. The image is loaded into your context, so after
     calling this you can describe its real contents instead of guessing.
+
+    Only pass a URL the user actually supplied (typed in their message) or one a
+    source tool returned this turn. Never invent, guess, or reconstruct a URL.
 
     This fetches the bytes at the URL directly; it does not scrape web pages. If
     the user gives a link to a page (not the image itself), find the direct image
@@ -68,6 +77,16 @@ async def view_image_from_url(
     url = (url or "").strip()
     if not url.lower().startswith(("http://", "https://")):
         return ToolResult(content=f"Refusing to fetch non-http(s) URL: {url!r}")
+    if not is_media_url_allowed(url):
+        log_warning(f"view_image_from_url: refusing unsourced URL {url}")
+        return ToolResult(
+            content=(
+                "Refusing to fetch an unsourced image URL — do not invent, guess, or "
+                "reconstruct one. Any image the user attached this turn is already in your "
+                "context; look at it directly. Only pass a URL the user typed in their message "
+                "or one a source tool returned this turn."
+            )
+        )
 
     try:
         async with httpx.AsyncClient(

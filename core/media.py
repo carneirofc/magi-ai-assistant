@@ -17,6 +17,8 @@ Two paths bring media into a `ConversationReply`:
 into the reply after.
 """
 
+import re
+from collections.abc import Iterable
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field, fields
 from typing import Any, Optional
@@ -48,6 +50,64 @@ class MediaOutbox:
 
 
 _OUTBOX: ContextVar[Optional[MediaOutbox]] = ContextVar("media_outbox", default=None)
+_ALLOWED_MEDIA_URLS: ContextVar[Optional[set[str]]] = ContextVar(
+    "allowed_media_urls", default=None
+)
+_HTTP_URL_RE = re.compile(r"https?://[^\s<>()\[\]{}\"']+", re.IGNORECASE)
+
+
+def _clean_url(url: str) -> str:
+    return (url or "").strip().rstrip(".,;:!?)\"]}")
+
+
+def extract_http_urls(text: str) -> set[str]:
+    """Direct URLs the user supplied in the current message."""
+    return {_clean_url(m.group(0)) for m in _HTTP_URL_RE.finditer(text or "")}
+
+
+def open_allowed_media_urls(
+    user_text: str = "", extra_urls: Iterable[str] = ()
+) -> Token:
+    """Start this run's allowlist for media URLs a tool may fetch.
+
+    Tools may add source-provided URLs as they run. Direct user URLs are seeded
+    here so "send this image" / "look at this image" still works without a
+    source-specific lookup. `extra_urls` seeds URLs the user attached out of band
+    — e.g. an inbound image passed by reference rather than pasted in the text —
+    so the same by-reference image stays fetchable for inspection.
+    """
+    seeded = extract_http_urls(user_text)
+    seeded.update(_clean_url(u) for u in extra_urls if u)
+    return _ALLOWED_MEDIA_URLS.set(seeded)
+
+
+def close_allowed_media_urls(token: Token) -> None:
+    _ALLOWED_MEDIA_URLS.reset(token)
+
+
+def allow_media_url(url: str | None) -> None:
+    """Mark one source-returned URL as deliverable during the current run."""
+    cleaned = _clean_url(url or "")
+    if not cleaned:
+        return
+    allowed = _ALLOWED_MEDIA_URLS.get()
+    if allowed is not None:
+        allowed.add(cleaned)
+
+
+def is_media_url_allowed(url: str) -> bool:
+    """Whether a media tool may fetch this URL in the current run.
+
+    Gates both delivery (`send_media_from_url`) and inspection
+    (`view_image_from_url`): a URL the model invented is on neither path. Outside
+    ConversationService there is no allowlist, preserving direct tool tests and
+    ad-hoc local calls. During a conversation, the URL must have come from the
+    user (typed or attached) or from a source tool that explicitly registered it.
+    """
+    allowed = _ALLOWED_MEDIA_URLS.get()
+    if allowed is None:
+        return True
+    return _clean_url(url) in allowed
 
 
 def open_media_outbox() -> Token:
@@ -87,6 +147,26 @@ def stage_media(
     outbox.audio.extend(audio)
     outbox.files.extend(files)
     return True
+
+
+def stage_bytes(data: bytes, content_type: str | None, filename: str) -> tuple[str, bool]:
+    """Classify raw bytes by content-type and stage them in the run's outbox.
+
+    The one place that maps a MIME type to an agno media kind (image/audio/video/
+    file) and constructs the right object — shared by every tool that delivers
+    fetched bytes (the URL media tool, the object-store recall tool). Returns the
+    chosen `kind` and whether staging happened (False => no outbox open, the
+    caller should be honest about non-delivery).
+    """
+    ctype = (content_type or "").split(";", 1)[0].strip().lower() or "application/octet-stream"
+    subtype = ctype.split("/", 1)[1] if "/" in ctype else None
+    if ctype.startswith("image/"):
+        return "image", stage_media(images=(Image(content=data, mime_type=ctype, format=subtype),))
+    if ctype.startswith("audio/"):
+        return "audio", stage_media(audio=(Audio(content=data, mime_type=ctype, format=subtype),))
+    if ctype.startswith("video/"):
+        return "video", stage_media(videos=(Video(content=data, mime_type=ctype, format=subtype),))
+    return "file", stage_media(files=(File(content=data, mime_type=ctype, filename=filename),))
 
 
 def collect_reply_media(response: Any, outbox: Optional[MediaOutbox] = None) -> dict[str, tuple]:

@@ -1,6 +1,6 @@
 import threading
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -36,7 +36,10 @@ class DummyMessage:
         self.content = content
         self.pinned = pinned
         self.attachments = []
-        self.created_at = datetime(2026, 6, 8, tzinfo=UTC)
+        # Relative to now, not a fixed calendar date: delete_recent_discord_messages
+        # skips messages older than Discord's 14-day bulk-delete window, so a
+        # hardcoded date would silently rot the fixture once it aged past 14 days.
+        self.created_at = datetime.now(UTC) - timedelta(days=1)
         self.deleted = False
 
     async def delete(self):

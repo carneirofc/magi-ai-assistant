@@ -127,3 +127,57 @@ async def test_surfaces_network_error(monkeypatch):
 
     assert result.images is None
     assert "could not fetch" in result.content.lower()
+
+
+async def test_refuses_unsourced_url_in_conversation(monkeypatch):
+    """A URL the model invented is on no allowlist → refuse before the network."""
+    from core.media import close_allowed_media_urls, open_allowed_media_urls
+
+    # Never reached if the guard works; make any fetch loudly wrong.
+    _patch_client(monkeypatch, raise_exc=AssertionError("should not fetch"))
+    token = open_allowed_media_urls("describe the image I attached")
+    try:
+        result = await view_image_from_url.entrypoint(
+            url="https://files.catbox.moe/2026-06-28T08-52-44-1000x1333.jpg"
+        )
+    finally:
+        close_allowed_media_urls(token)
+
+    assert result.images is None
+    assert "unsourced image URL" in result.content
+
+
+async def test_allows_user_supplied_url_in_conversation(monkeypatch):
+    """A URL the user typed (seeded into the allowlist) fetches normally."""
+    from core.media import close_allowed_media_urls, open_allowed_media_urls
+
+    allowed = "https://cdn.example/user.png"
+    _patch_client(
+        monkeypatch,
+        response=_FakeResponse(content=b"png", headers={"content-type": "image/png"}),
+    )
+    token = open_allowed_media_urls(f"look at {allowed}")
+    try:
+        result = await view_image_from_url.entrypoint(url=allowed)
+    finally:
+        close_allowed_media_urls(token)
+
+    assert result.images and len(result.images) == 1
+
+
+async def test_allows_attached_by_reference_url(monkeypatch):
+    """An image attached by reference (seeded via extra_urls) stays viewable."""
+    from core.media import close_allowed_media_urls, open_allowed_media_urls
+
+    attached = "https://cdn.example/attached.png"
+    _patch_client(
+        monkeypatch,
+        response=_FakeResponse(content=b"png", headers={"content-type": "image/png"}),
+    )
+    token = open_allowed_media_urls("what is this?", extra_urls=[attached])
+    try:
+        result = await view_image_from_url.entrypoint(url=attached)
+    finally:
+        close_allowed_media_urls(token)
+
+    assert result.images and len(result.images) == 1
