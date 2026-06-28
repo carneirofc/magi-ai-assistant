@@ -31,7 +31,7 @@ from agno.utils.log import log_info, log_warning
 
 from core.config import config
 from core.memory.curation import CurateFn, CurationInput
-from core.memory.kinds import Episodes, LongTerm, Session, SummarizeFn, clamp
+from core.memory.kinds import Episodes, LongTerm, Session, SummarizeFn
 from core.memory.semantic import MemoryRetriever
 from core.memory.store import FileMemoryStore, ScopedMemory
 
@@ -77,14 +77,15 @@ class MemoryManager:
         session_pending_max: int = 30,
         session_summary_max_chars: int = 4_000,
         curate_fn: Optional[CurateFn] = None,
-        long_term_summary_max_chars: int = 8_000,
+        long_term_fact_max_chars: int = 1_000,
+        long_term_facts_max: int = 200,
     ):
         self.store = store
         # Post-turn durable-memory curator (injected; None disables it). Owns the
-        # long-term profile when on — it rewrites it each turn instead of the lead
-        # appending raw facts. See core/memory/curation.py + agent/curator.py.
+        # long-term fact sheet when on — it revises it per-fact each turn (ADD/
+        # UPDATE/DELETE) instead of the lead appending raw facts. See
+        # core/memory/curation.py + agent/curator.py.
         self._curate_fn = curate_fn
-        self.long_term_summary_max_chars = long_term_summary_max_chars
         # When set, long-term/episodes are also embedded into a vector store so a kind
         # render can retrieve only the top-k relevant entries instead of the whole
         # file. None => whole-file injection (default). Owned by the kinds, not here.
@@ -92,6 +93,8 @@ class MemoryManager:
         # policy; this manager orchestrates them and handles the global persona.
         self.long_term = LongTerm(
             retriever, semantic_top_k, max(0, long_term_recent_raw),
+            fact_max_chars=long_term_fact_max_chars,
+            facts_max=long_term_facts_max,
         )
         self.episodes = Episodes(retriever, semantic_top_k, short_term_max)
         self.session = Session(
@@ -159,7 +162,7 @@ class MemoryManager:
         inp = CurationInput(
             user_message=user_message,
             assistant_reply=assistant_reply,
-            current_profile=self.long_term.render(mem, None),
+            current_facts=self.long_term.render_for_curator(mem),
             persona=self.store.persona.read(),
         )
         try:
@@ -169,11 +172,10 @@ class MemoryManager:
             return None
 
         applied: list[str] = []
-        if result.profile and result.profile.strip():
-            mem.long_term_summary.write(
-                clamp(result.profile.strip(), self.long_term_summary_max_chars, "long-term profile")
-            )
+        fact_ops = self.long_term.apply_ops(mem, result.operations)
+        if fact_ops:
             applied.append("profile")
+            log_info(f"memory: applied fact ops [{', '.join(fact_ops)}] for user {mem.user_id}")
         if result.episode and result.episode.strip():
             self.episodes.record_episode(mem, result.episode.strip())
             applied.append("episode")

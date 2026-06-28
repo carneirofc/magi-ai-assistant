@@ -247,7 +247,7 @@ def test_eviction_without_summarizer_just_drops(manager):
 
 
 def test_long_term_profile_and_recent_raw_injected(tmp_path):
-    """build_context renders the curated profile (long_term_summary, owned by the
+    """build_context renders the curated fact sheet (long_term_facts, owned by the
     curator) plus only the most-recent raw facts written via remember()."""
     mgr = MemoryManager(
         store=FileMemoryStore(tmp_path / "mem"),
@@ -257,14 +257,13 @@ def test_long_term_profile_and_recent_raw_injected(tmp_path):
     mgr.set_scope(user_id="u1", session_id="s1")
     for i in range(3):
         mgr.remember(f"fact {i}")
-    # The curator owns this file; simulate a curation pass writing the profile.
-    mgr.mem.long_term_summary.write("condensed profile")
+    # The curator owns this file; simulate a curation pass adding a durable fact.
+    mgr.mem.long_term_facts.add("condensed profile")
 
     ctx = mgr.build_context()
     assert "condensed profile" in ctx
     assert "fact 2" in ctx  # within recent-raw tail (last 2)
-    assert "fact 0" not in ctx  # older raw fact trimmed
-    assert "fact 0" not in ctx  # older facts live only in the summary now
+    assert "fact 0" not in ctx  # older raw fact trimmed (lives only in the sheet now)
 
 
 # --- semantic retrieval (fake retriever) ------------------------------------

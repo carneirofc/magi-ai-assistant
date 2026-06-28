@@ -133,7 +133,7 @@ class Config:
     session_pending_max: int = 30
     session_summary_max_chars: int = 4_000
 
-    # --- Long-term rendering. The durable profile (long_term_summary.md) is owned
+    # --- Long-term rendering. The durable fact sheet (long_term_facts.json) is owned
     # by the curator below; alongside it, build_context injects the most recent raw
     # facts written via `remember` so freshly-learned facts surface before the next
     # curation pass folds them in. ---
@@ -142,13 +142,17 @@ class Config:
     # --- Memory curator (see core/memory/curation + agent/curator). A cheap
     # post-turn pass that owns durable memory: instead of the lead appending
     # facts inline (append-only, on the reply path), the curator reads each
-    # finished turn and REWRITES the long-term profile (so it can update/supersede),
-    # optionally logging an episode or evolving the persona. Runs off the reply
-    # path; one member-model call per turn. The lead keeps only read tools. ---
+    # finished turn and revises the long-term fact sheet PER FACT — ADD a new fact,
+    # UPDATE one that changed, DELETE one now wrong, or NOOP — optionally logging an
+    # episode or evolving the persona. Runs off the reply path; one member-model
+    # call per turn. The lead keeps only read tools. ---
     memory_curation: bool = False
-    # Hard cap on the rewritten profile so a runaway curator can't park a huge
-    # blob that's replayed into every later run (<= 0 disables the clamp).
-    long_term_summary_max_chars: int = 8_000
+    # Per-fact size cap so a runaway curator can't park a huge fact that's replayed
+    # into every later run (<= 0 disables the clamp).
+    long_term_fact_max_chars: int = 1_000
+    # Soft cap on the number of durable facts; beyond it the oldest are dropped with
+    # a warning so the sheet can't grow unbounded if the curator stops pruning.
+    long_term_facts_max: int = 200
 
     # --- Semantic memory search (Qdrant + an embedding model via the proxy).
     # When off, build_context injects long-term/episodic whole; when on, it

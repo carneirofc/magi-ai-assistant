@@ -16,7 +16,7 @@ from typing import Optional
 from agno.utils.log import log_info
 
 from core.config import config
-from core.memory.curation import CurateFn, CurationInput, CurationResult
+from core.memory.curation import CurateFn, CurationInput, CurationResult, FactOp
 from core.memory.manager import MemoryManager, MemoryScope, SummarizeFn
 from core.memory.semantic import MemoryRetriever, build_semantic_index
 from core.memory.store import FileMemoryStore
@@ -27,6 +27,7 @@ __all__ = [
     "CurateFn",
     "CurationInput",
     "CurationResult",
+    "FactOp",
     "build_memory",
     "build_memory_from_config",
 ]
@@ -46,7 +47,8 @@ def build_memory(
     session_pending_max: int = 30,
     session_summary_max_chars: int = 4_000,
     curate_fn: Optional[CurateFn] = None,
-    long_term_summary_max_chars: int = 8_000,
+    long_term_fact_max_chars: int = 1_000,
+    long_term_facts_max: int = 200,
 ) -> MemoryManager:
     """Assemble a `MemoryManager` from already-built dependencies."""
     return MemoryManager(
@@ -62,7 +64,8 @@ def build_memory(
         session_pending_max=session_pending_max,
         session_summary_max_chars=session_summary_max_chars,
         curate_fn=curate_fn,
-        long_term_summary_max_chars=long_term_summary_max_chars,
+        long_term_fact_max_chars=long_term_fact_max_chars,
+        long_term_facts_max=long_term_facts_max,
     )
 
 
@@ -91,5 +94,6 @@ def build_memory_from_config(
         session_pending_max=config.session_pending_max,
         session_summary_max_chars=config.session_summary_max_chars,
         curate_fn=curate_fn,
-        long_term_summary_max_chars=config.long_term_summary_max_chars,
+        long_term_fact_max_chars=config.long_term_fact_max_chars,
+        long_term_facts_max=config.long_term_facts_max,
     )

@@ -1,10 +1,10 @@
-"""Unit tests for the three file-shape adapters (core/memory/adapters).
+"""Unit tests for the four file-shape adapters (core/memory/adapters).
 
 These pin the on-disk formats byte-for-byte so existing memory files round-trip
 unchanged after the store was refactored onto adapters.
 """
 
-from core.memory.adapters import BulletLog, Blob, JsonWindow
+from core.memory.adapters import BulletLog, Blob, JsonFacts, JsonWindow
 from core.memory.store import FileMemoryStore
 
 
@@ -57,3 +57,51 @@ def test_json_window_extend_accumulates_without_trimming(tmp_path):
     assert buf.extend([{"role": "user", "content": "x"}]) == 1
     assert buf.extend([{"role": "user", "content": "y"}]) == 2
     assert [t["content"] for t in buf.read()] == ["x", "y"]
+
+
+def test_json_facts_add_returns_stable_unique_ids(tmp_path):
+    facts = JsonFacts(tmp_path / "long_term_facts.json")
+
+    id_a = facts.add("uses SQLite")
+    id_b = facts.add("prefers terse replies")
+
+    assert id_a != id_b
+    stored = facts.read()
+    assert [f["id"] for f in stored] == [id_a, id_b]
+    assert facts.texts() == ["uses SQLite", "prefers terse replies"]
+
+
+def test_json_facts_update_replaces_in_place_by_id(tmp_path):
+    facts = JsonFacts(tmp_path / "long_term_facts.json")
+    fid = facts.add("uses Postgres")
+
+    assert facts.update(fid, "uses SQLite (was Postgres)") is True
+    assert facts.texts() == ["uses SQLite (was Postgres)"]  # same single fact
+    assert facts.update("nope", "ghost") is False  # unknown id, no-op
+
+
+def test_json_facts_remove_drops_by_id(tmp_path):
+    facts = JsonFacts(tmp_path / "long_term_facts.json")
+    fid = facts.add("temporary")
+    facts.add("durable")
+
+    assert facts.remove(fid) is True
+    assert facts.texts() == ["durable"]
+    assert facts.remove(fid) is False  # already gone
+
+
+def test_json_facts_trim_keeps_newest(tmp_path):
+    facts = JsonFacts(tmp_path / "long_term_facts.json")
+    for i in range(5):
+        facts.add(f"fact {i}")
+
+    assert facts.trim(2) == 3  # dropped the 3 oldest
+    assert facts.texts() == ["fact 3", "fact 4"]
+    assert facts.trim(0) == 0  # disabled
+
+
+def test_json_facts_unreadable_file_degrades_to_empty(tmp_path):
+    path = tmp_path / "long_term_facts.json"
+    path.write_text("{not json", encoding="utf-8")
+
+    assert JsonFacts(path).read() == []

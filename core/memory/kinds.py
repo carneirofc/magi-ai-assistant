@@ -12,10 +12,11 @@ resolves the scope and passes the `ScopedMemory` bundle (which carries its own
 guard and the retriever fallback each live once, as the helpers below.
 """
 
-from typing import Awaitable, Callable, Optional, Protocol, runtime_checkable
+from typing import Awaitable, Callable, Iterable, Optional, Protocol, runtime_checkable
 
 from agno.utils.log import log_info, log_warning
 
+from core.memory.curation import FactOp
 from core.memory.semantic import MemoryRetriever
 from core.memory.store import ScopedMemory
 
@@ -121,8 +122,12 @@ async def guarded_fold(
 
 # --- the kinds --------------------------------------------------------------
 class LongTerm:
-    """Durable per-user facts: rendered as a condensed profile (owned by the
-    post-turn curator) plus any recent raw facts written via `remember`."""
+    """Durable per-user facts: a curated, id-addressable fact sheet (owned by the
+    post-turn curator) plus any recent raw facts written via `remember`.
+
+    The curator revises the fact sheet one fact at a time (ADD/UPDATE/DELETE),
+    which is why this kind exposes both a context render (no ids, for the model's
+    answer) and a curator render (id-tagged, so the next pass can target a fact)."""
 
     section_header = "## What you remember about this user (global)"
     retriever_key = "long_term"
@@ -132,10 +137,14 @@ class LongTerm:
         retriever: Optional[MemoryRetriever],
         top_k: int,
         recent_raw: int,
+        fact_max_chars: int = 1_000,
+        facts_max: int = 200,
     ):
         self.retriever = retriever
         self.top_k = top_k
         self.recent_raw = recent_raw
+        self.fact_max_chars = fact_max_chars
+        self.facts_max = facts_max
 
     def render(self, mem: ScopedMemory, query: Optional[str]) -> str:
         return retrieved_or(
@@ -144,14 +153,48 @@ class LongTerm:
         )
 
     def _whole(self, mem: ScopedMemory) -> str:
-        summary = mem.long_term_summary.read()
-        if not summary:
-            return mem.long_term.read()  # nothing condensed yet
+        facts = mem.long_term_facts.texts()
+        if not facts:
+            return mem.long_term.read()  # nothing curated yet; show raw facts
+        parts = ["\n".join(f"- {f}" for f in facts)]
         recent = mem.long_term.recent(self.recent_raw)
-        parts = [strip_header(summary)]
         if recent:
             parts.append("Recent facts:\n" + "\n".join(f"- {r}" for r in recent))
         return "\n\n".join(parts)
+
+    def render_for_curator(self, mem: ScopedMemory) -> str:
+        """The durable facts the curator may revise, each tagged with its id so the
+        next pass can UPDATE/DELETE it: `[id] text` lines. Empty when none yet."""
+        return "\n".join(f"[{f['id']}] {f['text']}" for f in mem.long_term_facts.read())
+
+    def apply_ops(self, mem: ScopedMemory, operations: Iterable[FactOp]) -> list[str]:
+        """Apply the curator's per-fact operations to the fact sheet, in order.
+
+        Each op is clamped (size guardrail) and mirrored into the retriever on
+        add/update. UPDATE/DELETE against an unknown id is skipped (the curator
+        worked from a snapshot). Returns the kinds actually applied (for logging)."""
+        applied: list[str] = []
+        for op in operations:
+            if op.op == "add" and op.text and op.text.strip():
+                text = clamp(op.text.strip(), self.fact_max_chars, "long-term fact")
+                mem.long_term_facts.add(text)
+                index(self.retriever, mem.user_id, self.retriever_key, text)
+                applied.append("add")
+            elif op.op == "update" and op.fact_id and op.text and op.text.strip():
+                text = clamp(op.text.strip(), self.fact_max_chars, "long-term fact")
+                if mem.long_term_facts.update(op.fact_id, text):
+                    index(self.retriever, mem.user_id, self.retriever_key, text)
+                    applied.append("update")
+            elif op.op == "delete" and op.fact_id:
+                if mem.long_term_facts.remove(op.fact_id):
+                    applied.append("delete")
+        dropped = mem.long_term_facts.trim(self.facts_max)
+        if dropped:
+            log_warning(
+                f"memory: long-term facts over cap {self.facts_max}; dropped "
+                f"{dropped} oldest for user {mem.user_id} — is the curator pruning?"
+            )
+        return applied
 
     def remember(self, mem: ScopedMemory, fact: str) -> None:
         mem.long_term.append(fact)
