@@ -10,6 +10,7 @@ export function Nav({ title }: { title: string }) {
         <strong>{title}</strong>
         <nav style={{ display: "flex", gap: "0.8rem" }}>
           <Link href="/knowledge">Knowledge</Link>
+          <Link href="/subjects">Subjects</Link>
           <Link href="/memory">Memory</Link>
           <Link href="/persona">Persona</Link>
         </nav>

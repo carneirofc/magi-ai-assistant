@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 
+import { FactEditor } from "@/components/FactEditor";
 import { Nav } from "@/components/Nav";
 import { getProfile, listSessions } from "@/lib/admin-api";
 
@@ -39,20 +40,13 @@ export default async function UserMemoryPage({
         <p className="error">{error}</p>
       ) : (
         <>
-          <section>
-            <h2>Profile facts</h2>
-            {profile && profile.facts.length > 0 ? (
-              <ul>
-                {profile.facts.map((f) => (
-                  <li key={f.id}>
-                    {f.text} <span className="muted">({f.id})</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="muted">No curated facts.</p>
-            )}
-          </section>
+          {profile ? (
+            <FactEditor
+              userId={userId}
+              initialFacts={profile.facts}
+              initialVersion={profile.version}
+            />
+          ) : null}
 
           {profile && profile.raw_long_term.length > 0 ? (
             <section>
