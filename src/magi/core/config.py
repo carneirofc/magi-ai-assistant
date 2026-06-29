@@ -240,6 +240,16 @@ class Config:
     # not a cookie, so credentials are not allowed and "*" is safe.
     api_cors_origins: list[str] = field(default_factory=list)
 
+    # --- Admin service (magi/channels/admin). An operator-only tool to view and
+    # manage memory + organize the knowledge corpus — a SEPARATE deployable from
+    # the chat API, so its write-capable surface never rides the public brain. See
+    # ADR 0002. Reached only through the Next.js BFF (web/), which holds the token
+    # server-side; bind localhost / keep the port unpublished. admin_auth_token
+    # (secret) gates every /admin route with `Authorization: Bearer`. ---
+    admin_host: str = "127.0.0.1"
+    admin_port: int = 8100
+    admin_auth_token: str | None = _secret("ADMIN_AUTH_TOKEN")
+
     def log_settings(self) -> None:
         """Dump the effective config to the console (secrets masked).
 
@@ -247,7 +257,7 @@ class Config:
         backend urls, model ids, context windows, paths — in one place.
         """
         # Secrets that must never hit the log verbatim.
-        masked = {"litellm_api_key", "llamacpp_api_key", "DISCORD_BOT_TOKEN", "qdrant_api_key", "api_auth_token", "seanime_token", "s3_access_key_id", "s3_secret_access_key"}
+        masked = {"litellm_api_key", "llamacpp_api_key", "DISCORD_BOT_TOKEN", "qdrant_api_key", "api_auth_token", "admin_auth_token", "seanime_token", "s3_access_key_id", "s3_secret_access_key"}
         # Long prose: log the length, not the body.
         prose = {"system_prompt", "persona_seed"}
 

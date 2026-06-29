@@ -47,6 +47,22 @@ class KnowledgeHit:
     metadata: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class DocumentSummary:
+    """One document, aggregated from its chunks for the admin document list.
+
+    A *document* is the set of chunks sharing a `doc_id`; there is no document
+    record on disk, so this is derived by scrolling the corpus (see
+    `KnowledgeStore.list_documents`). `latest_ts` is the newest chunk timestamp
+    (when the doc was last ingested)."""
+
+    doc_id: str
+    source: str
+    scope: str
+    chunk_count: int
+    latest_ts: str
+
+
 class KnowledgeSearcher(Protocol):
     """What the search tool needs from a knowledge backend — keeps the tool layer
     decoupled from Qdrant so it can be faked in tests."""
@@ -93,6 +109,27 @@ class KnowledgeStore:
                 log_info(f"knowledge: created Qdrant collection '{self.collection}' (dim={dim})")
             self._client = client
             self._dim = dim
+            return client
+        except Exception as exc:  # noqa: BLE001
+            log_warning(f"knowledge: Qdrant unavailable ({type(exc).__name__}: {exc})")
+            return None
+
+    def _connect_existing(self):
+        """A client bound to the collection, *without* creating it — for admin
+        reads (list/delete) on a cold process where no embed has run yet.
+
+        Unlike `_ensure_client`, this never creates the collection: if it doesn't
+        exist there is simply nothing to list, so return None. Caches the client
+        on success so later calls reuse it. All failures degrade to None."""
+        if self._client is not None:
+            return self._client
+        try:
+            from qdrant_client import QdrantClient
+
+            client = QdrantClient(url=config.qdrant_url, api_key=config.qdrant_api_key)
+            if not client.collection_exists(self.collection):
+                return None
+            self._client = client
             return client
         except Exception as exc:  # noqa: BLE001
             log_warning(f"knowledge: Qdrant unavailable ({type(exc).__name__}: {exc})")
@@ -151,11 +188,74 @@ class KnowledgeStore:
         return len(points)
 
     def delete_document(self, doc_id: str) -> None:
-        """Remove all chunks for `doc_id`. No-op when the backend is unavailable."""
-        client = self._client
+        """Remove all chunks for `doc_id`. No-op when the backend is unavailable.
+
+        Connects to the existing collection if the client is cold (admin deletes
+        run in a process that never embedded), so a fresh admin service can delete."""
+        client = self._connect_existing()
         if client is None:
             return
         self._delete_doc(client, doc_id)
+
+    # --- enumerate (admin) --------------------------------------------------
+    def list_documents(self) -> list[DocumentSummary]:
+        """Every document in the corpus, one row per `doc_id`, aggregated from its
+        chunks by scrolling Qdrant payloads (no vectors). [] when the collection
+        is absent or the backend is unavailable.
+
+        There is no document record to read — the chunks are the source of truth —
+        so the list can never drift from what's actually retrievable. Cheap at the
+        hand-curated scale this corpus lives at; paginates so it stays correct if it
+        grows. Newest-ingested first (by latest chunk ts)."""
+        client = self._connect_existing()
+        if client is None:
+            return []
+        try:
+            docs: dict[str, dict] = {}
+            offset = None
+            while True:
+                points, offset = client.scroll(
+                    collection_name=self.collection,
+                    with_payload=True,
+                    with_vectors=False,
+                    limit=256,
+                    offset=offset,
+                )
+                for p in points:
+                    payload = p.payload or {}
+                    doc_id = str(payload.get("doc_id", ""))
+                    if not doc_id:
+                        continue
+                    ts = str(payload.get("ts", ""))
+                    agg = docs.get(doc_id)
+                    if agg is None:
+                        docs[doc_id] = {
+                            "source": str(payload.get("source", "")),
+                            "scope": str(payload.get("scope", GLOBAL_SCOPE)),
+                            "chunk_count": 1,
+                            "latest_ts": ts,
+                        }
+                    else:
+                        agg["chunk_count"] += 1
+                        if ts > agg["latest_ts"]:
+                            agg["latest_ts"] = ts
+                if offset is None:
+                    break
+        except Exception as exc:  # noqa: BLE001
+            log_warning(f"knowledge: list failed ({type(exc).__name__}: {exc})")
+            return []
+        summaries = [
+            DocumentSummary(
+                doc_id=doc_id,
+                source=agg["source"],
+                scope=agg["scope"],
+                chunk_count=agg["chunk_count"],
+                latest_ts=agg["latest_ts"],
+            )
+            for doc_id, agg in docs.items()
+        ]
+        summaries.sort(key=lambda d: d.latest_ts, reverse=True)
+        return summaries
 
     def _delete_doc(self, client, doc_id: str) -> None:
         try:
