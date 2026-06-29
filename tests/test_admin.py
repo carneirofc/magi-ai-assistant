@@ -7,10 +7,14 @@ fake the Qdrant `scroll` so the grouping/sort/pagination logic is pinned without
 live backend (same degradation philosophy as test_knowledge.py).
 """
 
+import tempfile
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from magi.channels.admin import create_admin_app
 from magi.core.knowledge import DocumentSummary, KnowledgeStore
+from magi.core.memory.store import FileMemoryStore
 
 
 # --- store: list_documents aggregation --------------------------------------
@@ -95,8 +99,10 @@ class _FakeKnowledge:
         return self._documents
 
 
-def _client(documents=(), auth_token=None):
-    app = create_admin_app(_FakeKnowledge(list(documents)), auth_token=auth_token)
+def _client(documents=(), auth_token=None, memory=None):
+    if memory is None:
+        memory = FileMemoryStore(Path(tempfile.mkdtemp()))  # empty: no users on disk
+    app = create_admin_app(_FakeKnowledge(list(documents)), memory, auth_token=auth_token)
     return TestClient(app)
 
 
@@ -141,3 +147,72 @@ def test_list_documents_requires_bearer_when_token_set():
 def test_no_token_means_open():
     # auth_token None => the gate is a no-op (keep the port unpublished instead).
     assert _client(auth_token=None).get("/admin/v1/knowledge/documents").status_code == 200
+
+
+# --- memory viewer (read-only) ----------------------------------------------
+def _seed_memory(tmp_path):
+    """A FileMemoryStore with one user's facts/episodes/session + a persona."""
+    store = FileMemoryStore(tmp_path)
+    mem = store.scoped("u1", "s1")
+    mem.long_term_facts.add("lives in Berlin")
+    mem.long_term_facts.add("likes anime")
+    mem.long_term.append("raw fact one")
+    mem.episodes.append("talked about docker")
+    mem.live_turns.append("user", "hi", 20)
+    mem.live_turns.append("assistant", "hello", 20)
+    mem.session_summary.write("earlier we said hi")
+    mem.pending.extend([{"role": "user", "content": "older", "ts": "t"}])
+    store.persona.append("be concise")
+    return store
+
+
+def test_list_users_aggregates_counts(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    data = client.get("/admin/v1/memory/users").json()
+    assert data == {
+        "users": [
+            {"user_id": "u1", "fact_count": 2, "episode_count": 1, "session_count": 1}
+        ]
+    }
+
+
+def test_list_users_empty_when_no_memory(tmp_path):
+    client = _client(memory=FileMemoryStore(tmp_path))
+    assert client.get("/admin/v1/memory/users").json() == {"users": []}
+
+
+def test_get_profile_returns_facts_and_episodes(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    data = client.get("/admin/v1/memory/users/u1/profile").json()
+    assert [f["text"] for f in data["facts"]] == ["lives in Berlin", "likes anime"]
+    assert all(f["id"] for f in data["facts"])
+    assert data["raw_long_term"] == ["raw fact one"]
+    assert data["episodes"] == ["talked about docker"]
+
+
+def test_list_sessions(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    assert client.get("/admin/v1/memory/users/u1/sessions").json() == {"sessions": ["s1"]}
+
+
+def test_get_session_detail(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    data = client.get("/admin/v1/memory/users/u1/sessions/s1").json()
+    assert [(t["role"], t["content"]) for t in data["turns"]] == [
+        ("user", "hi"),
+        ("assistant", "hello"),
+    ]
+    assert "earlier we said hi" in data["summary"]
+    assert data["pending"][0]["content"] == "older"
+
+
+def test_get_persona(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    assert "be concise" in client.get("/admin/v1/memory/persona").json()["text"]
+
+
+def test_memory_requires_bearer_when_token_set(tmp_path):
+    client = _client(auth_token="secret", memory=_seed_memory(tmp_path))
+    assert client.get("/admin/v1/memory/users").status_code == 401
+    ok = client.get("/admin/v1/memory/users", headers={"Authorization": "Bearer secret"})
+    assert ok.status_code == 200
