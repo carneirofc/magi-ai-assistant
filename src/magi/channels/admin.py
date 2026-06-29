@@ -92,6 +92,17 @@ class SetSubject(BaseModel):
     subject: str = Field(description="The subject name (from the registry), or '' to clear.")
 
 
+class EditTags(BaseModel):
+    """Add and/or remove free-form tags on a document."""
+
+    add: list[str] = Field(default_factory=list)
+    remove: list[str] = Field(default_factory=list)
+
+
+class TagList(BaseModel):
+    tags: list[str]
+
+
 # --- subject registry wire format --------------------------------------------
 class SubjectOut(BaseModel):
     id: str
@@ -295,6 +306,46 @@ def create_admin_app(
             documents=[DocumentSummaryOut.of(d) for d in knowledge.list_documents()]
         )
 
+    # Suffix routes (.../subject, .../tags) and /tags are declared BEFORE the
+    # catch-all `{doc_id:path}` document routes: the path converter is greedy, so a
+    # bare `{doc_id:path}` would otherwise swallow `<id>/tags` and shadow these.
+    @app.get(
+        "/admin/v1/knowledge/tags",
+        response_model=TagList,
+        dependencies=[Depends(require_auth)],
+    )
+    def list_tags() -> TagList:
+        return TagList(tags=knowledge.list_tags())
+
+    @app.put(
+        "/admin/v1/knowledge/documents/{doc_id:path}/subject",
+        response_model=DocumentDetailOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def set_document_subject(doc_id: str, body: SetSubject) -> DocumentDetailOut:
+        # A non-empty subject must exist in the registry (controlled vocabulary).
+        if body.subject and not any(s.name == body.subject for s in subjects.list()):
+            raise HTTPException(status_code=422, detail=f"unknown subject {body.subject!r}")
+        if not knowledge.set_document_subject(doc_id, body.subject):
+            raise HTTPException(status_code=404, detail="document not found")
+        detail = knowledge.get_document(doc_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="document not found")
+        return DocumentDetailOut.of(detail)
+
+    @app.patch(
+        "/admin/v1/knowledge/documents/{doc_id:path}/tags",
+        response_model=DocumentDetailOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def edit_document_tags(doc_id: str, body: EditTags) -> DocumentDetailOut:
+        if knowledge.tag_document(doc_id, add=body.add, remove=body.remove) is None:
+            raise HTTPException(status_code=404, detail="document not found")
+        detail = knowledge.get_document(doc_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="document not found")
+        return DocumentDetailOut.of(detail)
+
     @app.get(
         "/admin/v1/knowledge/documents/{doc_id:path}",
         response_model=DocumentDetailOut,
@@ -327,22 +378,6 @@ def create_admin_app(
     def delete_document(doc_id: str) -> None:
         if not knowledge.delete_document(doc_id):
             raise HTTPException(status_code=404, detail="document not found")
-
-    @app.put(
-        "/admin/v1/knowledge/documents/{doc_id:path}/subject",
-        response_model=DocumentDetailOut,
-        dependencies=[Depends(require_auth)],
-    )
-    def set_document_subject(doc_id: str, body: SetSubject) -> DocumentDetailOut:
-        # A non-empty subject must exist in the registry (controlled vocabulary).
-        if body.subject and not any(s.name == body.subject for s in subjects.list()):
-            raise HTTPException(status_code=422, detail=f"unknown subject {body.subject!r}")
-        if not knowledge.set_document_subject(doc_id, body.subject):
-            raise HTTPException(status_code=404, detail="document not found")
-        detail = knowledge.get_document(doc_id)
-        if detail is None:
-            raise HTTPException(status_code=404, detail="document not found")
-        return DocumentDetailOut.of(detail)
 
     # --- subjects (the controlled vocabulary) ------------------------------
     @app.get(

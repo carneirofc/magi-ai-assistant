@@ -509,6 +509,32 @@ class KnowledgeStore:
         summaries.sort(key=lambda d: d.latest_ts, reverse=True)
         return summaries
 
+    def list_tags(self) -> list[str]:
+        """Every distinct tag in the corpus, sorted — the source for tag
+        autocomplete. [] when the collection is absent / backend unavailable."""
+        client = self._connect_existing()
+        if client is None:
+            return []
+        try:
+            tags: set[str] = set()
+            offset = None
+            while True:
+                points, offset = client.scroll(
+                    collection_name=self.collection,
+                    with_payload=True,
+                    with_vectors=False,
+                    limit=256,
+                    offset=offset,
+                )
+                for p in points:
+                    tags.update(_payload_tags(p.payload or {}))
+                if offset is None:
+                    break
+        except Exception as exc:  # noqa: BLE001
+            log_warning(f"knowledge: list tags failed ({type(exc).__name__}: {exc})")
+            return []
+        return sorted(tags)
+
     def get_document(self, doc_id: str) -> Optional[DocumentDetail]:
         """One document's doc-level fields + its chunks in `chunk_index` order, or
         None when it doesn't exist / the backend is unavailable.

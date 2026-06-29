@@ -193,11 +193,45 @@ def test_tag_document_absent_returns_none():
     assert client.set_payload_calls == []
 
 
+def test_list_tags_unions_distinct_sorted():
+    points = [
+        _FakePoint({"tags": ["b", "a"]}),
+        _FakePoint({"tags": ["a", "c"]}),
+        _FakePoint({"tags": []}),
+    ]
+    assert _store_with_client(_FakeClient([(points, None)])).list_tags() == ["a", "b", "c"]
+
+
+def test_edit_document_tags_endpoint():
+    detail = DocumentDetail(
+        doc_id="a.md", source="a.md", title="A", subject="", tags=["keep", "drop"],
+        scope="global", chunks=[DocumentChunk(chunk_index=0, text="x")],
+    )
+    resp = _client(detail=detail).patch(
+        "/admin/v1/knowledge/documents/a.md/tags", json={"add": ["new"], "remove": ["drop"]}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["tags"] == ["keep", "new"]
+
+
+def test_edit_tags_missing_doc_is_404():
+    assert _client(detail=None).patch(
+        "/admin/v1/knowledge/documents/nope/tags", json={"add": ["x"]}
+    ).status_code == 404
+
+
+def test_list_tags_endpoint():
+    assert _client(tags=["docker", "k8s"]).get("/admin/v1/knowledge/tags").json() == {
+        "tags": ["docker", "k8s"]
+    }
+
+
 # --- admin app: endpoint + auth ---------------------------------------------
 class _FakeKnowledge:
-    def __init__(self, documents, detail=None):
+    def __init__(self, documents, detail=None, tags=()):
         self._documents = documents
         self._detail = detail
+        self._tags = list(tags)
         self.rename_subject_calls: list = []
 
     def list_documents(self):
@@ -228,6 +262,20 @@ class _FakeKnowledge:
         self.rename_subject_calls.append((old, new))
         return 0
 
+    def tag_document(self, doc_id, *, add=(), remove=()):
+        if self._detail and self._detail.doc_id == doc_id:
+            tags = list(self._detail.tags)
+            for t in add:
+                if t not in tags:
+                    tags.append(t)
+            tags = [t for t in tags if t not in set(remove)]
+            self._detail = dataclasses.replace(self._detail, tags=tags)
+            return tags
+        return None
+
+    def list_tags(self):
+        return self._tags
+
 
 class _FakeRetriever:
     """Records reset/index so the fact-write re-index path can be asserted."""
@@ -246,13 +294,15 @@ class _FakeRetriever:
         self.reset_calls.append((user_id, kind))
 
 
-def _client(documents=(), auth_token=None, memory=None, detail=None, retriever=None, subjects=None):
+def _client(
+    documents=(), auth_token=None, memory=None, detail=None, retriever=None, subjects=None, tags=()
+):
     if memory is None:
         memory = FileMemoryStore(Path(tempfile.mkdtemp()))  # empty: no users on disk
     if subjects is None:
         subjects = SubjectRegistry(Path(tempfile.mkdtemp()) / "subjects.json")
     app = create_admin_app(
-        _FakeKnowledge(list(documents), detail=detail),
+        _FakeKnowledge(list(documents), detail=detail, tags=tags),
         memory,
         subjects,
         retriever=retriever,
