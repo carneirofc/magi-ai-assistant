@@ -200,6 +200,16 @@ class JsonFacts:
             return []
         return data if isinstance(data, list) else []
 
+    def version(self) -> str:
+        """A content version token for optimistic concurrency — a sha256 of the raw
+        file bytes (empty-file token when absent). The admin viewer hands this to
+        the operator and requires it back on a write, so a stale edit is a visible
+        409 instead of a silent clobber of a concurrent curator write."""
+        import hashlib
+
+        raw = self.path.read_bytes() if self.path.exists() else b""
+        return hashlib.sha256(raw).hexdigest()
+
     def texts(self) -> list[str]:
         """The fact bodies, in order (no ids) — for rendering into context."""
         return [str(f.get("text", "")) for f in self.read() if f.get("text")]

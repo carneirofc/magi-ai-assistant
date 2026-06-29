@@ -212,11 +212,31 @@ class _FakeKnowledge:
         return False
 
 
-def _client(documents=(), auth_token=None, memory=None, detail=None):
+class _FakeRetriever:
+    """Records reset/index so the fact-write re-index path can be asserted."""
+
+    def __init__(self):
+        self.reset_calls: list = []
+        self.index_calls: list = []
+
+    def index(self, user_id, kind, text):
+        self.index_calls.append((user_id, kind, text))
+
+    def search(self, user_id, query, kind, top_k):
+        return []
+
+    def reset(self, user_id, kind):
+        self.reset_calls.append((user_id, kind))
+
+
+def _client(documents=(), auth_token=None, memory=None, detail=None, retriever=None):
     if memory is None:
         memory = FileMemoryStore(Path(tempfile.mkdtemp()))  # empty: no users on disk
     app = create_admin_app(
-        _FakeKnowledge(list(documents), detail=detail), memory, auth_token=auth_token
+        _FakeKnowledge(list(documents), detail=detail),
+        memory,
+        retriever=retriever,
+        auth_token=auth_token,
     )
     return TestClient(app)
 
@@ -388,3 +408,72 @@ def test_memory_requires_bearer_when_token_set(tmp_path):
     assert client.get("/admin/v1/memory/users").status_code == 401
     ok = client.get("/admin/v1/memory/users", headers={"Authorization": "Bearer secret"})
     assert ok.status_code == 200
+
+
+# --- fact CRUD + optimistic concurrency + semantic reset --------------------
+def _profile(client, user="u1"):
+    return client.get(f"/admin/v1/memory/users/{user}/profile").json()
+
+
+def test_add_fact_appends_and_returns_new_version(tmp_path):
+    store = _seed_memory(tmp_path)
+    retriever = _FakeRetriever()
+    client = _client(memory=store, retriever=retriever)
+    before = _profile(client)
+
+    resp = client.post("/admin/v1/memory/users/u1/facts", json={"text": "new fact"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [f["text"] for f in body["facts"]][-1] == "new fact"
+    assert body["version"] != before["version"]  # version moved
+    # Re-index rebuilt the whole long_term slice from current facts.
+    assert retriever.reset_calls == [("u1", "long_term")]
+    assert ("u1", "long_term", "new fact") in retriever.index_calls
+
+
+def test_update_fact(tmp_path):
+    store = _seed_memory(tmp_path)
+    client = _client(memory=store)
+    fact_id = _profile(client)["facts"][0]["id"]
+
+    resp = client.patch(
+        f"/admin/v1/memory/users/u1/facts/{fact_id}", json={"text": "moved to Munich"}
+    )
+    assert resp.status_code == 200
+    assert any(f["text"] == "moved to Munich" for f in resp.json()["facts"])
+
+
+def test_update_missing_fact_is_404(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    assert (
+        client.patch("/admin/v1/memory/users/u1/facts/nope", json={"text": "x"}).status_code == 404
+    )
+
+
+def test_delete_fact(tmp_path):
+    store = _seed_memory(tmp_path)
+    client = _client(memory=store)
+    fact_id = _profile(client)["facts"][0]["id"]
+
+    resp = client.delete(f"/admin/v1/memory/users/u1/facts/{fact_id}")
+    assert resp.status_code == 200
+    assert fact_id not in [f["id"] for f in resp.json()["facts"]]
+
+
+def test_stale_version_is_409(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    resp = client.post(
+        "/admin/v1/memory/users/u1/facts",
+        json={"text": "x", "expected_version": "deadbeef"},
+    )
+    assert resp.status_code == 409
+
+
+def test_current_version_is_accepted(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    version = _profile(client)["version"]
+    resp = client.post(
+        "/admin/v1/memory/users/u1/facts",
+        json={"text": "x", "expected_version": version},
+    )
+    assert resp.status_code == 200

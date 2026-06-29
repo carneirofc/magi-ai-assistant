@@ -30,6 +30,8 @@ class MemoryRetriever(Protocol):
 
     def search(self, user_id: str, query: str, kind: str, top_k: int) -> list[str]: ...
 
+    def reset(self, user_id: str, kind: str) -> None: ...
+
 
 class SemanticIndex:
     """Qdrant-backed retriever. All public methods are crash-proof by design."""
@@ -98,6 +100,33 @@ class SemanticIndex:
             )
         except Exception as exc:  # noqa: BLE001
             log_warning(f"semantic: upsert failed ({type(exc).__name__}: {exc})")
+
+    def reset(self, user_id: str, kind: str) -> None:
+        """Drop every indexed point for one `(user_id, kind)` slice. No-op when the
+        backend is unavailable.
+
+        The mirror is otherwise append-only, so a deleted/edited memory entry would
+        linger as a ghost vector; the admin re-index calls this then re-`index`es the
+        current entries, making semantic recall reflect the edit. See ADR 0002."""
+        client = self._client
+        if client is None:
+            return
+        try:
+            from qdrant_client import models
+
+            client.delete(
+                collection_name=self.collection,
+                points_selector=models.FilterSelector(
+                    filter=models.Filter(
+                        must=[
+                            models.FieldCondition(key="user_id", match=models.MatchValue(value=str(user_id))),
+                            models.FieldCondition(key="kind", match=models.MatchValue(value=kind)),
+                        ]
+                    )
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            log_warning(f"semantic: reset failed ({type(exc).__name__}: {exc})")
 
     def search(self, user_id: str, query: str, kind: str, top_k: int) -> list[str]:
         """Return up to `top_k` stored texts most relevant to `query`. [] on failure."""

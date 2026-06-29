@@ -26,17 +26,21 @@ Two factories, mirroring `channels/api.py`:
 from typing import Optional
 
 from agno.utils.log import log_info
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from magi.core.knowledge import DocumentDetail, DocumentSummary, KnowledgeStore
-from magi.core.memory.store import FileMemoryStore
+from magi.core.memory.semantic import MemoryRetriever
+from magi.core.memory.store import FileMemoryStore, ScopedMemory
 
 # A session id is irrelevant when reading user-level files (facts, episodes,
 # persona): those paths don't depend on it. Use a fixed placeholder so the
 # scope bundle resolves without inventing one per request.
 _USER_SCOPE_SID = "_admin"
+# The retriever kind key for long-term facts (matches LongTerm.retriever_key), so
+# an admin fact edit re-indexes the right semantic slice.
+_LONG_TERM_KIND = "long_term"
 
 
 # --- wire format (the public contract; version it, don't break it) -----------
@@ -126,12 +130,33 @@ class Fact(BaseModel):
 
 
 class Profile(BaseModel):
-    """A user's durable memory, read-only: curated facts + any raw `remember`
-    facts + episode bodies."""
+    """A user's durable memory: curated facts + any raw `remember` facts + episode
+    bodies. `version` is the facts file's optimistic-concurrency token — echo it on
+    a fact write or risk a 409."""
 
     facts: list[Fact]
     raw_long_term: list[str]
     episodes: list[str]
+    version: str
+
+
+class AddFact(BaseModel):
+    text: str = Field(min_length=1, description="The fact to add.")
+    expected_version: Optional[str] = Field(
+        default=None, description="The version from the last read; rejected with 409 if stale."
+    )
+
+
+class UpdateFact(BaseModel):
+    text: str = Field(min_length=1, description="The fact's new text.")
+    expected_version: Optional[str] = Field(default=None)
+
+
+class FactsResult(BaseModel):
+    """The facts after a write, plus the new version token to carry forward."""
+
+    facts: list[Fact]
+    version: str
 
 
 class SessionList(BaseModel):
@@ -159,13 +184,38 @@ class Persona(BaseModel):
 def create_admin_app(
     knowledge: KnowledgeStore,
     memory: FileMemoryStore,
+    retriever: Optional[MemoryRetriever] = None,
     auth_token: Optional[str] = None,
 ) -> FastAPI:
     """The FastAPI admin app over already-built stores (pure factory).
 
-    No CORS: the only caller is the server-side BFF, never a browser directly.
+    `retriever` (the semantic index, or None when semantic memory is off) is reset
+    and re-indexed on a fact write so recall reflects the edit. No CORS: the only
+    caller is the server-side BFF, never a browser directly.
     """
     app = FastAPI(title="magi-admin", version="1")
+
+    def _facts(mem: ScopedMemory) -> list[Fact]:
+        return [
+            Fact(id=str(f.get("id", "")), text=str(f.get("text", "")), ts=str(f.get("ts", "")))
+            for f in mem.long_term_facts.read()
+        ]
+
+    def _check_version(mem: ScopedMemory, expected: Optional[str]) -> None:
+        if expected is not None and expected != mem.long_term_facts.version():
+            raise HTTPException(status_code=409, detail="stale version; refetch the profile")
+
+    def _reindex_facts(mem: ScopedMemory) -> None:
+        """Rebuild the user's long-term semantic slice from the current facts, so a
+        deleted/edited fact stops surfacing in recall. No-op when semantic is off."""
+        if retriever is None:
+            return
+        retriever.reset(mem.user_id, _LONG_TERM_KIND)
+        for text in mem.long_term_facts.texts():
+            retriever.index(mem.user_id, _LONG_TERM_KIND, text)
+
+    def _facts_result(mem: ScopedMemory) -> FactsResult:
+        return FactsResult(facts=_facts(mem), version=mem.long_term_facts.version())
 
     bearer = HTTPBearer(auto_error=False)
 
@@ -252,13 +302,53 @@ def create_admin_app(
     def get_profile(user_id: str) -> Profile:
         mem = memory.scoped(user_id, _USER_SCOPE_SID)
         return Profile(
-            facts=[
-                Fact(id=str(f.get("id", "")), text=str(f.get("text", "")), ts=str(f.get("ts", "")))
-                for f in mem.long_term_facts.read()
-            ],
+            facts=_facts(mem),
             raw_long_term=mem.long_term.bodies(),
             episodes=mem.episodes.bodies(),
+            version=mem.long_term_facts.version(),
         )
+
+    @app.post(
+        "/admin/v1/memory/users/{user_id}/facts",
+        response_model=FactsResult,
+        dependencies=[Depends(require_auth)],
+    )
+    def add_fact(user_id: str, body: AddFact) -> FactsResult:
+        mem = memory.scoped(user_id, _USER_SCOPE_SID)
+        _check_version(mem, body.expected_version)
+        mem.long_term_facts.add(body.text.strip())
+        _reindex_facts(mem)
+        return _facts_result(mem)
+
+    @app.patch(
+        "/admin/v1/memory/users/{user_id}/facts/{fact_id}",
+        response_model=FactsResult,
+        dependencies=[Depends(require_auth)],
+    )
+    def update_fact(user_id: str, fact_id: str, body: UpdateFact) -> FactsResult:
+        mem = memory.scoped(user_id, _USER_SCOPE_SID)
+        _check_version(mem, body.expected_version)
+        if not mem.long_term_facts.update(fact_id, body.text.strip()):
+            raise HTTPException(status_code=404, detail="fact not found")
+        _reindex_facts(mem)
+        return _facts_result(mem)
+
+    @app.delete(
+        "/admin/v1/memory/users/{user_id}/facts/{fact_id}",
+        response_model=FactsResult,
+        dependencies=[Depends(require_auth)],
+    )
+    def delete_fact(
+        user_id: str,
+        fact_id: str,
+        expected_version: Optional[str] = Query(default=None),
+    ) -> FactsResult:
+        mem = memory.scoped(user_id, _USER_SCOPE_SID)
+        _check_version(mem, expected_version)
+        if not mem.long_term_facts.remove(fact_id):
+            raise HTTPException(status_code=404, detail="fact not found")
+        _reindex_facts(mem)
+        return _facts_result(mem)
 
     @app.get(
         "/admin/v1/memory/users/{user_id}/sessions",
@@ -310,12 +400,16 @@ def build_admin_app() -> FastAPI:
     from pathlib import Path
 
     from magi.core.config import config
+    from magi.core.memory.semantic import build_semantic_index
 
     log_info("building admin app")
     if config.admin_auth_token is None:
         log_info("admin: auth DISABLED (ADMIN_AUTH_TOKEN not set) — keep the port unpublished")
+    # Same semantic index as the chat stack (None when semantic memory is off), so
+    # an admin fact edit re-indexes the same slice the lead retrieves from.
     return create_admin_app(
         KnowledgeStore(),
         FileMemoryStore(Path(config.memory_dir)),
+        retriever=build_semantic_index(),
         auth_token=config.admin_auth_token,
     )
