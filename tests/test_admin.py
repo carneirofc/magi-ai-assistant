@@ -477,3 +477,61 @@ def test_current_version_is_accepted(tmp_path):
         json={"text": "x", "expected_version": version},
     )
     assert resp.status_code == 200
+
+
+# --- raw-file editor --------------------------------------------------------
+def test_get_and_put_persona_raw(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    got = client.get("/admin/v1/memory/files/persona").json()
+    assert "be concise" in got["content"]
+
+    resp = client.put(
+        "/admin/v1/memory/files/persona",
+        json={"content": "# Persona\n\nbe terse\n", "expected_version": got["version"]},
+    )
+    assert resp.status_code == 200
+    assert "be terse" in client.get("/admin/v1/memory/files/persona").json()["content"]
+
+
+def test_put_raw_stale_version_409(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    resp = client.put(
+        "/admin/v1/memory/files/persona",
+        json={"content": "x", "expected_version": "deadbeef"},
+    )
+    assert resp.status_code == 409
+
+
+def test_put_session_window_validates_json(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    base = "/admin/v1/memory/files/session_window?user_id=u1&session_id=s1"
+    # A valid JSON list is accepted...
+    ok = client.put(base, json={"content": '[{"role": "user", "content": "hi"}]'})
+    assert ok.status_code == 200
+    # ...a non-list and broken JSON are rejected.
+    assert client.put(base, json={"content": '{"not": "a list"}'}).status_code == 422
+    assert client.put(base, json={"content": "{bad json"}).status_code == 422
+
+
+def test_episodes_raw_edit_reindexes(tmp_path):
+    retriever = _FakeRetriever()
+    client = _client(memory=_seed_memory(tmp_path), retriever=retriever)
+    body = "# Episodic memory\n\n- 2026-01-01 :: talked about k8s\n"
+    resp = client.put(
+        "/admin/v1/memory/files/episodes?user_id=u1", json={"content": body}
+    )
+    assert resp.status_code == 200
+    assert retriever.reset_calls == [("u1", "episode")]
+    assert ("u1", "episode", "talked about k8s") in retriever.index_calls
+
+
+def test_unknown_file_kind_404(tmp_path):
+    assert _client(memory=_seed_memory(tmp_path)).get(
+        "/admin/v1/memory/files/bogus?user_id=u1"
+    ).status_code == 404
+
+
+def test_session_kind_requires_session_id(tmp_path):
+    assert _client(memory=_seed_memory(tmp_path)).get(
+        "/admin/v1/memory/files/session_window?user_id=u1"
+    ).status_code == 422

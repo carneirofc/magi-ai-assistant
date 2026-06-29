@@ -181,6 +181,21 @@ class Persona(BaseModel):
     text: str
 
 
+class RawFile(BaseModel):
+    """One memory file's raw content + its version token (optimistic concurrency)."""
+
+    kind: str
+    content: str
+    version: str
+
+
+class PutRawFile(BaseModel):
+    content: str = Field(description="The full new file content (replaces the file).")
+    expected_version: Optional[str] = Field(
+        default=None, description="The version from the last read; rejected with 409 if stale."
+    )
+
+
 def create_admin_app(
     knowledge: KnowledgeStore,
     memory: FileMemoryStore,
@@ -379,6 +394,78 @@ def create_admin_app(
     def get_persona() -> Persona:
         return Persona(text=memory.persona.read())
 
+    # --- raw-file editor: full-CRUD power on the plumbing kinds ------------
+    def _raw_target(kind: str, user_id: Optional[str], session_id: Optional[str]):
+        """Resolve (path, is_json, reindex_kind) for an editable file kind, or raise
+        a 4xx. `reindex_kind` names the semantic slice to rebuild after a write
+        (None when the kind isn't mirrored)."""
+        if kind == "persona":
+            return memory.persona.path, False, None
+        if not user_id:
+            raise HTTPException(status_code=422, detail="user_id required for this kind")
+        mem = memory.scoped(user_id, session_id or _USER_SCOPE_SID)
+        if kind == "episodes":
+            return mem.episodes.path, False, "episode"
+        if kind == "raw_long_term":
+            return mem.long_term.path, False, None
+        if kind in ("session_window", "session_summary", "session_pending"):
+            if not session_id:
+                raise HTTPException(status_code=422, detail="session_id required for this kind")
+            return {
+                "session_window": (mem.live_turns.path, True, None),
+                "session_summary": (mem.session_summary.path, False, None),
+                "session_pending": (mem.pending.path, True, None),
+            }[kind]
+        raise HTTPException(status_code=404, detail=f"unknown file kind {kind!r}")
+
+    @app.get(
+        "/admin/v1/memory/files/{kind}",
+        response_model=RawFile,
+        dependencies=[Depends(require_auth)],
+    )
+    def get_raw_file(
+        kind: str,
+        user_id: Optional[str] = Query(default=None),
+        session_id: Optional[str] = Query(default=None),
+    ) -> RawFile:
+        path, _is_json, _reindex = _raw_target(kind, user_id, session_id)
+        content = path.read_text(encoding="utf-8") if path.exists() else ""
+        return RawFile(kind=kind, content=content, version=_file_version(path))
+
+    @app.put(
+        "/admin/v1/memory/files/{kind}",
+        response_model=RawFile,
+        dependencies=[Depends(require_auth)],
+    )
+    def put_raw_file(
+        kind: str,
+        body: PutRawFile,
+        user_id: Optional[str] = Query(default=None),
+        session_id: Optional[str] = Query(default=None),
+    ) -> RawFile:
+        path, is_json, reindex = _raw_target(kind, user_id, session_id)
+        if body.expected_version is not None and body.expected_version != _file_version(path):
+            raise HTTPException(status_code=409, detail="stale version; refetch the file")
+        if is_json:
+            # Validate-on-save: JSON kinds (turn windows) must parse to a list, so a
+            # bad paste can't park content the chat layer will choke on.
+            import json
+
+            try:
+                parsed = json.loads(body.content)
+            except json.JSONDecodeError as exc:
+                raise HTTPException(status_code=422, detail=f"invalid JSON: {exc}") from exc
+            if not isinstance(parsed, list):
+                raise HTTPException(status_code=422, detail="expected a JSON list of turns")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body.content, encoding="utf-8")
+        if reindex == "episode" and retriever is not None and user_id:
+            mem = memory.scoped(user_id, session_id or _USER_SCOPE_SID)
+            retriever.reset(user_id, "episode")
+            for body_text in mem.episodes.bodies():
+                retriever.index(user_id, "episode", body_text)
+        return RawFile(kind=kind, content=body.content, version=_file_version(path))
+
     return app
 
 
@@ -389,6 +476,15 @@ def _turn(t: dict) -> dict:
         "content": str(t.get("content", "")),
         "ts": str(t.get("ts", "")),
     }
+
+
+def _file_version(path) -> str:
+    """A content version token for any memory file — sha256 of its bytes (empty-file
+    token when absent). The optimistic-concurrency token for the raw editor."""
+    import hashlib
+
+    raw = path.read_bytes() if path.exists() else b""
+    return hashlib.sha256(raw).hexdigest()
 
 
 def build_admin_app() -> FastAPI:
