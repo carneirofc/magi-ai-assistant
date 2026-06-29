@@ -1,0 +1,25 @@
+{
+  "name": "magi-admin-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Operator admin UI + BFF for MAGI memory & knowledge (ADR 0002).",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "next lint",
+    "gen:api": "openapi-typescript ${ADMIN_API_URL:-http://127.0.0.1:8100}/openapi.json -o src/lib/api-types.ts"
+  },
+  "dependencies": {
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "openapi-typescript": "^7.4.0",
+    "typescript": "^5.7.0"
+  }
+}
