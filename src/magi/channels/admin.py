@@ -30,7 +30,13 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
-from magi.core.knowledge import DocumentDetail, DocumentSummary, KnowledgeStore
+from magi.core.knowledge import (
+    DocumentDetail,
+    DocumentSummary,
+    KnowledgeStore,
+    Subject,
+    SubjectRegistry,
+)
 from magi.core.memory.semantic import MemoryRetriever
 from magi.core.memory.store import FileMemoryStore, ScopedMemory
 
@@ -78,6 +84,37 @@ class RenameDocument(BaseModel):
     """Edit a document's display label. Identity (`doc_id`) is untouched."""
 
     title: str = Field(min_length=1, description="The new display title.")
+
+
+class SetSubject(BaseModel):
+    """Assign a document's subject (the controlled grouping). '' clears it."""
+
+    subject: str = Field(description="The subject name (from the registry), or '' to clear.")
+
+
+# --- subject registry wire format --------------------------------------------
+class SubjectOut(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+
+    @classmethod
+    def of(cls, s: Subject) -> "SubjectOut":
+        return cls(id=s.id, name=s.name, description=s.description)
+
+
+class SubjectListOut(BaseModel):
+    subjects: list[SubjectOut]
+
+
+class CreateSubject(BaseModel):
+    name: str = Field(min_length=1, description="The subject name (unique, case-insensitive).")
+    description: str = Field(default="", description="Optional description.")
+
+
+class EditSubject(BaseModel):
+    name: Optional[str] = Field(default=None, description="New name (cascades to tagged docs).")
+    description: Optional[str] = Field(default=None)
 
 
 class ChunkOut(BaseModel):
@@ -199,14 +236,16 @@ class PutRawFile(BaseModel):
 def create_admin_app(
     knowledge: KnowledgeStore,
     memory: FileMemoryStore,
+    subjects: SubjectRegistry,
     retriever: Optional[MemoryRetriever] = None,
     auth_token: Optional[str] = None,
 ) -> FastAPI:
     """The FastAPI admin app over already-built stores (pure factory).
 
-    `retriever` (the semantic index, or None when semantic memory is off) is reset
-    and re-indexed on a fact write so recall reflects the edit. No CORS: the only
-    caller is the server-side BFF, never a browser directly.
+    `subjects` is the controlled-vocabulary registry; `retriever` (the semantic
+    index, or None when semantic memory is off) is reset and re-indexed on a fact
+    write so recall reflects the edit. No CORS: the only caller is the server-side
+    BFF, never a browser directly.
     """
     app = FastAPI(title="magi-admin", version="1")
 
@@ -288,6 +327,68 @@ def create_admin_app(
     def delete_document(doc_id: str) -> None:
         if not knowledge.delete_document(doc_id):
             raise HTTPException(status_code=404, detail="document not found")
+
+    @app.put(
+        "/admin/v1/knowledge/documents/{doc_id:path}/subject",
+        response_model=DocumentDetailOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def set_document_subject(doc_id: str, body: SetSubject) -> DocumentDetailOut:
+        # A non-empty subject must exist in the registry (controlled vocabulary).
+        if body.subject and not any(s.name == body.subject for s in subjects.list()):
+            raise HTTPException(status_code=422, detail=f"unknown subject {body.subject!r}")
+        if not knowledge.set_document_subject(doc_id, body.subject):
+            raise HTTPException(status_code=404, detail="document not found")
+        detail = knowledge.get_document(doc_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="document not found")
+        return DocumentDetailOut.of(detail)
+
+    # --- subjects (the controlled vocabulary) ------------------------------
+    @app.get(
+        "/admin/v1/knowledge/subjects",
+        response_model=SubjectListOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def list_subjects() -> SubjectListOut:
+        return SubjectListOut(subjects=[SubjectOut.of(s) for s in subjects.list()])
+
+    @app.post(
+        "/admin/v1/knowledge/subjects",
+        response_model=SubjectOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def create_subject(body: CreateSubject) -> SubjectOut:
+        created = subjects.create(body.name, body.description)
+        if created is None:
+            raise HTTPException(status_code=409, detail="a subject with that name already exists")
+        return SubjectOut.of(created)
+
+    @app.patch(
+        "/admin/v1/knowledge/subjects/{subject_id}",
+        response_model=SubjectOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def edit_subject(subject_id: str, body: EditSubject) -> SubjectOut:
+        before = subjects.get(subject_id)
+        if before is None:
+            raise HTTPException(status_code=404, detail="subject not found")
+        updated = subjects.rename(subject_id, name=body.name, description=body.description)
+        if updated is None:
+            raise HTTPException(status_code=404, detail="subject not found")
+        # Cascade a name change to the corpus so tagged docs keep their grouping.
+        if body.name is not None and updated.name != before.name:
+            knowledge.rename_subject(before.name, updated.name)
+        return SubjectOut.of(updated)
+
+    @app.delete(
+        "/admin/v1/knowledge/subjects/{subject_id}",
+        status_code=204,
+        dependencies=[Depends(require_auth)],
+    )
+    def delete_subject(subject_id: str) -> None:
+        if not subjects.delete(subject_id):
+            raise HTTPException(status_code=404, detail="subject not found")
 
     # --- memory (read-only viewer; CRUD arrives in later slices) -----------
     @app.get(
@@ -506,6 +607,7 @@ def build_admin_app() -> FastAPI:
     return create_admin_app(
         KnowledgeStore(),
         FileMemoryStore(Path(config.memory_dir)),
+        SubjectRegistry(config.knowledge_subjects_path),
         retriever=build_semantic_index(),
         auth_token=config.admin_auth_token,
     )

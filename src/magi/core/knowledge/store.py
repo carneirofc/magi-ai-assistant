@@ -324,6 +324,54 @@ class KnowledgeStore:
         log_info(f"knowledge: tagged doc {doc_id!r} -> {tags}")
         return tags
 
+    def set_document_subject(self, doc_id: str, subject: str) -> bool:
+        """Set a document's `subject` in place across its chunks. Returns whether the
+        document existed. Payload-only (no re-embed); identity unchanged."""
+        client = self._connect_existing()
+        if client is None:
+            return False
+        ids = self._point_ids_for_doc(client, doc_id)
+        if not ids:
+            return False
+        try:
+            client.set_payload(
+                collection_name=self.collection, payload={"subject": subject}, points=ids
+            )
+        except Exception as exc:  # noqa: BLE001
+            log_warning(f"knowledge: set subject failed for {doc_id!r} ({type(exc).__name__}: {exc})")
+            return False
+        log_info(f"knowledge: set doc {doc_id!r} subject -> {subject!r}")
+        return True
+
+    def rename_subject(self, old: str, new: str) -> int:
+        """Re-label every chunk whose subject is `old` to `new` (registry-rename
+        cascade). Returns the number of points updated; 0 when none match / failure."""
+        client = self._connect_existing()
+        if client is None:
+            return 0
+        try:
+            ids: list = []
+            offset = None
+            while True:
+                points, offset = client.scroll(
+                    collection_name=self.collection,
+                    with_payload=True,
+                    with_vectors=False,
+                    limit=256,
+                    offset=offset,
+                )
+                ids.extend(p.id for p in points if (p.payload or {}).get("subject") == old)
+                if offset is None:
+                    break
+            if not ids:
+                return 0
+            client.set_payload(collection_name=self.collection, payload={"subject": new}, points=ids)
+        except Exception as exc:  # noqa: BLE001
+            log_warning(f"knowledge: rename subject failed ({type(exc).__name__}: {exc})")
+            return 0
+        log_info(f"knowledge: renamed subject {old!r} -> {new!r} on {len(ids)} point(s)")
+        return len(ids)
+
     def _points_and_tags(self, client, doc_id: str) -> tuple[list, list[str]]:
         """The point ids of `doc_id`'s chunks + its current tag list (from the first
         matching chunk). ([], []) on any failure / absence."""

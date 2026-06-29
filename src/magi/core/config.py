@@ -185,6 +185,9 @@ class Config:
     # the candidate pool pulled before the Python re-rank. See ADR 0002.
     knowledge_tag_weight: float = 0.15
     knowledge_overfetch: int = 4
+    # The controlled-subject registry (admin-curated vocabulary); a small JSON file
+    # the admin service reads/writes. See magi/core/knowledge/subjects.py + ADR 0002.
+    knowledge_subjects_path: str = "data/knowledge/subjects.json"
 
     # --- Object storage (see magi/core/storage + magi/agent/tools/storage). A
     # durable file/image archive the model uses as memory: it can stash a file

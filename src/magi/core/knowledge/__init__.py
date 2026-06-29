@@ -12,6 +12,7 @@ injects it into the knowledge tool — no module-level singleton.
 """
 
 from magi.core.knowledge.chunking import chunk_text
+from magi.core.knowledge.subjects import Subject, SubjectRegistry
 from magi.core.knowledge.store import (
     GLOBAL_SCOPE,
     DocumentChunk,
@@ -33,6 +34,8 @@ __all__ = [
     "KnowledgeSearcher",
     "KnowledgeStore",
     "KnowledgeTagger",
+    "Subject",
+    "SubjectRegistry",
     "build_knowledge_from_config",
     "chunk_text",
 ]

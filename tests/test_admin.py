@@ -14,7 +14,13 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from magi.channels.admin import create_admin_app
-from magi.core.knowledge import DocumentChunk, DocumentDetail, DocumentSummary, KnowledgeStore
+from magi.core.knowledge import (
+    DocumentChunk,
+    DocumentDetail,
+    DocumentSummary,
+    KnowledgeStore,
+    SubjectRegistry,
+)
 from magi.core.memory.store import FileMemoryStore
 
 
@@ -192,6 +198,7 @@ class _FakeKnowledge:
     def __init__(self, documents, detail=None):
         self._documents = documents
         self._detail = detail
+        self.rename_subject_calls: list = []
 
     def list_documents(self):
         return self._documents
@@ -211,6 +218,16 @@ class _FakeKnowledge:
             return True
         return False
 
+    def set_document_subject(self, doc_id, subject):
+        if self._detail and self._detail.doc_id == doc_id:
+            self._detail = dataclasses.replace(self._detail, subject=subject)
+            return True
+        return False
+
+    def rename_subject(self, old, new):
+        self.rename_subject_calls.append((old, new))
+        return 0
+
 
 class _FakeRetriever:
     """Records reset/index so the fact-write re-index path can be asserted."""
@@ -229,12 +246,15 @@ class _FakeRetriever:
         self.reset_calls.append((user_id, kind))
 
 
-def _client(documents=(), auth_token=None, memory=None, detail=None, retriever=None):
+def _client(documents=(), auth_token=None, memory=None, detail=None, retriever=None, subjects=None):
     if memory is None:
         memory = FileMemoryStore(Path(tempfile.mkdtemp()))  # empty: no users on disk
+    if subjects is None:
+        subjects = SubjectRegistry(Path(tempfile.mkdtemp()) / "subjects.json")
     app = create_admin_app(
         _FakeKnowledge(list(documents), detail=detail),
         memory,
+        subjects,
         retriever=retriever,
         auth_token=auth_token,
     )
@@ -339,6 +359,69 @@ def test_delete_document_endpoint():
 
 def test_delete_document_missing_is_404():
     assert _client(detail=None).delete("/admin/v1/knowledge/documents/nope.md").status_code == 404
+
+
+# --- subject registry -------------------------------------------------------
+def test_subject_registry_create_list_rename_delete(tmp_path):
+    reg = SubjectRegistry(tmp_path / "subjects.json")
+    s = reg.create("Infra", "infrastructure")
+    assert s is not None and s.name == "Infra"
+    assert reg.create("infra") is None  # case-insensitive duplicate rejected
+    assert [x.name for x in reg.list()] == ["Infra"]
+    renamed = reg.rename(s.id, name="Infrastructure")
+    assert renamed.name == "Infrastructure"
+    assert reg.delete(s.id) is True
+    assert reg.list() == []
+
+
+def test_subjects_endpoints(tmp_path):
+    reg = SubjectRegistry(tmp_path / "subjects.json")
+    client = _client(subjects=reg)
+
+    created = client.post("/admin/v1/knowledge/subjects", json={"name": "Infra"})
+    assert created.status_code == 200
+    sid = created.json()["id"]
+    assert client.post("/admin/v1/knowledge/subjects", json={"name": "infra"}).status_code == 409
+
+    listed = client.get("/admin/v1/knowledge/subjects").json()
+    assert [s["name"] for s in listed["subjects"]] == ["Infra"]
+
+    edited = client.patch(f"/admin/v1/knowledge/subjects/{sid}", json={"name": "Infrastructure"})
+    assert edited.status_code == 200 and edited.json()["name"] == "Infrastructure"
+
+    assert client.delete(f"/admin/v1/knowledge/subjects/{sid}").status_code == 204
+    assert client.get("/admin/v1/knowledge/subjects").json()["subjects"] == []
+
+
+def test_subject_rename_cascades_to_corpus(tmp_path):
+    reg = SubjectRegistry(tmp_path / "subjects.json")
+    sid = reg.create("Infra").id
+    fake = _FakeKnowledge([], detail=None)
+    app = create_admin_app(fake, FileMemoryStore(tmp_path / "m"), reg)
+    client = TestClient(app)
+    client.patch(f"/admin/v1/knowledge/subjects/{sid}", json={"name": "Infrastructure"})
+    assert fake.rename_subject_calls == [("Infra", "Infrastructure")]
+
+
+def test_set_document_subject_requires_known_subject(tmp_path):
+    reg = SubjectRegistry(tmp_path / "subjects.json")
+    detail = DocumentDetail(
+        doc_id="a.md", source="a.md", title="A", subject="", tags=[], scope="global",
+        chunks=[DocumentChunk(chunk_index=0, text="x")],
+    )
+    client = _client(detail=detail, subjects=reg)
+    # Unknown subject rejected...
+    assert client.put(
+        "/admin/v1/knowledge/documents/a.md/subject", json={"subject": "Ghost"}
+    ).status_code == 422
+    # ...known subject accepted.
+    reg.create("Infra")
+    ok = client.put("/admin/v1/knowledge/documents/a.md/subject", json={"subject": "Infra"})
+    assert ok.status_code == 200 and ok.json()["subject"] == "Infra"
+    # Clearing ('') is always allowed.
+    assert client.put(
+        "/admin/v1/knowledge/documents/a.md/subject", json={"subject": ""}
+    ).status_code == 200
 
 
 # --- memory viewer (read-only) ----------------------------------------------
