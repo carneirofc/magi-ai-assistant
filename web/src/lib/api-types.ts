@@ -15,12 +15,25 @@ export interface components {
     DocumentSummaryOut: {
       doc_id: string;
       source: string;
+      title: string;
+      subject: string;
+      tags: string[];
       scope: string;
       chunk_count: number;
       latest_ts: string;
     };
     DocumentList: {
       documents: components["schemas"]["DocumentSummaryOut"][];
+    };
+    ChunkOut: { chunk_index: number; text: string };
+    DocumentDetailOut: {
+      doc_id: string;
+      source: string;
+      title: string;
+      subject: string;
+      tags: string[];
+      scope: string;
+      chunks: components["schemas"]["ChunkOut"][];
     };
     UserSummary: {
       user_id: string;
@@ -50,6 +63,9 @@ type Json<T> = { get: { responses: { 200: { content: { "application/json": T } }
 
 export interface paths {
   "/admin/v1/knowledge/documents": Json<components["schemas"]["DocumentList"]>;
+  "/admin/v1/knowledge/documents/{doc_id}": Json<
+    components["schemas"]["DocumentDetailOut"]
+  >;
   "/admin/v1/memory/users": Json<components["schemas"]["UserList"]>;
   "/admin/v1/memory/users/{user_id}/profile": Json<components["schemas"]["Profile"]>;
   "/admin/v1/memory/users/{user_id}/sessions": Json<components["schemas"]["SessionList"]>;

@@ -2,6 +2,8 @@
 // calls the admin-api directly (server-side, with the bearer), so the token never
 // touches the browser. Future slices add detail/edit/add views.
 
+import Link from "next/link";
+
 import { Nav } from "@/components/Nav";
 import { listKnowledgeDocuments } from "@/lib/admin-api";
 
@@ -29,7 +31,8 @@ export default async function KnowledgePage() {
           <thead>
             <tr>
               <th>Document</th>
-              <th>Scope</th>
+              <th>Subject</th>
+              <th>Tags</th>
               <th>Chunks</th>
               <th>Last ingested</th>
             </tr>
@@ -38,12 +41,17 @@ export default async function KnowledgePage() {
             {documents.map((d) => (
               <tr key={d.doc_id}>
                 <td>
-                  <div>{d.source || d.doc_id}</div>
+                  <Link
+                    href={`/knowledge/${d.doc_id.split("/").map(encodeURIComponent).join("/")}`}
+                  >
+                    {d.title || d.source || d.doc_id}
+                  </Link>
                   <div className="muted" style={{ fontSize: "0.8rem" }}>
                     {d.doc_id}
                   </div>
                 </td>
-                <td>{d.scope}</td>
+                <td>{d.subject || <span className="muted">—</span>}</td>
+                <td className="muted">{d.tags.join(", ") || "—"}</td>
                 <td>{d.chunk_count}</td>
                 <td className="muted">{d.latest_ts}</td>
               </tr>

@@ -37,6 +37,15 @@ export async function listKnowledgeDocuments(): Promise<
   return adminGet("/admin/v1/knowledge/documents");
 }
 
+export async function getKnowledgeDocument(
+  docId: string,
+): Promise<Body<"/admin/v1/knowledge/documents/{doc_id}">> {
+  // doc_id may contain slashes (it's the ingest path) — encode each segment but
+  // keep the separators so the admin-api's {doc_id:path} route matches.
+  const encoded = docId.split("/").map(encodeURIComponent).join("/");
+  return adminGet(`/admin/v1/knowledge/documents/${encoded}`);
+}
+
 export async function listUsers(): Promise<Body<"/admin/v1/memory/users">> {
   return adminGet("/admin/v1/memory/users");
 }
