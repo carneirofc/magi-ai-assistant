@@ -6,8 +6,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { DocumentActions } from "@/components/DocumentActions";
+import { DocumentMeta } from "@/components/DocumentMeta";
 import { Nav } from "@/components/Nav";
-import { getKnowledgeDocument } from "@/lib/admin-api";
+import { getKnowledgeDocument, listSubjects, listTags } from "@/lib/admin-api";
 
 export const dynamic = "force-dynamic";
 
@@ -20,8 +21,14 @@ export default async function DocumentPage({
   const id = docId.map(decodeURIComponent).join("/");
 
   let doc: Awaited<ReturnType<typeof getKnowledgeDocument>> | null = null;
+  let allSubjects: { id: string; name: string }[] = [];
+  let allTags: string[] = [];
   try {
-    doc = await getKnowledgeDocument(id);
+    [doc, allSubjects, allTags] = await Promise.all([
+      getKnowledgeDocument(id),
+      listSubjects().then((s) => s.subjects),
+      listTags().then((t) => t.tags),
+    ]);
   } catch {
     notFound();
   }
@@ -41,12 +48,15 @@ export default async function DocumentPage({
 
       <DocumentActions docId={doc.doc_id} title={doc.title} />
 
+      <DocumentMeta
+        docId={doc.doc_id}
+        subject={doc.subject}
+        tags={doc.tags}
+        allSubjects={allSubjects}
+        allTags={allTags}
+      />
 
       <dl style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "0.25rem 1rem" }}>
-        <dt className="muted">Subject</dt>
-        <dd>{doc.subject || "—"}</dd>
-        <dt className="muted">Tags</dt>
-        <dd>{doc.tags.join(", ") || "—"}</dd>
         <dt className="muted">Source</dt>
         <dd>{doc.source}</dd>
         <dt className="muted">Chunks</dt>

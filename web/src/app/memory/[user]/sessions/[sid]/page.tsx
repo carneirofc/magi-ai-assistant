@@ -1,10 +1,11 @@
 // One session's machine-managed state: the live turn window, the rolling summary,
-// and the pending (not-yet-summarized) buffer. Read-only.
+// and the pending buffer. Editable as raw files (validate-on-save).
 
 import Link from "next/link";
 
 import { Nav } from "@/components/Nav";
-import { getSession } from "@/lib/admin-api";
+import { RawFileEditor } from "@/components/RawFileEditor";
+import { getRawFile } from "@/lib/admin-api";
 
 export const dynamic = "force-dynamic";
 
@@ -17,10 +18,18 @@ export default async function SessionPage({
   const userId = decodeURIComponent(user);
   const sessionId = decodeURIComponent(sid);
 
-  let detail: Awaited<ReturnType<typeof getSession>> | null = null;
+  const kinds = [
+    { kind: "session_window", label: "Live window (JSON list of turns)" },
+    { kind: "session_summary", label: "Rolling summary (markdown)" },
+    { kind: "session_pending", label: "Pending buffer (JSON list of turns)" },
+  ];
+
+  let files: Awaited<ReturnType<typeof getRawFile>>[] | null = null;
   let error: string | null = null;
   try {
-    detail = await getSession(userId, sessionId);
+    files = await Promise.all(
+      kinds.map((k) => getRawFile(k.kind, { userId, sessionId })),
+    );
   } catch {
     error = "Could not reach the admin API.";
   }
@@ -34,44 +43,19 @@ export default async function SessionPage({
 
       {error ? (
         <p className="error">{error}</p>
-      ) : detail ? (
-        <>
-          <section>
-            <h2>Live window</h2>
-            {detail.turns.length > 0 ? (
-              <ul>
-                {detail.turns.map((t, i) => (
-                  <li key={i}>
-                    <strong>{t.role}:</strong> {t.content}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="muted">Empty.</p>
-            )}
-          </section>
-
-          <section>
-            <h2>Rolling summary</h2>
-            <p className={detail.summary ? "" : "muted"}>
-              {detail.summary || "None."}
-            </p>
-          </section>
-
-          {detail.pending.length > 0 ? (
-            <section>
-              <h2>Pending (awaiting summary)</h2>
-              <ul>
-                {detail.pending.map((t, i) => (
-                  <li key={i}>
-                    <strong>{t.role}:</strong> {t.content}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-        </>
-      ) : null}
+      ) : (
+        files?.map((file, i) => (
+          <RawFileEditor
+            key={kinds[i].kind}
+            kind={kinds[i].kind}
+            label={kinds[i].label}
+            userId={userId}
+            sessionId={sessionId}
+            initialContent={file.content}
+            initialVersion={file.version}
+          />
+        ))
+      )}
     </main>
   );
 }

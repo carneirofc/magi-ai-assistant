@@ -1,11 +1,12 @@
-// A user's memory: curated facts, raw long-term, episodes, and a session list.
-// Read-only (CRUD arrives in later slices).
+// A user's memory: curated facts (per-fact CRUD), raw long-term, editable
+// episodes, and a session list.
 
 import Link from "next/link";
 
 import { FactEditor } from "@/components/FactEditor";
 import { Nav } from "@/components/Nav";
-import { getProfile, listSessions } from "@/lib/admin-api";
+import { RawFileEditor } from "@/components/RawFileEditor";
+import { getProfile, getRawFile, listSessions } from "@/lib/admin-api";
 
 export const dynamic = "force-dynamic";
 
@@ -18,11 +19,13 @@ export default async function UserMemoryPage({
   const userId = decodeURIComponent(user);
 
   let profile: Awaited<ReturnType<typeof getProfile>> | null = null;
+  let episodesFile: Awaited<ReturnType<typeof getRawFile>> | null = null;
   let sessions: string[] = [];
   let error: string | null = null;
   try {
-    [profile, sessions] = await Promise.all([
+    [profile, episodesFile, sessions] = await Promise.all([
       getProfile(userId),
+      getRawFile("episodes", { userId }),
       listSessions(userId).then((s) => s.sessions),
     ]);
   } catch {
@@ -59,18 +62,15 @@ export default async function UserMemoryPage({
             </section>
           ) : null}
 
-          <section>
-            <h2>Episodes</h2>
-            {profile && profile.episodes.length > 0 ? (
-              <ul>
-                {profile.episodes.map((e, i) => (
-                  <li key={i}>{e}</li>
-                ))}
-              </ul>
-            ) : (
-              <p className="muted">No episodes.</p>
-            )}
-          </section>
+          {episodesFile ? (
+            <RawFileEditor
+              kind="episodes"
+              label="Episodes"
+              userId={userId}
+              initialContent={episodesFile.content}
+              initialVersion={episodesFile.version}
+            />
+          ) : null}
 
           <section>
             <h2>Sessions</h2>

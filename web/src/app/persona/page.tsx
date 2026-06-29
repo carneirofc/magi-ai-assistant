@@ -1,16 +1,17 @@
 // The global persona — the bot's evolved behavior, shared across all users.
-// Read-only here (editing arrives in a later slice).
+// Editable as a raw file.
 
 import { Nav } from "@/components/Nav";
-import { getPersona } from "@/lib/admin-api";
+import { RawFileEditor } from "@/components/RawFileEditor";
+import { getRawFile } from "@/lib/admin-api";
 
 export const dynamic = "force-dynamic";
 
 export default async function PersonaPage() {
-  let text = "";
+  let file: Awaited<ReturnType<typeof getRawFile>> | null = null;
   let error: string | null = null;
   try {
-    text = (await getPersona()).text;
+    file = await getRawFile("persona");
   } catch {
     error = "Could not reach the admin API.";
   }
@@ -20,20 +21,14 @@ export default async function PersonaPage() {
       <Nav title="Persona" />
       {error ? (
         <p className="error">{error}</p>
-      ) : text ? (
-        <pre
-          style={{
-            whiteSpace: "pre-wrap",
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-            padding: "1rem",
-          }}
-        >
-          {text}
-        </pre>
-      ) : (
-        <p className="muted">No persona written yet.</p>
-      )}
+      ) : file ? (
+        <RawFileEditor
+          kind="persona"
+          label="Persona (global)"
+          initialContent={file.content}
+          initialVersion={file.version}
+        />
+      ) : null}
     </main>
   );
 }
