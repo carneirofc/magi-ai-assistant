@@ -273,12 +273,16 @@ class _FakeRetriever:
     def __init__(self, hits):
         self.hits = hits
         self.indexed = []
+        self.resets = []
 
     def index(self, user_id, kind, text):
         self.indexed.append((user_id, kind, text))
 
     def search(self, user_id, query, kind, top_k):
         return self.hits.get(kind, [])
+
+    def reset(self, user_id, kind):
+        self.resets.append((user_id, kind))
 
 
 def test_retriever_indexes_and_overrides_context(tmp_path):
@@ -304,3 +308,62 @@ def test_retriever_empty_falls_back_to_whole_file(tmp_path):
     mgr.remember("the whole-file fact")
     ctx = mgr.build_context(query="anything")
     assert "the whole-file fact" in ctx
+
+
+# --- mirror reconciliation on curator ops (no ghost vectors) ----------------
+def _long_term(retriever):
+    from magi.core.memory.kinds import LongTerm
+
+    return LongTerm(retriever, 5, 5)
+
+
+def test_apply_ops_add_only_indexes_without_reset(tmp_path):
+    from magi.core.memory.curation import FactOp
+
+    r = _FakeRetriever({})
+    mem = FileMemoryStore(tmp_path / "m").scoped("u1", "s1")
+    _long_term(r).apply_ops(mem, [FactOp(op="add", text="lives in Berlin")])
+    assert r.resets == []  # add-only: no rebuild
+    assert ("u1", "long_term", "lives in Berlin") in r.indexed
+
+
+def test_apply_ops_delete_rebuilds_slice(tmp_path):
+    from magi.core.memory.curation import FactOp
+
+    r = _FakeRetriever({})
+    mem = FileMemoryStore(tmp_path / "m").scoped("u1", "s1")
+    fid = mem.long_term_facts.add("old fact")
+    mem.long_term_facts.add("keep me")
+    r.indexed.clear()
+
+    _long_term(r).apply_ops(mem, [FactOp(op="delete", fact_id=fid)])
+
+    # The whole slice is rebuilt from the surviving facts — the deleted fact's
+    # vector is gone, not orphaned.
+    assert r.resets == [("u1", "long_term")]
+    assert ("u1", "long_term", "keep me") in r.indexed
+    assert ("u1", "long_term", "old fact") not in r.indexed
+
+
+def test_apply_ops_update_rebuilds_slice(tmp_path):
+    from magi.core.memory.curation import FactOp
+
+    r = _FakeRetriever({})
+    mem = FileMemoryStore(tmp_path / "m").scoped("u1", "s1")
+    fid = mem.long_term_facts.add("lives in Berlin")
+    r.indexed.clear()
+
+    _long_term(r).apply_ops(mem, [FactOp(op="update", fact_id=fid, text="lives in Munich")])
+
+    assert r.resets == [("u1", "long_term")]
+    assert ("u1", "long_term", "lives in Munich") in r.indexed
+    assert ("u1", "long_term", "lives in Berlin") not in r.indexed  # no ghost
+
+
+def test_apply_ops_no_retriever_is_safe(tmp_path):
+    from magi.core.memory.curation import FactOp
+
+    mem = FileMemoryStore(tmp_path / "m").scoped("u1", "s1")
+    # No retriever → reconciliation is a no-op, never raises.
+    applied = _long_term(None).apply_ops(mem, [FactOp(op="add", text="x")])
+    assert applied == ["add"]
