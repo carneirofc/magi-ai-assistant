@@ -70,6 +70,12 @@ class DocumentList(BaseModel):
     documents: list[DocumentSummaryOut]
 
 
+class RenameDocument(BaseModel):
+    """Edit a document's display label. Identity (`doc_id`) is untouched."""
+
+    title: str = Field(min_length=1, description="The new display title.")
+
+
 class ChunkOut(BaseModel):
     chunk_index: int
     text: str
@@ -195,6 +201,28 @@ def create_admin_app(
         if detail is None:
             raise HTTPException(status_code=404, detail="document not found")
         return DocumentDetailOut.of(detail)
+
+    @app.patch(
+        "/admin/v1/knowledge/documents/{doc_id:path}",
+        response_model=DocumentDetailOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def rename_document(doc_id: str, body: RenameDocument) -> DocumentDetailOut:
+        if not knowledge.rename_document(doc_id, body.title):
+            raise HTTPException(status_code=404, detail="document not found")
+        detail = knowledge.get_document(doc_id)
+        if detail is None:  # raced with a delete — treat as gone
+            raise HTTPException(status_code=404, detail="document not found")
+        return DocumentDetailOut.of(detail)
+
+    @app.delete(
+        "/admin/v1/knowledge/documents/{doc_id:path}",
+        status_code=204,
+        dependencies=[Depends(require_auth)],
+    )
+    def delete_document(doc_id: str) -> None:
+        if not knowledge.delete_document(doc_id):
+            raise HTTPException(status_code=404, detail="document not found")
 
     # --- memory (read-only viewer; CRUD arrives in later slices) -----------
     @app.get(

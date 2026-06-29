@@ -7,6 +7,7 @@ fake the Qdrant `scroll` so the grouping/sort/pagination logic is pinned without
 live backend (same degradation philosophy as test_knowledge.py).
 """
 
+import dataclasses
 import tempfile
 from pathlib import Path
 
@@ -19,22 +20,32 @@ from magi.core.memory.store import FileMemoryStore
 
 # --- store: list_documents aggregation --------------------------------------
 class _FakePoint:
-    def __init__(self, payload):
+    def __init__(self, payload, id="pid"):
         self.payload = payload
+        self.id = id
 
 
 class _FakeClient:
-    """A Qdrant stand-in whose `scroll` returns the given pages then stops."""
+    """A Qdrant stand-in whose `scroll` returns the given pages then stops, and
+    which records `set_payload`/`delete` so writes can be asserted."""
 
     def __init__(self, pages):
         # pages: list of (points, next_offset); the last next_offset must be None.
         self._pages = pages
         self._i = 0
+        self.set_payload_calls: list = []
+        self.delete_calls: list = []
 
     def scroll(self, **_kwargs):
         page = self._pages[self._i]
         self._i += 1
         return page
+
+    def set_payload(self, *, collection_name, payload, points):
+        self.set_payload_calls.append((payload, points))
+
+    def delete(self, *, collection_name, points_selector):
+        self.delete_calls.append(points_selector)
 
 
 def _store_with_client(client):
@@ -118,6 +129,41 @@ def test_get_document_absent_returns_none():
     assert detail is None
 
 
+def test_rename_document_sets_title_over_doc_points():
+    points = [
+        _FakePoint({"doc_id": "a.md"}, id="p1"),
+        _FakePoint({"doc_id": "a.md"}, id="p2"),
+        _FakePoint({"doc_id": "other"}, id="p3"),
+    ]
+    client = _FakeClient([(points, None)])
+    ok = _store_with_client(client).rename_document("a.md", "New Title")
+    assert ok is True
+    # Only this doc's points, payload-only update (identity untouched).
+    assert client.set_payload_calls == [({"title": "New Title"}, ["p1", "p2"])]
+
+
+def test_rename_document_absent_returns_false():
+    client = _FakeClient([([], None)])
+    assert _store_with_client(client).rename_document("missing", "x") is False
+    assert client.set_payload_calls == []
+
+
+def test_delete_document_removes_doc_points():
+    points = [
+        _FakePoint({"doc_id": "a.md"}, id="p1"),
+        _FakePoint({"doc_id": "other"}, id="p2"),
+    ]
+    client = _FakeClient([(points, None)])
+    assert _store_with_client(client).delete_document("a.md") is True
+    assert client.delete_calls == [["p1"]]
+
+
+def test_delete_document_absent_returns_false():
+    client = _FakeClient([([], None)])
+    assert _store_with_client(client).delete_document("missing") is False
+    assert client.delete_calls == []
+
+
 # --- admin app: endpoint + auth ---------------------------------------------
 class _FakeKnowledge:
     def __init__(self, documents, detail=None):
@@ -129,6 +175,18 @@ class _FakeKnowledge:
 
     def get_document(self, doc_id):
         return self._detail if (self._detail and self._detail.doc_id == doc_id) else None
+
+    def rename_document(self, doc_id, title):
+        if self._detail and self._detail.doc_id == doc_id:
+            self._detail = dataclasses.replace(self._detail, title=title)
+            return True
+        return False
+
+    def delete_document(self, doc_id):
+        if self._detail and self._detail.doc_id == doc_id:
+            self._detail = None
+            return True
+        return False
 
 
 def _client(documents=(), auth_token=None, memory=None, detail=None):
@@ -198,6 +256,46 @@ def test_get_document_endpoint_returns_chunks():
 
 def test_get_document_missing_is_404():
     assert _client(detail=None).get("/admin/v1/knowledge/documents/nope.md").status_code == 404
+
+
+def _detail(doc_id="a.md", title="A"):
+    return DocumentDetail(
+        doc_id=doc_id, source="a.md", title=title, subject="", tags=[],
+        scope="global", chunks=[DocumentChunk(chunk_index=0, text="x")],
+    )
+
+
+def test_rename_document_endpoint_updates_title():
+    resp = _client(detail=_detail()).patch(
+        "/admin/v1/knowledge/documents/a.md", json={"title": "Renamed"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "Renamed"
+
+
+def test_rename_document_missing_is_404():
+    resp = _client(detail=None).patch(
+        "/admin/v1/knowledge/documents/nope.md", json={"title": "X"}
+    )
+    assert resp.status_code == 404
+
+
+def test_rename_document_rejects_empty_title():
+    resp = _client(detail=_detail()).patch(
+        "/admin/v1/knowledge/documents/a.md", json={"title": ""}
+    )
+    assert resp.status_code == 422  # min_length=1
+
+
+def test_delete_document_endpoint():
+    client = _client(detail=_detail())
+    assert client.delete("/admin/v1/knowledge/documents/a.md").status_code == 204
+    # Gone now → second delete is a 404.
+    assert client.delete("/admin/v1/knowledge/documents/a.md").status_code == 404
+
+
+def test_delete_document_missing_is_404():
+    assert _client(detail=None).delete("/admin/v1/knowledge/documents/nope.md").status_code == 404
 
 
 # --- memory viewer (read-only) ----------------------------------------------

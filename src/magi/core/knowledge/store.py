@@ -229,15 +229,69 @@ class KnowledgeStore:
         log_info(f"knowledge: indexed {len(points)} chunk(s) for doc {doc_id!r} (source={source})")
         return len(points)
 
-    def delete_document(self, doc_id: str) -> None:
-        """Remove all chunks for `doc_id`. No-op when the backend is unavailable.
+    def delete_document(self, doc_id: str) -> bool:
+        """Remove all chunks for `doc_id`. Returns whether any were removed (False
+        when the doc is absent or the backend is unavailable).
 
         Connects to the existing collection if the client is cold (admin deletes
-        run in a process that never embedded), so a fresh admin service can delete."""
+        run in a process that never embedded), so a fresh admin service can delete.
+        Selects by collected point ids — no `models` import, so it works without the
+        optional qdrant extra's filter types."""
         client = self._connect_existing()
         if client is None:
-            return
-        self._delete_doc(client, doc_id)
+            return False
+        ids = self._point_ids_for_doc(client, doc_id)
+        if not ids:
+            return False
+        try:
+            client.delete(collection_name=self.collection, points_selector=ids)
+        except Exception as exc:  # noqa: BLE001
+            log_warning(f"knowledge: delete failed for {doc_id!r} ({type(exc).__name__}: {exc})")
+            return False
+        log_info(f"knowledge: deleted {len(ids)} chunk(s) for doc {doc_id!r}")
+        return True
+
+    def rename_document(self, doc_id: str, title: str) -> bool:
+        """Set a document's display `title` in place across all its chunks. Returns
+        whether the document existed. Identity (`doc_id`) is unchanged and nothing
+        is re-embedded — a payload-only update over the doc's point ids."""
+        client = self._connect_existing()
+        if client is None:
+            return False
+        ids = self._point_ids_for_doc(client, doc_id)
+        if not ids:
+            return False
+        try:
+            client.set_payload(
+                collection_name=self.collection, payload={"title": title}, points=ids
+            )
+        except Exception as exc:  # noqa: BLE001
+            log_warning(f"knowledge: rename failed for {doc_id!r} ({type(exc).__name__}: {exc})")
+            return False
+        log_info(f"knowledge: renamed doc {doc_id!r} -> title {title!r}")
+        return True
+
+    def _point_ids_for_doc(self, client, doc_id: str) -> list:
+        """The point ids of every chunk for `doc_id`, by scrolling payloads and
+        filtering client-side (no `models` import). [] on any failure."""
+        try:
+            ids: list = []
+            offset = None
+            while True:
+                points, offset = client.scroll(
+                    collection_name=self.collection,
+                    with_payload=True,
+                    with_vectors=False,
+                    limit=256,
+                    offset=offset,
+                )
+                ids.extend(p.id for p in points if (p.payload or {}).get("doc_id") == doc_id)
+                if offset is None:
+                    break
+            return ids
+        except Exception as exc:  # noqa: BLE001
+            log_warning(f"knowledge: scan failed for {doc_id!r} ({type(exc).__name__}: {exc})")
+            return []
 
     # --- enumerate (admin) --------------------------------------------------
     def list_documents(self) -> list[DocumentSummary]:
