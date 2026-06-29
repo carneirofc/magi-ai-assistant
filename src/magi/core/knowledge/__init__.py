@@ -14,6 +14,8 @@ injects it into the knowledge tool — no module-level singleton.
 from magi.core.knowledge.chunking import chunk_text
 from magi.core.knowledge.store import (
     GLOBAL_SCOPE,
+    DocumentChunk,
+    DocumentDetail,
     DocumentSummary,
     KnowledgeHit,
     KnowledgeSearcher,
@@ -23,6 +25,8 @@ from magi.core.knowledge.store import (
 
 __all__ = [
     "GLOBAL_SCOPE",
+    "DocumentChunk",
+    "DocumentDetail",
     "DocumentSummary",
     "KnowledgeHit",
     "KnowledgeSearcher",

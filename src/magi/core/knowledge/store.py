@@ -36,6 +36,12 @@ from magi.core.knowledge.chunking import chunk_text
 GLOBAL_SCOPE = "global"
 
 
+def _payload_tags(payload: dict) -> list[str]:
+    """The `tags` list off a chunk payload, defensively (tolerates absent / non-list)."""
+    raw = payload.get("tags")
+    return [str(t) for t in raw] if isinstance(raw, list) else []
+
+
 @dataclass(frozen=True)
 class KnowledgeHit:
     """One retrieved chunk: the verbatim text plus where it came from."""
@@ -53,14 +59,39 @@ class DocumentSummary:
 
     A *document* is the set of chunks sharing a `doc_id`; there is no document
     record on disk, so this is derived by scrolling the corpus (see
-    `KnowledgeStore.list_documents`). `latest_ts` is the newest chunk timestamp
-    (when the doc was last ingested)."""
+    `KnowledgeStore.list_documents`). `title`/`subject`/`tags` are doc-level fields
+    repeated on every chunk; `latest_ts` is the newest chunk timestamp (when the
+    doc was last ingested)."""
 
     doc_id: str
     source: str
+    title: str
+    subject: str
+    tags: list[str]
     scope: str
     chunk_count: int
     latest_ts: str
+
+
+@dataclass(frozen=True)
+class DocumentChunk:
+    """One chunk of a document, in order."""
+
+    chunk_index: int
+    text: str
+
+
+@dataclass(frozen=True)
+class DocumentDetail:
+    """A single document: its doc-level fields plus its chunks in order."""
+
+    doc_id: str
+    source: str
+    title: str
+    subject: str
+    tags: list[str]
+    scope: str
+    chunks: list[DocumentChunk]
 
 
 class KnowledgeSearcher(Protocol):
@@ -142,12 +173,20 @@ class KnowledgeStore:
         text: str,
         *,
         source: str,
+        title: Optional[str] = None,
+        subject: str = "",
+        tags: Optional[list[str]] = None,
         scope: str = GLOBAL_SCOPE,
         metadata: Optional[dict[str, str]] = None,
     ) -> int:
         """Chunk, embed, and upsert one document. Re-ingesting the same `doc_id`
         replaces its previous chunks (so edits and shrinks are clean). Returns the
-        number of chunks indexed (0 on empty input or any failure)."""
+        number of chunks indexed (0 on empty input or any failure).
+
+        `title` is the human display label (defaults to `source`); `subject` is the
+        single controlled grouping; `tags` are free-form labels. All three are
+        carried on every chunk's payload (doc-level fields, repeated per chunk) so
+        the admin can browse/filter and the model can filter at query time."""
         chunks = chunk_text(text, size=self.chunk_chars, overlap=self.chunk_overlap)
         if not chunks:
             return 0
@@ -171,6 +210,9 @@ class KnowledgeStore:
                     payload={
                         "doc_id": doc_id,
                         "source": source,
+                        "title": title or source,
+                        "subject": subject,
+                        "tags": list(tags or []),
                         "scope": scope,
                         "chunk_index": i,
                         "text": chunk,
@@ -229,8 +271,12 @@ class KnowledgeStore:
                     ts = str(payload.get("ts", ""))
                     agg = docs.get(doc_id)
                     if agg is None:
+                        source = str(payload.get("source", ""))
                         docs[doc_id] = {
-                            "source": str(payload.get("source", "")),
+                            "source": source,
+                            "title": str(payload.get("title") or source),
+                            "subject": str(payload.get("subject", "")),
+                            "tags": _payload_tags(payload),
                             "scope": str(payload.get("scope", GLOBAL_SCOPE)),
                             "chunk_count": 1,
                             "latest_ts": ts,
@@ -248,6 +294,9 @@ class KnowledgeStore:
             DocumentSummary(
                 doc_id=doc_id,
                 source=agg["source"],
+                title=agg["title"],
+                subject=agg["subject"],
+                tags=agg["tags"],
                 scope=agg["scope"],
                 chunk_count=agg["chunk_count"],
                 latest_ts=agg["latest_ts"],
@@ -256,6 +305,59 @@ class KnowledgeStore:
         ]
         summaries.sort(key=lambda d: d.latest_ts, reverse=True)
         return summaries
+
+    def get_document(self, doc_id: str) -> Optional[DocumentDetail]:
+        """One document's doc-level fields + its chunks in `chunk_index` order, or
+        None when it doesn't exist / the backend is unavailable.
+
+        Filters the corpus to this `doc_id` and reads payloads only (no vectors)."""
+        client = self._connect_existing()
+        if client is None:
+            return None
+        try:
+            payloads: list[dict] = []
+            offset = None
+            while True:
+                points, offset = client.scroll(
+                    collection_name=self.collection,
+                    with_payload=True,
+                    with_vectors=False,
+                    limit=256,
+                    offset=offset,
+                )
+                # Filter client-side (no models import needed, no optional-dep
+                # coupling); the corpus is small and admin-only.
+                payloads.extend(
+                    p.payload for p in points if (p.payload or {}).get("doc_id") == doc_id
+                )
+                if offset is None:
+                    break
+        except Exception as exc:  # noqa: BLE001
+            log_warning(f"knowledge: get failed for {doc_id!r} ({type(exc).__name__}: {exc})")
+            return None
+        if not payloads:
+            return None
+        chunks = sorted(
+            (
+                DocumentChunk(
+                    chunk_index=int(p.get("chunk_index", 0)),
+                    text=str(p.get("text", "")),
+                )
+                for p in payloads
+            ),
+            key=lambda c: c.chunk_index,
+        )
+        head = payloads[0]
+        source = str(head.get("source", ""))
+        return DocumentDetail(
+            doc_id=doc_id,
+            source=source,
+            title=str(head.get("title") or source),
+            subject=str(head.get("subject", "")),
+            tags=_payload_tags(head),
+            scope=str(head.get("scope", GLOBAL_SCOPE)),
+            chunks=chunks,
+        )
 
     def _delete_doc(self, client, doc_id: str) -> None:
         try:

@@ -30,7 +30,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
-from magi.core.knowledge import DocumentSummary, KnowledgeStore
+from magi.core.knowledge import DocumentDetail, DocumentSummary, KnowledgeStore
 from magi.core.memory.store import FileMemoryStore
 
 # A session id is irrelevant when reading user-level files (facts, episodes,
@@ -45,6 +45,9 @@ class DocumentSummaryOut(BaseModel):
 
     doc_id: str = Field(description="Stable identity (the ingest path/key).")
     source: str = Field(description="Where the document came from (e.g. filename).")
+    title: str = Field(description="Human display label (defaults to source).")
+    subject: str = Field(description="Single controlled grouping ('' when unset).")
+    tags: list[str] = Field(description="Free-form labels.")
     scope: str = Field(description="Origin partition; 'global' for the shared corpus.")
     chunk_count: int = Field(description="How many chunks this document is stored as.")
     latest_ts: str = Field(description="Newest chunk timestamp (last ingest).")
@@ -54,6 +57,9 @@ class DocumentSummaryOut(BaseModel):
         return cls(
             doc_id=d.doc_id,
             source=d.source,
+            title=d.title,
+            subject=d.subject,
+            tags=d.tags,
             scope=d.scope,
             chunk_count=d.chunk_count,
             latest_ts=d.latest_ts,
@@ -62,6 +68,35 @@ class DocumentSummaryOut(BaseModel):
 
 class DocumentList(BaseModel):
     documents: list[DocumentSummaryOut]
+
+
+class ChunkOut(BaseModel):
+    chunk_index: int
+    text: str
+
+
+class DocumentDetailOut(BaseModel):
+    """A single document: doc-level fields + its chunks in order."""
+
+    doc_id: str
+    source: str
+    title: str
+    subject: str
+    tags: list[str]
+    scope: str
+    chunks: list[ChunkOut]
+
+    @classmethod
+    def of(cls, d: DocumentDetail) -> "DocumentDetailOut":
+        return cls(
+            doc_id=d.doc_id,
+            source=d.source,
+            title=d.title,
+            subject=d.subject,
+            tags=d.tags,
+            scope=d.scope,
+            chunks=[ChunkOut(chunk_index=c.chunk_index, text=c.text) for c in d.chunks],
+        )
 
 
 # --- memory wire format ------------------------------------------------------
@@ -149,6 +184,17 @@ def create_admin_app(
         return DocumentList(
             documents=[DocumentSummaryOut.of(d) for d in knowledge.list_documents()]
         )
+
+    @app.get(
+        "/admin/v1/knowledge/documents/{doc_id:path}",
+        response_model=DocumentDetailOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def get_document(doc_id: str) -> DocumentDetailOut:
+        detail = knowledge.get_document(doc_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="document not found")
+        return DocumentDetailOut.of(detail)
 
     # --- memory (read-only viewer; CRUD arrives in later slices) -----------
     @app.get(

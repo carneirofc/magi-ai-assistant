@@ -13,7 +13,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from magi.channels.admin import create_admin_app
-from magi.core.knowledge import DocumentSummary, KnowledgeStore
+from magi.core.knowledge import DocumentChunk, DocumentDetail, DocumentSummary, KnowledgeStore
 from magi.core.memory.store import FileMemoryStore
 
 
@@ -45,8 +45,10 @@ def _store_with_client(client):
 
 def test_list_documents_groups_chunks_by_doc_id():
     points = [
-        _FakePoint({"doc_id": "a.md", "source": "a.md", "scope": "global", "ts": "2026-01-01T00:00:00"}),
-        _FakePoint({"doc_id": "a.md", "source": "a.md", "scope": "global", "ts": "2026-01-02T00:00:00"}),
+        _FakePoint({"doc_id": "a.md", "source": "a.md", "title": "A", "subject": "Infra",
+                    "tags": ["x"], "scope": "global", "ts": "2026-01-01T00:00:00"}),
+        _FakePoint({"doc_id": "a.md", "source": "a.md", "title": "A", "subject": "Infra",
+                    "tags": ["x"], "scope": "global", "ts": "2026-01-02T00:00:00"}),
         _FakePoint({"doc_id": "b.md", "source": "b.md", "scope": "global", "ts": "2026-01-03T00:00:00"}),
     ]
     store = _store_with_client(_FakeClient([(points, None)]))
@@ -55,10 +57,17 @@ def test_list_documents_groups_chunks_by_doc_id():
 
     by_id = {d.doc_id: d for d in docs}
     assert by_id["a.md"] == DocumentSummary(
-        doc_id="a.md", source="a.md", scope="global", chunk_count=2,
-        latest_ts="2026-01-02T00:00:00",
+        doc_id="a.md", source="a.md", title="A", subject="Infra", tags=["x"],
+        scope="global", chunk_count=2, latest_ts="2026-01-02T00:00:00",
     )
     assert by_id["b.md"].chunk_count == 1
+
+
+def test_list_documents_title_defaults_to_source():
+    # A pre-schema chunk (no title) renders with title == source (backfill).
+    points = [_FakePoint({"doc_id": "old.md", "source": "old.md", "ts": "1"})]
+    [doc] = _store_with_client(_FakeClient([(points, None)])).list_documents()
+    assert doc.title == "old.md" and doc.subject == "" and doc.tags == []
 
 
 def test_list_documents_sorted_newest_first():
@@ -90,19 +99,44 @@ def test_list_documents_no_collection_returns_empty():
     assert store.list_documents() == []
 
 
+def test_get_document_orders_chunks_and_reads_fields():
+    points = [
+        _FakePoint({"doc_id": "a.md", "source": "a.md", "title": "A", "subject": "Infra",
+                    "tags": ["x", "y"], "scope": "global", "chunk_index": 1, "text": "second"}),
+        _FakePoint({"doc_id": "a.md", "source": "a.md", "title": "A", "subject": "Infra",
+                    "tags": ["x", "y"], "scope": "global", "chunk_index": 0, "text": "first"}),
+    ]
+    detail = _store_with_client(_FakeClient([(points, None)])).get_document("a.md")
+    assert detail is not None
+    assert detail.title == "A" and detail.subject == "Infra" and detail.tags == ["x", "y"]
+    assert [c.text for c in detail.chunks] == ["first", "second"]
+
+
+def test_get_document_absent_returns_none():
+    # No points match => None (the scroll yields an empty page).
+    detail = _store_with_client(_FakeClient([([], None)])).get_document("missing")
+    assert detail is None
+
+
 # --- admin app: endpoint + auth ---------------------------------------------
 class _FakeKnowledge:
-    def __init__(self, documents):
+    def __init__(self, documents, detail=None):
         self._documents = documents
+        self._detail = detail
 
     def list_documents(self):
         return self._documents
 
+    def get_document(self, doc_id):
+        return self._detail if (self._detail and self._detail.doc_id == doc_id) else None
 
-def _client(documents=(), auth_token=None, memory=None):
+
+def _client(documents=(), auth_token=None, memory=None, detail=None):
     if memory is None:
         memory = FileMemoryStore(Path(tempfile.mkdtemp()))  # empty: no users on disk
-    app = create_admin_app(_FakeKnowledge(list(documents)), memory, auth_token=auth_token)
+    app = create_admin_app(
+        _FakeKnowledge(list(documents), detail=detail), memory, auth_token=auth_token
+    )
     return TestClient(app)
 
 
@@ -113,16 +147,16 @@ def test_healthz_is_open():
 
 def test_list_documents_endpoint_returns_rows():
     docs = [
-        DocumentSummary(doc_id="a.md", source="a.md", scope="global", chunk_count=2, latest_ts="t2"),
-        DocumentSummary(doc_id="b.md", source="b.md", scope="global", chunk_count=1, latest_ts="t1"),
+        DocumentSummary(doc_id="a.md", source="a.md", title="A", subject="Infra",
+                        tags=["x"], scope="global", chunk_count=2, latest_ts="t2"),
     ]
     resp = _client(documents=docs).get("/admin/v1/knowledge/documents")
 
     assert resp.status_code == 200
     assert resp.json() == {
         "documents": [
-            {"doc_id": "a.md", "source": "a.md", "scope": "global", "chunk_count": 2, "latest_ts": "t2"},
-            {"doc_id": "b.md", "source": "b.md", "scope": "global", "chunk_count": 1, "latest_ts": "t1"},
+            {"doc_id": "a.md", "source": "a.md", "title": "A", "subject": "Infra",
+             "tags": ["x"], "scope": "global", "chunk_count": 2, "latest_ts": "t2"},
         ]
     }
 
@@ -147,6 +181,23 @@ def test_list_documents_requires_bearer_when_token_set():
 def test_no_token_means_open():
     # auth_token None => the gate is a no-op (keep the port unpublished instead).
     assert _client(auth_token=None).get("/admin/v1/knowledge/documents").status_code == 200
+
+
+def test_get_document_endpoint_returns_chunks():
+    detail = DocumentDetail(
+        doc_id="a.md", source="a.md", title="A", subject="Infra", tags=["x"],
+        scope="global",
+        chunks=[DocumentChunk(chunk_index=0, text="first"), DocumentChunk(chunk_index=1, text="second")],
+    )
+    resp = _client(detail=detail).get("/admin/v1/knowledge/documents/a.md")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["title"] == "A" and body["subject"] == "Infra"
+    assert [c["text"] for c in body["chunks"]] == ["first", "second"]
+
+
+def test_get_document_missing_is_404():
+    assert _client(detail=None).get("/admin/v1/knowledge/documents/nope.md").status_code == 404
 
 
 # --- memory viewer (read-only) ----------------------------------------------
