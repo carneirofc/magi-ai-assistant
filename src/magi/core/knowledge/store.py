@@ -114,6 +114,15 @@ class KnowledgeSearcher(Protocol):
     ) -> list[KnowledgeHit]: ...
 
 
+class KnowledgeTagger(Protocol):
+    """The write surface the model's tag tool needs — tags only, never content or
+    subject. Kept separate from `KnowledgeSearcher` so a read-only fake stays read-only."""
+
+    def tag_document(
+        self, doc_id: str, *, add: Sequence[str] = (), remove: Sequence[str] = ()
+    ) -> Optional[list[str]]: ...
+
+
 def blend_by_tags(
     hits: list[KnowledgeHit], query_tags: Sequence[str], weight: float
 ) -> list[KnowledgeHit]:
@@ -283,6 +292,65 @@ class KnowledgeStore:
             return False
         log_info(f"knowledge: deleted {len(ids)} chunk(s) for doc {doc_id!r}")
         return True
+
+    def tag_document(
+        self, doc_id: str, *, add: Sequence[str] = (), remove: Sequence[str] = ()
+    ) -> Optional[list[str]]:
+        """Add/remove free-form tags on a document, in place across all its chunks.
+        Returns the document's new tag list, or None when it doesn't exist / the
+        backend is unavailable.
+
+        Order-preserving: existing tags keep their order, new ones append, removed
+        ones drop. A payload-only update over the doc's point ids — no re-embed, no
+        content or subject change (the model's write boundary is tags only)."""
+        client = self._connect_existing()
+        if client is None:
+            return None
+        ids, current = self._points_and_tags(client, doc_id)
+        if not ids:
+            return None
+        tags = list(current)
+        for t in add:
+            t = t.strip()
+            if t and t not in tags:
+                tags.append(t)
+        drop = {t.strip() for t in remove}
+        tags = [t for t in tags if t not in drop]
+        try:
+            client.set_payload(collection_name=self.collection, payload={"tags": tags}, points=ids)
+        except Exception as exc:  # noqa: BLE001
+            log_warning(f"knowledge: tag failed for {doc_id!r} ({type(exc).__name__}: {exc})")
+            return None
+        log_info(f"knowledge: tagged doc {doc_id!r} -> {tags}")
+        return tags
+
+    def _points_and_tags(self, client, doc_id: str) -> tuple[list, list[str]]:
+        """The point ids of `doc_id`'s chunks + its current tag list (from the first
+        matching chunk). ([], []) on any failure / absence."""
+        try:
+            ids: list = []
+            tags: list[str] = []
+            offset = None
+            while True:
+                points, offset = client.scroll(
+                    collection_name=self.collection,
+                    with_payload=True,
+                    with_vectors=False,
+                    limit=256,
+                    offset=offset,
+                )
+                for p in points:
+                    payload = p.payload or {}
+                    if payload.get("doc_id") == doc_id:
+                        if not ids:
+                            tags = _payload_tags(payload)
+                        ids.append(p.id)
+                if offset is None:
+                    break
+            return ids, tags
+        except Exception as exc:  # noqa: BLE001
+            log_warning(f"knowledge: scan failed for {doc_id!r} ({type(exc).__name__}: {exc})")
+            return [], []
 
     def rename_document(self, doc_id: str, title: str) -> bool:
         """Set a document's display `title` in place across all its chunks. Returns

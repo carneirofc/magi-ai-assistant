@@ -20,6 +20,7 @@ from magi.core.knowledge.store import (
     KnowledgeHit,
     KnowledgeSearcher,
     KnowledgeStore,
+    KnowledgeTagger,
     build_knowledge_from_config,
 )
 
@@ -31,6 +32,7 @@ __all__ = [
     "KnowledgeHit",
     "KnowledgeSearcher",
     "KnowledgeStore",
+    "KnowledgeTagger",
     "build_knowledge_from_config",
     "chunk_text",
 ]

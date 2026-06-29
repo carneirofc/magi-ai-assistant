@@ -149,9 +149,10 @@ def build_team(
     knowledge_tools: list = []
     knowledge = build_knowledge_from_config()
     if knowledge is not None:
-        knowledge_tools = build_knowledge_tools(knowledge)
+        # The store is both searcher and tagger, so it powers read + tag-write tools.
+        knowledge_tools = build_knowledge_tools(knowledge, knowledge)
         log_info(
-            f"knowledge: ENABLED ({len(knowledge_tools)} tool, "
+            f"knowledge: ENABLED ({len(knowledge_tools)} tool(s), "
             f"collection={config.knowledge_collection})"
         )
 

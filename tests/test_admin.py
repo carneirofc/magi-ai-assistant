@@ -164,6 +164,29 @@ def test_delete_document_absent_returns_false():
     assert client.delete_calls == []
 
 
+def test_tag_document_adds_and_removes_order_preserving():
+    points = [
+        _FakePoint({"doc_id": "a.md", "tags": ["keep", "drop"]}, id="p1"),
+        _FakePoint({"doc_id": "a.md", "tags": ["keep", "drop"]}, id="p2"),
+    ]
+    client = _FakeClient([(points, None)])
+    result = _store_with_client(client).tag_document("a.md", add=["new"], remove=["drop"])
+    assert result == ["keep", "new"]
+    assert client.set_payload_calls == [({"tags": ["keep", "new"]}, ["p1", "p2"])]
+
+
+def test_tag_document_dedupes_existing():
+    points = [_FakePoint({"doc_id": "a.md", "tags": ["x"]}, id="p1")]
+    result = _store_with_client(_FakeClient([(points, None)])).tag_document("a.md", add=["x", "y"])
+    assert result == ["x", "y"]
+
+
+def test_tag_document_absent_returns_none():
+    client = _FakeClient([([], None)])
+    assert _store_with_client(client).tag_document("missing", add=["x"]) is None
+    assert client.set_payload_calls == []
+
+
 # --- admin app: endpoint + auth ---------------------------------------------
 class _FakeKnowledge:
     def __init__(self, documents, detail=None):

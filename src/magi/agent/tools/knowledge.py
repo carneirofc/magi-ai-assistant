@@ -12,15 +12,15 @@ the tool takes only a query; the searcher's `scopes=` seam is where per-user/
 session knowledge would later be added without changing this tool's contract.
 """
 
-from typing import Annotated
+from typing import Annotated, Optional
 
 from agno.tools import tool
 from agno.utils.log import log_info
 from pydantic import BaseModel, Field
 
-from magi.agent.tools.outputs import ToolOutput, ok
+from magi.agent.tools.outputs import ToolOutput, fail, ok
 from magi.core.config import config
-from magi.core.knowledge import KnowledgeSearcher
+from magi.core.knowledge import KnowledgeSearcher, KnowledgeTagger
 
 
 class KnowledgeSnippet(BaseModel):
@@ -39,8 +39,19 @@ class KnowledgeSearchData(BaseModel):
     count: int = Field(description="How many passages were returned.")
 
 
-def build_knowledge_tools(searcher: KnowledgeSearcher) -> list:
-    """Return the knowledge tool set bound to `searcher` (dependency-injected)."""
+class TagData(BaseModel):
+    doc_id: str = Field(description="The document whose tags were changed.")
+    tags: list[str] = Field(description="The document's full tag list after the change.")
+
+
+def build_knowledge_tools(
+    searcher: KnowledgeSearcher, tagger: Optional[KnowledgeTagger] = None
+) -> list:
+    """Return the knowledge tool set bound to the injected dependencies.
+
+    `searcher` powers the read tool; when `tagger` is given (the store), the
+    tag-write tool is included too. The store satisfies both, so the composition
+    root passes it as both."""
 
     @tool(
         description="Search the knowledge base for reference material relevant to a question.",
@@ -100,4 +111,48 @@ def build_knowledge_tools(searcher: KnowledgeSearcher) -> list:
         )
         return ok(msg, KnowledgeSearchData(query=query.strip(), snippets=snippets, count=len(snippets)))
 
-    return [search_knowledge]
+    if tagger is None:
+        return [search_knowledge]
+
+    @tool(
+        description="Adjust the tags on a knowledge document so it's easier to find later.",
+        instructions=(
+            "Use to curate the tag labels on a knowledge document — the free-form labels you can "
+            "later pass to search_knowledge to bias results. Identify the document by its `doc_id` "
+            "(shown on search results' source/origin). You may only change tags: the document's "
+            "content and its subject are not yours to edit. Pass `add` and/or `remove` lists. "
+            "Returns the document's full tag list after the change; a missing document is reported "
+            "as a failure, not invented."
+        ),
+        show_result=True,
+    )
+    def tag_knowledge(
+        doc_id: Annotated[
+            str, Field(min_length=1, description="The document's id (from a search result).")
+        ],
+        add: Annotated[
+            list[str], Field(default_factory=list, description="Tags to add.")
+        ] = [],  # noqa: B006 — agno reads the annotation default; never mutated.
+        remove: Annotated[
+            list[str], Field(default_factory=list, description="Tags to remove.")
+        ] = [],  # noqa: B006
+    ) -> ToolOutput[TagData]:
+        """Add and/or remove tags on the knowledge document `doc_id`.
+
+        Tags are the free-form labels that bias `search_knowledge`; curate them so
+        related material is easier to surface. You can only change tags — never the
+        document's content or its subject. Returns the new full tag list; a doc that
+        doesn't exist is a failure, not a silent success.
+        """
+        result = tagger.tag_document(
+            doc_id.strip(),
+            add=[t for t in add if t.strip()],
+            remove=[t for t in remove if t.strip()],
+        )
+        if result is None:
+            log_info(f"knowledge: tag {doc_id.strip()!r} -> not found")
+            return fail(f"No knowledge document with id {doc_id.strip()!r}.")
+        log_info(f"knowledge: tag {doc_id.strip()!r} -> {result}")
+        return ok(f"Tags now: {', '.join(result) or '(none)'}.", TagData(doc_id=doc_id.strip(), tags=result))
+
+    return [search_knowledge, tag_knowledge]

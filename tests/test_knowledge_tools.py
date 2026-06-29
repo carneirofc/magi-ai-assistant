@@ -23,6 +23,18 @@ class _FakeSearcher:
         return self._hits
 
 
+class _FakeTagger:
+    """Records tag writes; returns a canned new tag list (or None = not found)."""
+
+    def __init__(self, result):
+        self._result = result
+        self.calls: list[tuple] = []
+
+    def tag_document(self, doc_id, *, add=(), remove=()):
+        self.calls.append((doc_id, tuple(add), tuple(remove)))
+        return self._result
+
+
 def _tool(hits):
     searcher = _FakeSearcher(hits)
     (search_knowledge,) = build_knowledge_tools(searcher)
@@ -91,3 +103,38 @@ def test_snippets_carry_subject_and_tags():
     data = search_knowledge.entrypoint(query="q").get("data")
     assert data["snippets"][0]["subject"] == "Infra"
     assert data["snippets"][0]["tags"] == ["docker"]
+
+
+# --- tag_knowledge (write tool) ---------------------------------------------
+def test_no_tag_tool_without_a_tagger():
+    # Read-only deployment: only the search tool is built.
+    tools = build_knowledge_tools(_FakeSearcher([]))
+    assert [t.name for t in tools] == ["search_knowledge"]
+
+
+def test_tag_tool_present_with_tagger():
+    tagger = _FakeTagger(["a"])
+    names = [t.name for t in build_knowledge_tools(_FakeSearcher([]), tagger)]
+    assert names == ["search_knowledge", "tag_knowledge"]
+
+
+def _tag_tool(result):
+    tagger = _FakeTagger(result)
+    _, tag_knowledge = build_knowledge_tools(_FakeSearcher([]), tagger)
+    return tagger, tag_knowledge
+
+
+def test_tag_knowledge_forwards_and_reports_new_tags():
+    tagger, tag_knowledge = _tag_tool(["keep", "new"])
+    result = tag_knowledge.entrypoint(doc_id="a.md", add=["new", " "], remove=["drop"])
+    assert result.get("success") is True
+    assert result.get("data")["tags"] == ["keep", "new"]
+    # Blank tags dropped before forwarding.
+    assert tagger.calls == [("a.md", ("new",), ("drop",))]
+
+
+def test_tag_knowledge_missing_doc_is_failure():
+    _, tag_knowledge = _tag_tool(None)
+    result = tag_knowledge.entrypoint(doc_id="nope.md", add=["x"])
+    assert result.get("success") is False
+    assert "No knowledge document" in result.get("message")
