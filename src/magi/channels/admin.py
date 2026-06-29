@@ -86,6 +86,22 @@ class RenameDocument(BaseModel):
     title: str = Field(min_length=1, description="The new display title.")
 
 
+class IngestDocument(BaseModel):
+    """Add a document. The resolver (paste / upload) has already produced
+    `(title, text)`; re-using an existing `doc_id` replaces that document."""
+
+    title: str = Field(min_length=1, description="Display title (and source).")
+    text: str = Field(min_length=1, description="The document's full text.")
+    doc_id: Optional[str] = Field(default=None, description="Identity; derived from title if absent.")
+    subject: str = Field(default="", description="Subject (must exist in the registry), or ''.")
+    tags: list[str] = Field(default_factory=list)
+
+
+class IngestResult(BaseModel):
+    doc_id: str
+    chunks_indexed: int
+
+
 class SetSubject(BaseModel):
     """Assign a document's subject (the controlled grouping). '' clears it."""
 
@@ -305,6 +321,25 @@ def create_admin_app(
         return DocumentList(
             documents=[DocumentSummaryOut.of(d) for d in knowledge.list_documents()]
         )
+
+    @app.post(
+        "/admin/v1/knowledge/documents",
+        response_model=IngestResult,
+        dependencies=[Depends(require_auth)],
+    )
+    def ingest_document(body: IngestDocument) -> IngestResult:
+        if body.subject and not any(s.name == body.subject for s in subjects.list()):
+            raise HTTPException(status_code=422, detail=f"unknown subject {body.subject!r}")
+        doc_id = (body.doc_id or _slug(body.title)).strip() or _slug(body.title)
+        n = knowledge.index_document(
+            doc_id,
+            body.text,
+            source=body.title,
+            title=body.title,
+            subject=body.subject,
+            tags=body.tags,
+        )
+        return IngestResult(doc_id=doc_id, chunks_indexed=n)
 
     # Suffix routes (.../subject, .../tags) and /tags are declared BEFORE the
     # catch-all `{doc_id:path}` document routes: the path converter is greedy, so a
@@ -612,6 +647,14 @@ def _turn(t: dict) -> dict:
         "content": str(t.get("content", "")),
         "ts": str(t.get("ts", "")),
     }
+
+
+def _slug(title: str) -> str:
+    """A filesystem/url-safe doc_id derived from a title (lowercased, hyphenated)."""
+    import re
+
+    s = re.sub(r"[^a-z0-9]+", "-", title.strip().lower()).strip("-")
+    return s or "document"
 
 
 def _file_version(path) -> str:

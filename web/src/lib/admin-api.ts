@@ -98,6 +98,20 @@ export async function getPersona(): Promise<Body<"/admin/v1/memory/persona">> {
   return adminGet("/admin/v1/memory/persona");
 }
 
+// --- ingest -----------------------------------------------------------------
+export function ingestDocument(doc: {
+  title: string;
+  text: string;
+  subject?: string;
+  tags?: string[];
+  doc_id?: string;
+}): Promise<Response> {
+  return adminRequest("/admin/v1/knowledge/documents", {
+    method: "POST",
+    body: JSON.stringify(doc),
+  });
+}
+
 // --- subjects ---------------------------------------------------------------
 export async function listSubjects(): Promise<Body<"/admin/v1/knowledge/subjects">> {
   return adminGet("/admin/v1/knowledge/subjects");

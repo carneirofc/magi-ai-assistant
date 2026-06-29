@@ -226,6 +226,41 @@ def test_list_tags_endpoint():
     }
 
 
+def test_ingest_derives_doc_id_from_title():
+    fake = _FakeKnowledge([])
+    app = create_admin_app(fake, FileMemoryStore(Path(tempfile.mkdtemp())), SubjectRegistry(Path(tempfile.mkdtemp()) / "s.json"))
+    resp = TestClient(app).post(
+        "/admin/v1/knowledge/documents",
+        json={"title": "My Great Doc!", "text": "hello world"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"doc_id": "my-great-doc", "chunks_indexed": 3}
+    assert fake.index_calls[0][0] == "my-great-doc"
+    assert fake.index_calls[0][3] == "My Great Doc!"  # title forwarded
+
+
+def test_ingest_rejects_unknown_subject(tmp_path):
+    reg = SubjectRegistry(tmp_path / "s.json")
+    resp = _client(subjects=reg).post(
+        "/admin/v1/knowledge/documents",
+        json={"title": "X", "text": "y", "subject": "Ghost"},
+    )
+    assert resp.status_code == 422
+
+
+def test_ingest_with_known_subject_and_tags(tmp_path):
+    reg = SubjectRegistry(tmp_path / "s.json")
+    reg.create("Infra")
+    fake = _FakeKnowledge([])
+    app = create_admin_app(fake, FileMemoryStore(tmp_path / "m"), reg)
+    resp = TestClient(app).post(
+        "/admin/v1/knowledge/documents",
+        json={"title": "Doc", "text": "z", "subject": "Infra", "tags": ["docker"]},
+    )
+    assert resp.status_code == 200
+    assert fake.index_calls[0][4] == "Infra" and fake.index_calls[0][5] == ["docker"]
+
+
 # --- admin app: endpoint + auth ---------------------------------------------
 class _FakeKnowledge:
     def __init__(self, documents, detail=None, tags=()):
@@ -233,6 +268,7 @@ class _FakeKnowledge:
         self._detail = detail
         self._tags = list(tags)
         self.rename_subject_calls: list = []
+        self.index_calls: list = []
 
     def list_documents(self):
         return self._documents
@@ -275,6 +311,10 @@ class _FakeKnowledge:
 
     def list_tags(self):
         return self._tags
+
+    def index_document(self, doc_id, text, *, source, title=None, subject="", tags=None):
+        self.index_calls.append((doc_id, text, source, title, subject, list(tags or [])))
+        return 3  # canned chunk count
 
 
 class _FakeRetriever:

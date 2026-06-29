@@ -1,6 +1,8 @@
 // The knowledge document list. Server-fetches the corpus + subjects, then a client
 // component renders the table with subject (hard) and tag (soft) filters.
 
+import Link from "next/link";
+
 import { KnowledgeList } from "@/components/KnowledgeList";
 import { Nav } from "@/components/Nav";
 import { listKnowledgeDocuments, listSubjects } from "@/lib/admin-api";
@@ -23,6 +25,9 @@ export default async function KnowledgePage() {
   return (
     <main>
       <Nav title="Knowledge" />
+      <p>
+        <Link href="/knowledge/add">+ Add document</Link>
+      </p>
       {error ? (
         <p className="error">{error}</p>
       ) : documents.length === 0 ? (
