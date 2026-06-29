@@ -2,6 +2,7 @@
 // calls the admin-api directly (server-side, with the bearer), so the token never
 // touches the browser. Future slices add detail/edit/add views.
 
+import { Nav } from "@/components/Nav";
 import { listKnowledgeDocuments } from "@/lib/admin-api";
 
 export const dynamic = "force-dynamic"; // always live; never cached at build
@@ -17,14 +18,7 @@ export default async function KnowledgePage() {
 
   return (
     <main>
-      <div className="topbar">
-        <h1>Knowledge</h1>
-        <form method="post" action="/api/auth/logout">
-          <button className="ghost" type="submit">
-            Sign out
-          </button>
-        </form>
-      </div>
+      <Nav title="Knowledge" />
 
       {error ? (
         <p className="error">{error}</p>

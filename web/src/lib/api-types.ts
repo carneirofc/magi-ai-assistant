@@ -22,19 +22,39 @@ export interface components {
     DocumentList: {
       documents: components["schemas"]["DocumentSummaryOut"][];
     };
+    UserSummary: {
+      user_id: string;
+      fact_count: number;
+      episode_count: number;
+      session_count: number;
+    };
+    UserList: { users: components["schemas"]["UserSummary"][] };
+    Fact: { id: string; text: string; ts: string };
+    Profile: {
+      facts: components["schemas"]["Fact"][];
+      raw_long_term: string[];
+      episodes: string[];
+    };
+    SessionList: { sessions: string[] };
+    Turn: { role: string; content: string; ts: string };
+    SessionDetail: {
+      turns: components["schemas"]["Turn"][];
+      summary: string;
+      pending: components["schemas"]["Turn"][];
+    };
+    Persona: { text: string };
   };
 }
 
+type Json<T> = { get: { responses: { 200: { content: { "application/json": T } } } } };
+
 export interface paths {
-  "/admin/v1/knowledge/documents": {
-    get: {
-      responses: {
-        200: {
-          content: {
-            "application/json": components["schemas"]["DocumentList"];
-          };
-        };
-      };
-    };
-  };
+  "/admin/v1/knowledge/documents": Json<components["schemas"]["DocumentList"]>;
+  "/admin/v1/memory/users": Json<components["schemas"]["UserList"]>;
+  "/admin/v1/memory/users/{user_id}/profile": Json<components["schemas"]["Profile"]>;
+  "/admin/v1/memory/users/{user_id}/sessions": Json<components["schemas"]["SessionList"]>;
+  "/admin/v1/memory/users/{user_id}/sessions/{session_id}": Json<
+    components["schemas"]["SessionDetail"]
+  >;
+  "/admin/v1/memory/persona": Json<components["schemas"]["Persona"]>;
 }

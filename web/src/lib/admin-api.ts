@@ -27,10 +27,43 @@ export async function adminGet<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-// Typed convenience: the document list, shaped by the generated OpenAPI types.
-type DocumentList =
-  paths["/admin/v1/knowledge/documents"]["get"]["responses"]["200"]["content"]["application/json"];
+// Typed convenience helpers, each shaped by the generated OpenAPI types.
+type Body<P extends keyof paths> =
+  paths[P]["get"]["responses"]["200"]["content"]["application/json"];
 
-export async function listKnowledgeDocuments(): Promise<DocumentList> {
-  return adminGet<DocumentList>("/admin/v1/knowledge/documents");
+export async function listKnowledgeDocuments(): Promise<
+  Body<"/admin/v1/knowledge/documents">
+> {
+  return adminGet("/admin/v1/knowledge/documents");
+}
+
+export async function listUsers(): Promise<Body<"/admin/v1/memory/users">> {
+  return adminGet("/admin/v1/memory/users");
+}
+
+export async function getProfile(
+  userId: string,
+): Promise<Body<"/admin/v1/memory/users/{user_id}/profile">> {
+  return adminGet(`/admin/v1/memory/users/${encodeURIComponent(userId)}/profile`);
+}
+
+export async function listSessions(
+  userId: string,
+): Promise<Body<"/admin/v1/memory/users/{user_id}/sessions">> {
+  return adminGet(`/admin/v1/memory/users/${encodeURIComponent(userId)}/sessions`);
+}
+
+export async function getSession(
+  userId: string,
+  sessionId: string,
+): Promise<Body<"/admin/v1/memory/users/{user_id}/sessions/{session_id}">> {
+  return adminGet(
+    `/admin/v1/memory/users/${encodeURIComponent(userId)}/sessions/${encodeURIComponent(
+      sessionId,
+    )}`,
+  );
+}
+
+export async function getPersona(): Promise<Body<"/admin/v1/memory/persona">> {
+  return adminGet("/admin/v1/memory/persona");
 }
