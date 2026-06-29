@@ -56,6 +56,12 @@ export interface components {
       pending: components["schemas"]["Turn"][];
     };
     Persona: { text: string };
+    SubjectOut: { id: string; name: string; description: string };
+    SubjectListOut: { subjects: components["schemas"]["SubjectOut"][] };
+    TagList: { tags: string[] };
+    Fact: { id: string; text: string; ts: string };
+    FactsResult: { facts: components["schemas"]["Fact"][]; version: string };
+    RawFile: { kind: string; content: string; version: string };
   };
 }
 
@@ -73,4 +79,7 @@ export interface paths {
     components["schemas"]["SessionDetail"]
   >;
   "/admin/v1/memory/persona": Json<components["schemas"]["Persona"]>;
+  "/admin/v1/knowledge/subjects": Json<components["schemas"]["SubjectListOut"]>;
+  "/admin/v1/knowledge/tags": Json<components["schemas"]["TagList"]>;
+  "/admin/v1/memory/files/{kind}": Json<components["schemas"]["RawFile"]>;
 }

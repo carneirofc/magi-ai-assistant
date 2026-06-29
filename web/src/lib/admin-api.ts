@@ -97,3 +97,116 @@ export async function getSession(
 export async function getPersona(): Promise<Body<"/admin/v1/memory/persona">> {
   return adminGet("/admin/v1/memory/persona");
 }
+
+// --- subjects ---------------------------------------------------------------
+export async function listSubjects(): Promise<Body<"/admin/v1/knowledge/subjects">> {
+  return adminGet("/admin/v1/knowledge/subjects");
+}
+
+export async function listTags(): Promise<Body<"/admin/v1/knowledge/tags">> {
+  return adminGet("/admin/v1/knowledge/tags");
+}
+
+export function createSubject(name: string, description = ""): Promise<Response> {
+  return adminRequest("/admin/v1/knowledge/subjects", {
+    method: "POST",
+    body: JSON.stringify({ name, description }),
+  });
+}
+
+export function editSubject(
+  id: string,
+  patch: { name?: string; description?: string },
+): Promise<Response> {
+  return adminRequest(`/admin/v1/knowledge/subjects/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export function deleteSubject(id: string): Promise<Response> {
+  return adminRequest(`/admin/v1/knowledge/subjects/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+// --- document subject / tags ------------------------------------------------
+export function setDocumentSubject(docId: string, subject: string): Promise<Response> {
+  return adminRequest(`/admin/v1/knowledge/documents/${encodeDocId(docId)}/subject`, {
+    method: "PUT",
+    body: JSON.stringify({ subject }),
+  });
+}
+
+export function editDocumentTags(
+  docId: string,
+  change: { add?: string[]; remove?: string[] },
+): Promise<Response> {
+  return adminRequest(`/admin/v1/knowledge/documents/${encodeDocId(docId)}/tags`, {
+    method: "PATCH",
+    body: JSON.stringify(change),
+  });
+}
+
+// --- memory facts -----------------------------------------------------------
+function factsPath(userId: string, factId?: string): string {
+  const base = `/admin/v1/memory/users/${encodeURIComponent(userId)}/facts`;
+  return factId ? `${base}/${encodeURIComponent(factId)}` : base;
+}
+
+export function addFact(userId: string, text: string, expectedVersion?: string): Promise<Response> {
+  return adminRequest(factsPath(userId), {
+    method: "POST",
+    body: JSON.stringify({ text, expected_version: expectedVersion }),
+  });
+}
+
+export function updateFact(
+  userId: string,
+  factId: string,
+  text: string,
+  expectedVersion?: string,
+): Promise<Response> {
+  return adminRequest(factsPath(userId, factId), {
+    method: "PATCH",
+    body: JSON.stringify({ text, expected_version: expectedVersion }),
+  });
+}
+
+export function deleteFact(
+  userId: string,
+  factId: string,
+  expectedVersion?: string,
+): Promise<Response> {
+  const q = expectedVersion ? `?expected_version=${encodeURIComponent(expectedVersion)}` : "";
+  return adminRequest(`${factsPath(userId, factId)}${q}`, { method: "DELETE" });
+}
+
+// --- raw memory files -------------------------------------------------------
+function rawFileQuery(userId?: string, sessionId?: string): string {
+  const p = new URLSearchParams();
+  if (userId) p.set("user_id", userId);
+  if (sessionId) p.set("session_id", sessionId);
+  const s = p.toString();
+  return s ? `?${s}` : "";
+}
+
+export async function getRawFile(
+  kind: string,
+  opts: { userId?: string; sessionId?: string } = {},
+): Promise<Body<"/admin/v1/memory/files/{kind}">> {
+  return adminGet(
+    `/admin/v1/memory/files/${encodeURIComponent(kind)}${rawFileQuery(opts.userId, opts.sessionId)}`,
+  );
+}
+
+export function putRawFile(
+  kind: string,
+  content: string,
+  opts: { userId?: string; sessionId?: string; expectedVersion?: string } = {},
+): Promise<Response> {
+  return adminRequest(
+    `/admin/v1/memory/files/${encodeURIComponent(kind)}${rawFileQuery(opts.userId, opts.sessionId)}`,
+    { method: "PUT", body: JSON.stringify({ content, expected_version: opts.expectedVersion }) },
+  );
+}
