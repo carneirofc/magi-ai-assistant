@@ -5,6 +5,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { DocumentActions } from "@/components/DocumentActions";
 import { Nav } from "@/components/Nav";
 import { getKnowledgeDocument } from "@/lib/admin-api";
 
@@ -37,6 +38,9 @@ export default async function DocumentPage({
       <p className="muted" style={{ marginTop: 0 }}>
         {doc.doc_id} · {doc.scope}
       </p>
+
+      <DocumentActions docId={doc.doc_id} title={doc.title} />
+
 
       <dl style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "0.25rem 1rem" }}>
         <dt className="muted">Subject</dt>

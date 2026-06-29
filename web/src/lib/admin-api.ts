@@ -5,6 +5,9 @@
 import "server-only";
 
 import type { paths } from "./api-types";
+import { encodeDocId } from "./encode";
+
+export { encodeDocId };
 
 function baseUrl(): string {
   return process.env.ADMIN_API_URL ?? "http://127.0.0.1:8100";
@@ -15,17 +18,23 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/** Low-level request to the admin-api with the server-side bearer. Returns the raw
+ * Response so callers (BFF routes) can relay status codes. */
+export async function adminRequest(path: string, init?: RequestInit): Promise<Response> {
+  const headers: Record<string, string> = { ...authHeaders() };
+  if (init?.body) headers["Content-Type"] = "application/json";
+  return fetch(`${baseUrl()}${path}`, { ...init, headers, cache: "no-store" });
+}
+
 /** GET a JSON path on the admin-api with the server-side bearer. Throws on non-2xx. */
 export async function adminGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${baseUrl()}${path}`, {
-    headers: { ...authHeaders() },
-    cache: "no-store",
-  });
+  const res = await adminRequest(path);
   if (!res.ok) {
     throw new Error(`admin-api GET ${path} failed: ${res.status}`);
   }
   return (await res.json()) as T;
 }
+
 
 // Typed convenience helpers, each shaped by the generated OpenAPI types.
 type Body<P extends keyof paths> =
@@ -40,10 +49,22 @@ export async function listKnowledgeDocuments(): Promise<
 export async function getKnowledgeDocument(
   docId: string,
 ): Promise<Body<"/admin/v1/knowledge/documents/{doc_id}">> {
-  // doc_id may contain slashes (it's the ingest path) — encode each segment but
-  // keep the separators so the admin-api's {doc_id:path} route matches.
-  const encoded = docId.split("/").map(encodeURIComponent).join("/");
-  return adminGet(`/admin/v1/knowledge/documents/${encoded}`);
+  return adminGet(`/admin/v1/knowledge/documents/${encodeDocId(docId)}`);
+}
+
+/** Rename a document's title (proxied by the BFF). Returns the admin-api Response. */
+export function renameDocument(docId: string, title: string): Promise<Response> {
+  return adminRequest(`/admin/v1/knowledge/documents/${encodeDocId(docId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+}
+
+/** Delete a document (proxied by the BFF). Returns the admin-api Response. */
+export function deleteDocument(docId: string): Promise<Response> {
+  return adminRequest(`/admin/v1/knowledge/documents/${encodeDocId(docId)}`, {
+    method: "DELETE",
+  });
 }
 
 export async function listUsers(): Promise<Body<"/admin/v1/memory/users">> {
