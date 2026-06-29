@@ -179,6 +179,12 @@ class Config:
     knowledge_top_k: int = 5
     knowledge_chunk_chars: int = 1_200  # target chunk size before overlap
     knowledge_chunk_overlap: int = 150  # chars repeated between adjacent chunks
+    # Subject is a hard filter at query time; tags are a soft boost (re-rank, never
+    # exclude). The model passes them via search_knowledge. tag_weight scales the
+    # tag-overlap bonus added to the (0..1 cosine) vector score; overfetch widens
+    # the candidate pool pulled before the Python re-rank. See ADR 0002.
+    knowledge_tag_weight: float = 0.15
+    knowledge_overfetch: int = 4
 
     # --- Object storage (see magi/core/storage + magi/agent/tools/storage). A
     # durable file/image archive the model uses as memory: it can stash a file

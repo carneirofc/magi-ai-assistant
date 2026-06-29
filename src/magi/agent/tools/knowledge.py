@@ -27,6 +27,10 @@ class KnowledgeSnippet(BaseModel):
     text: str = Field(description="The retrieved passage, verbatim from the source.")
     source: str = Field(description="Where the passage came from (document name / origin).")
     score: float = Field(description="Relevance score (higher is closer); for ranking only.")
+    subject: str = Field(default="", description="The passage's subject (a coarse filter you can pass).")
+    tags: list[str] = Field(
+        default_factory=list, description="The passage's tags (labels you can pass to bias results)."
+    )
 
 
 class KnowledgeSearchData(BaseModel):
@@ -43,10 +47,13 @@ def build_knowledge_tools(searcher: KnowledgeSearcher) -> list:
         instructions=(
             "Use when answering needs factual reference material that may live in the curated "
             "knowledge base — documentation, guides, domain facts — rather than the user's own "
-            "history (that is your memory). Pass a focused natural-language query. Returns verbatim "
-            "passages with their sources; ground your answer in them and cite the source when you "
-            "rely on one. An empty result means the base has nothing relevant — say so rather than "
-            "inventing an answer."
+            "history (that is your memory). Pass a focused natural-language query. Optionally narrow "
+            "with `subject` (a hard filter: only that subject's passages are searched) and/or `tags` "
+            "(a soft bias: passages carrying these rank higher but nothing is excluded). Each result "
+            "carries its own subject and tags, so you can see the available vocabulary and refine a "
+            "follow-up search. Returns verbatim passages with their sources; ground your answer in "
+            "them and cite the source. An empty result means the base has nothing relevant — say so "
+            "rather than inventing an answer."
         ),
         show_result=True,
     )
@@ -55,18 +62,35 @@ def build_knowledge_tools(searcher: KnowledgeSearcher) -> list:
             str,
             Field(min_length=1, description="Natural-language description of what to look up."),
         ],
+        subject: Annotated[
+            str,
+            Field(default="", description="Restrict to this subject (hard filter); '' = any subject."),
+        ] = "",
+        tags: Annotated[
+            list[str],
+            Field(default_factory=list, description="Bias toward passages with these tags (soft)."),
+        ] = [],  # noqa: B006 — agno reads the annotation default; never mutated.
     ) -> ToolOutput[KnowledgeSearchData]:
         """Retrieve passages from the global knowledge base most relevant to `query`.
 
         Use for reference/domain knowledge, not for facts about the current user
-        (those are in your memory). Returns up to a handful of verbatim passages,
-        each with its source, ranked by relevance — empty when nothing matches.
-        Ground answers in what comes back and cite the source; never present an
-        empty result as if the base confirmed something.
+        (those are in your memory). `subject` is a hard filter (only that subject is
+        searched); `tags` softly bias ranking without excluding anything. Each
+        returned passage reports its own subject and tags so you can discover the
+        vocabulary and refine. Empty when nothing matches — never present an empty
+        result as if the base confirmed something.
         """
-        hits = searcher.search(query.strip(), config.knowledge_top_k)
+        hits = searcher.search(
+            query.strip(),
+            config.knowledge_top_k,
+            subject=subject.strip() or None,
+            tags=[t for t in tags if t.strip()],
+        )
         snippets = [
-            KnowledgeSnippet(text=h.text, source=h.source, score=h.score) for h in hits
+            KnowledgeSnippet(
+                text=h.text, source=h.source, score=h.score, subject=h.subject, tags=h.tags
+            )
+            for h in hits
         ]
         log_info(f"knowledge: search {query.strip()!r} -> {len(snippets)} hit(s)")
         msg = (

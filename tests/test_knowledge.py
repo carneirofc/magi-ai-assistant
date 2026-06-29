@@ -11,7 +11,11 @@ import dataclasses
 
 import magi.core.knowledge.store as store_mod
 from magi.core.knowledge import KnowledgeStore, build_knowledge_from_config, chunk_text
-from magi.core.knowledge.store import KnowledgeHit
+from magi.core.knowledge.store import KnowledgeHit, blend_by_tags
+
+
+def _hit(text, score, tags=()):
+    return KnowledgeHit(text=text, source="s", score=score, doc_id="d", tags=list(tags))
 
 
 # --- chunking ---------------------------------------------------------------
@@ -112,6 +116,34 @@ def test_to_hit_maps_payload_and_score():
 def test_to_hit_tolerates_missing_fields():
     hit = KnowledgeStore._to_hit(_FakePoint({"text": "x"}, None))
     assert hit.text == "x" and hit.source == "" and hit.score == 0.0 and hit.metadata == {}
+
+
+# --- tag soft-boost (blend) -------------------------------------------------
+def test_blend_no_query_tags_is_identity():
+    hits = [_hit("a", 0.9), _hit("b", 0.8)]
+    assert blend_by_tags(hits, [], weight=0.2) == hits
+
+
+def test_blend_promotes_tag_match_past_higher_vector_score():
+    # b starts lower (0.50 vs 0.55) but matches both query tags; with weight 0.2 it
+    # gains +0.2 and overtakes a.
+    a = _hit("a", 0.55, tags=["x"])
+    b = _hit("b", 0.50, tags=["docker", "ci"])
+    out = blend_by_tags([a, b], ["docker", "ci"], weight=0.2)
+    assert [h.text for h in out] == ["b", "a"]
+
+
+def test_blend_never_excludes_unmatched():
+    a = _hit("a", 0.9, tags=[])
+    b = _hit("b", 0.4, tags=["docker"])
+    out = blend_by_tags([a, b], ["docker"], weight=0.1)
+    # b boosted by 0.1 -> 0.5, still below a's 0.9: a stays first, b retained.
+    assert [h.text for h in out] == ["a", "b"]
+
+
+def test_blend_is_case_insensitive():
+    out = blend_by_tags([_hit("a", 0.1, tags=["Docker"])], ["docker"], weight=1.0)
+    assert out[0].score == 0.1  # original score unchanged; only ordering uses the blend
 
 
 # --- config gating ----------------------------------------------------------

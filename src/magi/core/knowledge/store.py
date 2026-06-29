@@ -44,12 +44,17 @@ def _payload_tags(payload: dict) -> list[str]:
 
 @dataclass(frozen=True)
 class KnowledgeHit:
-    """One retrieved chunk: the verbatim text plus where it came from."""
+    """One retrieved chunk: the verbatim text plus where it came from.
+
+    `subject`/`tags` ride along so the caller (the model, via the tool) sees the
+    live vocabulary it can filter by next, and so the tag soft-boost can re-rank."""
 
     text: str
     source: str
     score: float
     doc_id: str
+    subject: str = ""
+    tags: list[str] = field(default_factory=list)
     metadata: dict[str, str] = field(default_factory=dict)
 
 
@@ -99,8 +104,36 @@ class KnowledgeSearcher(Protocol):
     decoupled from Qdrant so it can be faked in tests."""
 
     def search(
-        self, query: str, top_k: int, *, scopes: Sequence[str] = (GLOBAL_SCOPE,)
+        self,
+        query: str,
+        top_k: int,
+        *,
+        subject: Optional[str] = None,
+        tags: Sequence[str] = (),
+        scopes: Sequence[str] = (GLOBAL_SCOPE,),
     ) -> list[KnowledgeHit]: ...
+
+
+def blend_by_tags(
+    hits: list[KnowledgeHit], query_tags: Sequence[str], weight: float
+) -> list[KnowledgeHit]:
+    """Re-rank `hits` by a soft tag boost: `score + weight × (matched / |query_tags|)`.
+
+    Tags never exclude — a hit with no tag overlap keeps its vector score and can
+    still rank. Pure and Qdrant-free so the blend is unit-testable. Stable: equal
+    blended scores keep their incoming (vector-ranked) order."""
+    if not query_tags:
+        return hits
+    wanted = {t.lower() for t in query_tags}
+    n = len(wanted)
+    scored = []
+    for i, h in enumerate(hits):
+        have = {t.lower() for t in h.tags}
+        matched = len(wanted & have)
+        blended = h.score + weight * (matched / n)
+        scored.append((blended, i, h))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [h for _, _, h in scored]
 
 
 class KnowledgeStore:
@@ -434,10 +467,21 @@ class KnowledgeStore:
 
     # --- retrieve -----------------------------------------------------------
     def search(
-        self, query: str, top_k: int, *, scopes: Sequence[str] = (GLOBAL_SCOPE,)
+        self,
+        query: str,
+        top_k: int,
+        *,
+        subject: Optional[str] = None,
+        tags: Sequence[str] = (),
+        scopes: Sequence[str] = (GLOBAL_SCOPE,),
     ) -> list[KnowledgeHit]:
-        """Return up to `top_k` chunks most relevant to `query`, restricted to
-        `scopes`. [] on empty query or any failure.
+        """Up to `top_k` chunks most relevant to `query`, within `scopes`.
+
+        `subject` is a **hard filter** — when set, only that subject's chunks are
+        candidates. `tags` are a **soft boost** — they never exclude; they re-rank
+        the candidates (over-fetched, then blended by tag overlap in Python). An
+        empty *subject-filtered* result falls back to one unfiltered pass so a stale
+        subject can't silently hide everything. [] on empty query or any failure.
 
         `scopes` is the per-origin hook: it defaults to the global corpus; pass a
         wider set (e.g. `("global", "user:42")`) once per-user knowledge is ingested.
@@ -450,23 +494,45 @@ class KnowledgeStore:
         client = self._ensure_client(len(vector))
         if client is None:
             return []
+        # Over-fetch a wider candidate pool when we'll re-rank by tags, so the boost
+        # can pull a relevant-but-slightly-lower hit up past the top_k cutoff.
+        limit = top_k * max(1, config.knowledge_overfetch) if tags else top_k
+        hits = self._query(client, vector, limit, subject, scopes)
+        if not hits and subject:
+            log_info(f"knowledge: no hits for subject {subject!r}; retrying unfiltered")
+            hits = self._query(client, vector, limit, None, scopes)
+        if tags:
+            hits = blend_by_tags(hits, list(tags), config.knowledge_tag_weight)
+        return hits[:top_k]
+
+    def _query(
+        self,
+        client,
+        vector: list,
+        limit: int,
+        subject: Optional[str],
+        scopes: Sequence[str],
+    ) -> list[KnowledgeHit]:
+        """One Qdrant vector query with the scope + optional subject hard-filter."""
         try:
             from qdrant_client import models
 
-            flt = models.Filter(
-                must=[models.FieldCondition(key="scope", match=models.MatchAny(any=list(scopes)))]
-            )
-            hits = client.query_points(
+            must = [models.FieldCondition(key="scope", match=models.MatchAny(any=list(scopes)))]
+            if subject:
+                must.append(
+                    models.FieldCondition(key="subject", match=models.MatchValue(value=subject))
+                )
+            points = client.query_points(
                 collection_name=self.collection,
                 query=vector,
-                query_filter=flt,
-                limit=top_k,
+                query_filter=models.Filter(must=must),
+                limit=limit,
                 with_payload=True,
             ).points
         except Exception as exc:  # noqa: BLE001
             log_warning(f"knowledge: search failed ({type(exc).__name__}: {exc})")
             return []
-        return [self._to_hit(h) for h in hits if h.payload and h.payload.get("text")]
+        return [self._to_hit(h) for h in points if h.payload and h.payload.get("text")]
 
     @staticmethod
     def _to_hit(point) -> KnowledgeHit:
@@ -477,6 +543,8 @@ class KnowledgeStore:
             source=str(payload.get("source", "")),
             score=float(getattr(point, "score", 0.0) or 0.0),
             doc_id=str(payload.get("doc_id", "")),
+            subject=str(payload.get("subject", "")),
+            tags=_payload_tags(payload),
             metadata=meta if isinstance(meta, dict) else {},
         )
 
