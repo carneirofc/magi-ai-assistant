@@ -1,0 +1,63 @@
+# Example: run the magi app itself in Docker, built locally from the Dockerfile.
+#
+# docker-compose.yaml holds the *supporting* services (litellm, qdrant, rustfs, …);
+# this file adds the app on top. The app reaches every backend — the host's
+# llama-server on :8888, plus any compose service that publishes a host port — via
+# host.docker.internal, exactly as the host-run app reaches localhost. So it works
+# standalone or merged with the infra stack:
+#
+#   # just the app (needs a llama-server running on the host :8888)
+#   docker compose -f docker-compose.app.yaml up --build api
+#
+#   # app + supporting services together
+#   docker compose -f docker-compose.yaml -f docker-compose.app.yaml up --build
+#
+#   # the Discord bot instead of the HTTP API (needs DISCORD_BOT_TOKEN in .env)
+#   docker compose -f docker-compose.app.yaml --profile discord up --build discord
+#
+# Bake in optional extras at build time, e.g.:  EXTRAS="--extra s3" docker compose ...
+
+services:
+  # HTTP API + OpenAI-compatible shim (main_api_docker.py → bind 0.0.0.0:8000).
+  api:
+    build:
+      context: .
+      args:
+        EXTRAS: ${EXTRAS:-}
+    image: magi-app:local
+    container_name: magi-api
+    restart: unless-stopped
+    command: ["python", "main_api_docker.py"]
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env                      # secrets only (API_AUTH_TOKEN, LLAMACPP_API_KEY, …)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # so the container can reach host services
+    volumes:
+      - ./data:/app/data          # persist sqlite db, memory files, local byte archive
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Discord bot (main_discord_docker.py). Outbound-only, so no ports. Started only
+  # with `--profile discord` so it stays out of the way until you set a bot token.
+  discord:
+    build:
+      context: .
+      args:
+        EXTRAS: ${EXTRAS:-}
+    image: magi-app:local
+    container_name: magi-discord
+    restart: unless-stopped
+    command: ["python", "main_discord_docker.py"]
+    profiles: ["discord"]
+    env_file:
+      - .env                      # must include DISCORD_BOT_TOKEN
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/app/data

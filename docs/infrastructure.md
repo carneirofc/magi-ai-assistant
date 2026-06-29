@@ -70,6 +70,28 @@ docker compose up -d litellm postgres      # just the proxy
 Configuration consumed by the compose stack (proxy keys, Databricks creds, S3
 creds) lives in `.env` — see [`.env.example`](../.env.example).
 
+## Running the app in a container
+
+By default magi runs on the host (the service map above). To containerize it
+instead, build the image locally from the [`Dockerfile`](../Dockerfile) (uv,
+Python 3.14) and bring it up with [`docker-compose.app.yaml`](../docker-compose.app.yaml),
+which layers the app onto the supporting services:
+
+```bash
+docker compose -f docker-compose.app.yaml up --build api          # API on :8000
+docker compose -f docker-compose.yaml -f docker-compose.app.yaml up --build   # + infra
+docker compose -f docker-compose.app.yaml --profile discord up --build discord
+```
+
+The container reaches the host's `llama-server` and any host-published service
+via `host.docker.internal` (compose wires `host-gateway`), mirroring how the
+host-run app uses `localhost`. Config stays code-first: the container entrypoints
+(`main_api_docker.py` / `main_discord_docker.py`) reuse each deployment's
+`apply_deployment_config()` and overlay only the container deltas — bind
+`0.0.0.0`, point the backend URL at the host. `./data` is volume-mounted so the
+sqlite db, memory files, and local byte archive survive rebuilds. Optional extras
+bake in at build time via the `EXTRAS` build arg (e.g. `EXTRAS="--extra s3"`).
+
 ## Object storage (byte archive)
 
 The model's durable file/image archive ([memory.md](memory.md), README). Two

@@ -67,6 +67,33 @@ python main_api.py      # standalone HTTP service for external clients
 
 Both serve the same brain (`magi/channels/bootstrap.py`); only the transport differs.
 
+### Run in Docker
+
+To run the app itself in a container, build it locally and bring it up with the
+example compose. `docker-compose.yaml` holds the *supporting* services;
+[`docker-compose.app.yaml`](docker-compose.app.yaml) adds the app on top, built
+from the [`Dockerfile`](Dockerfile) (uv, Python 3.14):
+
+```bash
+# HTTP API + OpenAI shim on :8000 (needs a llama-server on the host :8888)
+docker compose -f docker-compose.app.yaml up --build api
+
+# app + supporting services together
+docker compose -f docker-compose.yaml -f docker-compose.app.yaml up --build
+
+# the Discord bot instead (needs DISCORD_BOT_TOKEN in .env)
+docker compose -f docker-compose.app.yaml --profile discord up --build discord
+```
+
+The container reaches the host's `llama-server` (and any other host-published
+service) via `host.docker.internal`, exactly as the host-run app reaches
+`localhost`. Config stays code-first: the container entrypoints
+(`main_api_docker.py` / `main_discord_docker.py`) reuse each deployment's
+`apply_deployment_config()` and overlay only the bits that differ in a container
+(bind `0.0.0.0`, point the backend URL at the host). To enable an optional extra
+in the image, pass it at build time: `EXTRAS="--extra s3" docker compose -f
+docker-compose.app.yaml up --build`.
+
 ## HTTP API
 
 For a desktop app or any other client. JSON over HTTP, session-scoped

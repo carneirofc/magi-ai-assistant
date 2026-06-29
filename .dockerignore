@@ -1,0 +1,32 @@
+# Keep the build context small and the image clean. Only the manifests, src/, and
+# the main_*.py entrypoints need to ship; everything below is host-only.
+
+# Virtualenv + caches (rebuilt inside the image)
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# Secrets + local runtime state (mounted at run time, never baked in)
+.env
+data/
+artifacts/
+*.sqlite
+*.db
+
+# VCS, tooling, editor
+.git/
+.gitignore
+.vscode/
+.claude/
+
+# Docs / images / tests — not needed to run the service
+docs/
+imgs/
+tests/
+
+# The compose + Docker files themselves
+Dockerfile
+.dockerignore
+docker-compose*.yaml
