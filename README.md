@@ -1,5 +1,9 @@
 # magi
 
+<p align="center">
+  <img src="imgs/magi.png" alt="MAGI logo" width="200">
+</p>
+
 Personal multi-channel AI assistant on the [Agno](https://www.agno.com/) framework.
 One shared agent brain, many channel adapters. Model-agnostic — local
 llama.cpp `llama-server` by default (direct with `model_provider="llamacpp"`, or
