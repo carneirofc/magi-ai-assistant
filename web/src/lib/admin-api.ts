@@ -36,9 +36,13 @@ export async function adminGet<T>(path: string): Promise<T> {
 }
 
 
-// Typed convenience helpers, each shaped by the generated OpenAPI types.
-type Body<P extends keyof paths> =
-  paths[P]["get"]["responses"]["200"]["content"]["application/json"];
+// Typed convenience helpers, each shaped by the generated OpenAPI types. A
+// conditional `infer` so it resolves only for paths that actually expose a GET
+// with a JSON 200 (generated types mark missing methods as `never`).
+type JsonOf<G> = G extends { responses: { 200: { content: { "application/json": infer R } } } }
+  ? R
+  : never;
+type Body<P extends keyof paths> = paths[P] extends { get: infer G } ? JsonOf<G> : never;
 
 export async function listKnowledgeDocuments(): Promise<
   Body<"/admin/v1/knowledge/documents">
