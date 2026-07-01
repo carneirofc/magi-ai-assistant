@@ -25,6 +25,7 @@ class ModelProviderEnum(enum.StrEnum):
     OLLAMA = "ollama"
     LITELLM = "litellm"
     LLAMACPP = "llamacpp"
+    OPENAI = "openai"
 
 
 # Prefix that tells the litellm SDK "this id is served by a litellm proxy at
@@ -154,6 +155,35 @@ def _build_llamacpp(model: ModelDefinition) -> Model:
     return llm
 
 
+def _build_openai(model: ModelDefinition) -> Model:
+    """A generic OpenAI-compatible remote serving endpoint (config.openai_base_url).
+
+    For any hosted server that speaks the OpenAI /v1 API — real OpenAI, OpenRouter,
+    Together, a remote vLLM / llama-server, … Uses agno's `OpenAILike` (not
+    `OpenAIChat`) so it tolerates servers that don't implement every OpenAI-only
+    field, the same lenient client the local llamacpp builder uses. The only
+    difference from `llamacpp` is where it points: a remote URL + a real API key
+    (the model id is whatever the remote names it). Sampling overrides ride through
+    `extra_body` verbatim, exactly as for llamacpp.
+    """
+    from agno.models.openai.like import OpenAILike
+
+    llm = OpenAILike(
+        id=model.model_id,
+        base_url=config.openai_base_url,
+        # Most hosted endpoints require a real key; keep a placeholder so the openai
+        # client still constructs against a keyless dev server.
+        api_key=config.openai_api_key or "sk-no-key",
+    )
+    if model.temperature is not None:
+        llm.temperature = model.temperature
+    if model.max_tokens is not None:
+        llm.max_tokens = model.max_tokens
+    if model.extra_body:
+        llm.extra_body = dict(model.extra_body)
+    return llm
+
+
 def _build_ollama(model: ModelDefinition) -> Model:
     """Direct Ollama, bypassing the proxy. Handy for local dev / offline tests."""
     from agno.models.ollama import Ollama
@@ -168,6 +198,7 @@ _BUILDERS: dict[ModelProviderEnum, Callable[[ModelDefinition], Model]] = {
     ModelProviderEnum.LITELLM: _build_litellm,
     ModelProviderEnum.OLLAMA: _build_ollama,
     ModelProviderEnum.LLAMACPP: _build_llamacpp,
+    ModelProviderEnum.OPENAI: _build_openai,
 }
 
 

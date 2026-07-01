@@ -20,6 +20,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from magi.core.items import build_item_archive_from_config
 from magi.core.knowledge import GLOBAL_SCOPE, KnowledgeStore
 
 _TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".rst", ".text"}
@@ -66,7 +67,9 @@ def main(argv: list[str] | None = None) -> int:
         print("Nothing to ingest.", file=sys.stderr)
         return 1
 
-    store = KnowledgeStore()
+    # Attach the item archive (no-op unless enabled) so an ingest also keeps the
+    # verbatim original as a durable, re-indexable blob.
+    store = KnowledgeStore(archive=build_item_archive_from_config())
     total_chunks = 0
     indexed = 0
     for path in files:

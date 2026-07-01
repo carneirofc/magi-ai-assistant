@@ -58,6 +58,34 @@ class FileMemoryStore:
         """The memory adapters for one (user, session) scope."""
         return ScopedMemory(self.root, user_id, session_id)
 
+    # --- enumerate (admin) --------------------------------------------------
+    def list_users(self) -> list[str]:
+        """The user ids that have any memory on disk, sorted.
+
+        These are the on-disk slugs (ids are slugged on write, see `slug`), which
+        is the identity the admin tool addresses. Empty when nothing's been
+        written yet. Used by the operator admin viewer (ADR 0002)."""
+        users_dir = self.root / "users"
+        if not users_dir.is_dir():
+            return []
+        return sorted(p.name for p in users_dir.iterdir() if p.is_dir())
+
+    def list_sessions(self, user_id: object) -> list[str]:
+        """The session ids with a live window on disk for `user_id`, sorted.
+
+        Derived from the `<sid>.json` files under the user's sessions dir; the
+        sidecar `<sid>.pending.json` and `<sid>.summary.md` are not sessions of
+        their own and are excluded."""
+        sessions_dir = self.root / "users" / slug(user_id) / "sessions"
+        if not sessions_dir.is_dir():
+            return []
+        sids = [
+            p.name[: -len(".json")]
+            for p in sessions_dir.iterdir()
+            if p.is_file() and p.name.endswith(".json") and not p.name.endswith(".pending.json")
+        ]
+        return sorted(sids)
+
     def seed_persona(self, text: str) -> None:
         """Write the base persona once, if no persona file exists yet."""
         self.persona.seed(

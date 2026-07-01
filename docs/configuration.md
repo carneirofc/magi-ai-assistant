@@ -49,7 +49,8 @@ These never belong in code. See [`.env.example`](../.env.example).
 | `DISCORD_BOT_TOKEN` | Discord bot auth |
 | `LITELLM_MASTER_KEY` | LiteLLM proxy auth |
 | `LLAMACPP_API_KEY` | Only if `llama-server` runs with `--api-key` |
-| `QDRANT_API_KEY` | Qdrant auth (semantic memory / knowledge) |
+| `OPENAI_API_KEY` | Remote OpenAI-compatible serving (`model_provider="openai"` / `embeddings_provider="openai"`) |
+| `QDRANT_API_KEY` | Qdrant auth (semantic memory / knowledge / item archive) |
 | `API_AUTH_TOKEN` | Gates `/v1` with `Authorization: Bearer <token>` |
 | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | S3-backend object storage |
 | `SEANIME_TOKEN` | Seanime server password (sent as `X-Seanime-Token`) |
@@ -63,9 +64,10 @@ Defaults shown are the engine defaults; the bundled entrypoints override several
 
 | Field | Default | Notes |
 |---|---|---|
-| `model_provider` | `"litellm"` | `litellm` \| `llamacpp` \| `ollama` |
+| `model_provider` | `"litellm"` | `litellm` \| `llamacpp` \| `openai` \| `ollama` |
 | `litellm_base_url` | `http://localhost:4000` | LiteLLM proxy gateway |
 | `llamacpp_base_url` | `http://localhost:8080/v1` | Direct llama-server `/v1` |
+| `openai_base_url` | `https://api.openai.com/v1` | Remote OpenAI-compatible server (`model_provider="openai"`) — OpenAI, OpenRouter, Together, a remote vLLM/llama-server, … |
 | `ollama_host` | `http://localhost:11434` | Dormant fallback |
 | `lead_model_id` | `qwen3.5-9b-llamacpp` | Lead/router brain id |
 | `member_model_id` | `qwen3.5-9b-llamacpp` | Specialist member id |
@@ -122,7 +124,8 @@ Needs the `semantic` extra (`uv sync --extra semantic`) and an embedding backend
 | Field | Default | Notes |
 |---|---|---|
 | `semantic_memory` | `False` | Retrieve top-k relevant entries instead of whole files |
-| `embedding_model_id` | `nomic-embed-text` | Embedding model (via the proxy) |
+| `embedding_model_id` | `nomic-embed-text` | Embedding model id |
+| `embeddings_provider` | `"litellm"` | Where embeddings are served: `litellm` (proxy) \| `openai` (remote OpenAI-compatible at `openai_base_url`). Lets you serve chat locally and embeddings remotely |
 | `qdrant_url` | `http://localhost:6333` | Qdrant endpoint |
 | `semantic_top_k` | `5` | Entries retrieved per kind |
 
@@ -156,6 +159,37 @@ and the README. Two backends via `storage_backend`.
 > The `s3` backend needs the `s3` extra (`uv sync --extra s3`; boto3 is
 > lazy-imported, absent → tools off). The legacy `s3_enabled=True` still works —
 > `configure()` maps it to `storage_enabled` + the `s3` backend.
+
+### Item archive (durable original + index)
+
+The "persist original + index" hook shared by the admin-managed **items** —
+knowledge documents, durable memory facts, and stored files. On a write it keeps
+the item's canonical bytes in the object store (the source of truth, re-indexable)
+**and** a searchable vector in a Qdrant collection; on delete it drops both. It
+pairs the object-store backend (`storage_backend` + the `s3_*` / `storage_local_dir`
+fields above) with Qdrant (`qdrant_url`), but is gated by its **own** flag —
+independent of `storage_enabled` and `semantic_memory` — so you can turn durable
+item archival on without enabling the model's file tools or semantic recall.
+
+| Field | Default | Notes |
+|---|---|---|
+| `items_archive_enabled` | `False` | Turn the hook on across all three item kinds |
+| `items_collection` | `chatbot_items` | Qdrant collection for the cross-item search index |
+
+What it adds per kind (all no-ops when off, and degrade cleanly when the object
+store / Qdrant is unreachable — an item write never breaks a chat or an ingest):
+
+- **Knowledge** — keeps the verbatim source document as a re-indexable blob;
+  `KnowledgeStore.reindex_document(doc_id)` re-chunks from it (e.g. after a chunk-size
+  change) with no source file on hand; deletes cascade to the blob + doc vector.
+- **Memory** — snapshots the curated fact sheet (`long_term_facts.json`) to the object
+  store after each curator/admin fact write, as an off-disk source-of-truth copy.
+- **Files** — indexes each archived file's name + note so the model gets a
+  `search_files` tool (find a kept file by description, then recall it).
+
+> Needs Qdrant reachable (the `semantic` extra for `qdrant-client`) for the vector
+> side, and — for the `s3` object-store backend — the `s3` extra. The blob side
+> works on the zero-setup `local` backend with neither.
 
 ### Anime specialist (Seanime)
 

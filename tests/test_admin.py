@@ -1,0 +1,710 @@
+"""Tests for the admin channel (channels.admin) and the knowledge listing it
+exposes (core/knowledge.store.list_documents).
+
+`create_admin_app` is a pure factory over an injected `KnowledgeStore`, so the
+endpoint tests run against a fake store — no Qdrant. The store-aggregation tests
+fake the Qdrant `scroll` so the grouping/sort/pagination logic is pinned without a
+live backend (same degradation philosophy as test_knowledge.py).
+"""
+
+import dataclasses
+import tempfile
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from magi.channels.admin import create_admin_app
+from magi.core.knowledge import (
+    DocumentChunk,
+    DocumentDetail,
+    DocumentSummary,
+    KnowledgeStore,
+    SubjectRegistry,
+)
+from magi.core.memory.store import FileMemoryStore
+
+
+# --- store: list_documents aggregation --------------------------------------
+class _FakePoint:
+    def __init__(self, payload, id="pid"):
+        self.payload = payload
+        self.id = id
+
+
+class _FakeClient:
+    """A Qdrant stand-in whose `scroll` returns the given pages then stops, and
+    which records `set_payload`/`delete` so writes can be asserted."""
+
+    def __init__(self, pages):
+        # pages: list of (points, next_offset); the last next_offset must be None.
+        self._pages = pages
+        self._i = 0
+        self.set_payload_calls: list = []
+        self.delete_calls: list = []
+
+    def scroll(self, **_kwargs):
+        page = self._pages[self._i]
+        self._i += 1
+        return page
+
+    def set_payload(self, *, collection_name, payload, points):
+        self.set_payload_calls.append((payload, points))
+
+    def delete(self, *, collection_name, points_selector):
+        self.delete_calls.append(points_selector)
+
+
+def _store_with_client(client):
+    store = KnowledgeStore(collection="t")
+    store._connect_existing = lambda: client  # type: ignore[method-assign]
+    return store
+
+
+def test_list_documents_groups_chunks_by_doc_id():
+    points = [
+        _FakePoint({"doc_id": "a.md", "source": "a.md", "title": "A", "subject": "Infra",
+                    "tags": ["x"], "scope": "global", "ts": "2026-01-01T00:00:00"}),
+        _FakePoint({"doc_id": "a.md", "source": "a.md", "title": "A", "subject": "Infra",
+                    "tags": ["x"], "scope": "global", "ts": "2026-01-02T00:00:00"}),
+        _FakePoint({"doc_id": "b.md", "source": "b.md", "scope": "global", "ts": "2026-01-03T00:00:00"}),
+    ]
+    store = _store_with_client(_FakeClient([(points, None)]))
+
+    docs = store.list_documents()
+
+    by_id = {d.doc_id: d for d in docs}
+    assert by_id["a.md"] == DocumentSummary(
+        doc_id="a.md", source="a.md", title="A", subject="Infra", tags=["x"],
+        scope="global", chunk_count=2, latest_ts="2026-01-02T00:00:00",
+    )
+    assert by_id["b.md"].chunk_count == 1
+
+
+def test_list_documents_title_defaults_to_source():
+    # A pre-schema chunk (no title) renders with title == source (backfill).
+    points = [_FakePoint({"doc_id": "old.md", "source": "old.md", "ts": "1"})]
+    [doc] = _store_with_client(_FakeClient([(points, None)])).list_documents()
+    assert doc.title == "old.md" and doc.subject == "" and doc.tags == []
+
+
+def test_list_documents_sorted_newest_first():
+    points = [
+        _FakePoint({"doc_id": "old", "ts": "2026-01-01T00:00:00"}),
+        _FakePoint({"doc_id": "new", "ts": "2026-02-01T00:00:00"}),
+    ]
+    docs = _store_with_client(_FakeClient([(points, None)])).list_documents()
+    assert [d.doc_id for d in docs] == ["new", "old"]
+
+
+def test_list_documents_paginates_until_offset_none():
+    page1 = ([_FakePoint({"doc_id": "a", "ts": "1"})], "cursor")
+    page2 = ([_FakePoint({"doc_id": "b", "ts": "2"})], None)
+    docs = _store_with_client(_FakeClient([page1, page2])).list_documents()
+    assert {d.doc_id for d in docs} == {"a", "b"}
+
+
+def test_list_documents_skips_points_without_doc_id():
+    points = [_FakePoint({"ts": "1"}), _FakePoint({"doc_id": "ok", "ts": "2"})]
+    docs = _store_with_client(_FakeClient([(points, None)])).list_documents()
+    assert [d.doc_id for d in docs] == ["ok"]
+
+
+def test_list_documents_no_collection_returns_empty():
+    # _connect_existing returns None when the collection is absent / backend down.
+    store = KnowledgeStore(collection="t")
+    store._connect_existing = lambda: None  # type: ignore[method-assign]
+    assert store.list_documents() == []
+
+
+def test_get_document_orders_chunks_and_reads_fields():
+    points = [
+        _FakePoint({"doc_id": "a.md", "source": "a.md", "title": "A", "subject": "Infra",
+                    "tags": ["x", "y"], "scope": "global", "chunk_index": 1, "text": "second"}),
+        _FakePoint({"doc_id": "a.md", "source": "a.md", "title": "A", "subject": "Infra",
+                    "tags": ["x", "y"], "scope": "global", "chunk_index": 0, "text": "first"}),
+    ]
+    detail = _store_with_client(_FakeClient([(points, None)])).get_document("a.md")
+    assert detail is not None
+    assert detail.title == "A" and detail.subject == "Infra" and detail.tags == ["x", "y"]
+    assert [c.text for c in detail.chunks] == ["first", "second"]
+
+
+def test_get_document_absent_returns_none():
+    # No points match => None (the scroll yields an empty page).
+    detail = _store_with_client(_FakeClient([([], None)])).get_document("missing")
+    assert detail is None
+
+
+def test_rename_document_sets_title_over_doc_points():
+    points = [
+        _FakePoint({"doc_id": "a.md"}, id="p1"),
+        _FakePoint({"doc_id": "a.md"}, id="p2"),
+        _FakePoint({"doc_id": "other"}, id="p3"),
+    ]
+    client = _FakeClient([(points, None)])
+    ok = _store_with_client(client).rename_document("a.md", "New Title")
+    assert ok is True
+    # Only this doc's points, payload-only update (identity untouched).
+    assert client.set_payload_calls == [({"title": "New Title"}, ["p1", "p2"])]
+
+
+def test_rename_document_absent_returns_false():
+    client = _FakeClient([([], None)])
+    assert _store_with_client(client).rename_document("missing", "x") is False
+    assert client.set_payload_calls == []
+
+
+def test_delete_document_removes_doc_points():
+    points = [
+        _FakePoint({"doc_id": "a.md"}, id="p1"),
+        _FakePoint({"doc_id": "other"}, id="p2"),
+    ]
+    client = _FakeClient([(points, None)])
+    assert _store_with_client(client).delete_document("a.md") is True
+    assert client.delete_calls == [["p1"]]
+
+
+def test_delete_document_absent_returns_false():
+    client = _FakeClient([([], None)])
+    assert _store_with_client(client).delete_document("missing") is False
+    assert client.delete_calls == []
+
+
+def test_tag_document_adds_and_removes_order_preserving():
+    points = [
+        _FakePoint({"doc_id": "a.md", "tags": ["keep", "drop"]}, id="p1"),
+        _FakePoint({"doc_id": "a.md", "tags": ["keep", "drop"]}, id="p2"),
+    ]
+    client = _FakeClient([(points, None)])
+    result = _store_with_client(client).tag_document("a.md", add=["new"], remove=["drop"])
+    assert result == ["keep", "new"]
+    assert client.set_payload_calls == [({"tags": ["keep", "new"]}, ["p1", "p2"])]
+
+
+def test_tag_document_dedupes_existing():
+    points = [_FakePoint({"doc_id": "a.md", "tags": ["x"]}, id="p1")]
+    result = _store_with_client(_FakeClient([(points, None)])).tag_document("a.md", add=["x", "y"])
+    assert result == ["x", "y"]
+
+
+def test_tag_document_absent_returns_none():
+    client = _FakeClient([([], None)])
+    assert _store_with_client(client).tag_document("missing", add=["x"]) is None
+    assert client.set_payload_calls == []
+
+
+def test_list_tags_unions_distinct_sorted():
+    points = [
+        _FakePoint({"tags": ["b", "a"]}),
+        _FakePoint({"tags": ["a", "c"]}),
+        _FakePoint({"tags": []}),
+    ]
+    assert _store_with_client(_FakeClient([(points, None)])).list_tags() == ["a", "b", "c"]
+
+
+def test_edit_document_tags_endpoint():
+    detail = DocumentDetail(
+        doc_id="a.md", source="a.md", title="A", subject="", tags=["keep", "drop"],
+        scope="global", chunks=[DocumentChunk(chunk_index=0, text="x")],
+    )
+    resp = _client(detail=detail).patch(
+        "/admin/v1/knowledge/documents/a.md/tags", json={"add": ["new"], "remove": ["drop"]}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["tags"] == ["keep", "new"]
+
+
+def test_edit_tags_missing_doc_is_404():
+    assert _client(detail=None).patch(
+        "/admin/v1/knowledge/documents/nope/tags", json={"add": ["x"]}
+    ).status_code == 404
+
+
+def test_list_tags_endpoint():
+    assert _client(tags=["docker", "k8s"]).get("/admin/v1/knowledge/tags").json() == {
+        "tags": ["docker", "k8s"]
+    }
+
+
+def test_ingest_derives_doc_id_from_title():
+    fake = _FakeKnowledge([])
+    app = create_admin_app(fake, FileMemoryStore(Path(tempfile.mkdtemp())), SubjectRegistry(Path(tempfile.mkdtemp()) / "s.json"))
+    resp = TestClient(app).post(
+        "/admin/v1/knowledge/documents",
+        json={"title": "My Great Doc!", "text": "hello world"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"doc_id": "my-great-doc", "chunks_indexed": 3}
+    assert fake.index_calls[0][0] == "my-great-doc"
+    assert fake.index_calls[0][3] == "My Great Doc!"  # title forwarded
+
+
+def test_ingest_rejects_unknown_subject(tmp_path):
+    reg = SubjectRegistry(tmp_path / "s.json")
+    resp = _client(subjects=reg).post(
+        "/admin/v1/knowledge/documents",
+        json={"title": "X", "text": "y", "subject": "Ghost"},
+    )
+    assert resp.status_code == 422
+
+
+def test_ingest_with_known_subject_and_tags(tmp_path):
+    reg = SubjectRegistry(tmp_path / "s.json")
+    reg.create("Infra")
+    fake = _FakeKnowledge([])
+    app = create_admin_app(fake, FileMemoryStore(tmp_path / "m"), reg)
+    resp = TestClient(app).post(
+        "/admin/v1/knowledge/documents",
+        json={"title": "Doc", "text": "z", "subject": "Infra", "tags": ["docker"]},
+    )
+    assert resp.status_code == 200
+    assert fake.index_calls[0][4] == "Infra" and fake.index_calls[0][5] == ["docker"]
+
+
+# --- admin app: endpoint + auth ---------------------------------------------
+class _FakeKnowledge:
+    def __init__(self, documents, detail=None, tags=()):
+        self._documents = documents
+        self._detail = detail
+        self._tags = list(tags)
+        self.rename_subject_calls: list = []
+        self.index_calls: list = []
+
+    def list_documents(self):
+        return self._documents
+
+    def get_document(self, doc_id):
+        return self._detail if (self._detail and self._detail.doc_id == doc_id) else None
+
+    def rename_document(self, doc_id, title):
+        if self._detail and self._detail.doc_id == doc_id:
+            self._detail = dataclasses.replace(self._detail, title=title)
+            return True
+        return False
+
+    def delete_document(self, doc_id):
+        if self._detail and self._detail.doc_id == doc_id:
+            self._detail = None
+            return True
+        return False
+
+    def set_document_subject(self, doc_id, subject):
+        if self._detail and self._detail.doc_id == doc_id:
+            self._detail = dataclasses.replace(self._detail, subject=subject)
+            return True
+        return False
+
+    def rename_subject(self, old, new):
+        self.rename_subject_calls.append((old, new))
+        return 0
+
+    def tag_document(self, doc_id, *, add=(), remove=()):
+        if self._detail and self._detail.doc_id == doc_id:
+            tags = list(self._detail.tags)
+            for t in add:
+                if t not in tags:
+                    tags.append(t)
+            tags = [t for t in tags if t not in set(remove)]
+            self._detail = dataclasses.replace(self._detail, tags=tags)
+            return tags
+        return None
+
+    def list_tags(self):
+        return self._tags
+
+    def index_document(self, doc_id, text, *, source, title=None, subject="", tags=None):
+        self.index_calls.append((doc_id, text, source, title, subject, list(tags or [])))
+        return 3  # canned chunk count
+
+
+class _FakeRetriever:
+    """Records reset/index so the fact-write re-index path can be asserted."""
+
+    def __init__(self):
+        self.reset_calls: list = []
+        self.index_calls: list = []
+
+    def index(self, user_id, kind, text):
+        self.index_calls.append((user_id, kind, text))
+
+    def search(self, user_id, query, kind, top_k):
+        return []
+
+    def reset(self, user_id, kind):
+        self.reset_calls.append((user_id, kind))
+
+
+def _client(
+    documents=(), auth_token=None, memory=None, detail=None, retriever=None, subjects=None, tags=()
+):
+    if memory is None:
+        memory = FileMemoryStore(Path(tempfile.mkdtemp()))  # empty: no users on disk
+    if subjects is None:
+        subjects = SubjectRegistry(Path(tempfile.mkdtemp()) / "subjects.json")
+    app = create_admin_app(
+        _FakeKnowledge(list(documents), detail=detail, tags=tags),
+        memory,
+        subjects,
+        retriever=retriever,
+        auth_token=auth_token,
+    )
+    return TestClient(app)
+
+
+def test_healthz_is_open():
+    client = _client(auth_token="secret")
+    assert client.get("/healthz").json() == {"status": "ok"}
+
+
+def test_list_documents_endpoint_returns_rows():
+    docs = [
+        DocumentSummary(doc_id="a.md", source="a.md", title="A", subject="Infra",
+                        tags=["x"], scope="global", chunk_count=2, latest_ts="t2"),
+    ]
+    resp = _client(documents=docs).get("/admin/v1/knowledge/documents")
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "documents": [
+            {"doc_id": "a.md", "source": "a.md", "title": "A", "subject": "Infra",
+             "tags": ["x"], "scope": "global", "chunk_count": 2, "latest_ts": "t2"},
+        ]
+    }
+
+
+def test_list_documents_requires_bearer_when_token_set():
+    client = _client(auth_token="secret")
+
+    assert client.get("/admin/v1/knowledge/documents").status_code == 401
+    assert (
+        client.get(
+            "/admin/v1/knowledge/documents",
+            headers={"Authorization": "Bearer wrong"},
+        ).status_code
+        == 401
+    )
+    ok = client.get(
+        "/admin/v1/knowledge/documents", headers={"Authorization": "Bearer secret"}
+    )
+    assert ok.status_code == 200
+
+
+def test_no_token_means_open():
+    # auth_token None => the gate is a no-op (keep the port unpublished instead).
+    assert _client(auth_token=None).get("/admin/v1/knowledge/documents").status_code == 200
+
+
+def test_get_document_endpoint_returns_chunks():
+    detail = DocumentDetail(
+        doc_id="a.md", source="a.md", title="A", subject="Infra", tags=["x"],
+        scope="global",
+        chunks=[DocumentChunk(chunk_index=0, text="first"), DocumentChunk(chunk_index=1, text="second")],
+    )
+    resp = _client(detail=detail).get("/admin/v1/knowledge/documents/a.md")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["title"] == "A" and body["subject"] == "Infra"
+    assert [c["text"] for c in body["chunks"]] == ["first", "second"]
+
+
+def test_get_document_missing_is_404():
+    assert _client(detail=None).get("/admin/v1/knowledge/documents/nope.md").status_code == 404
+
+
+def _detail(doc_id="a.md", title="A"):
+    return DocumentDetail(
+        doc_id=doc_id, source="a.md", title=title, subject="", tags=[],
+        scope="global", chunks=[DocumentChunk(chunk_index=0, text="x")],
+    )
+
+
+def test_rename_document_endpoint_updates_title():
+    resp = _client(detail=_detail()).patch(
+        "/admin/v1/knowledge/documents/a.md", json={"title": "Renamed"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "Renamed"
+
+
+def test_rename_document_missing_is_404():
+    resp = _client(detail=None).patch(
+        "/admin/v1/knowledge/documents/nope.md", json={"title": "X"}
+    )
+    assert resp.status_code == 404
+
+
+def test_rename_document_rejects_empty_title():
+    resp = _client(detail=_detail()).patch(
+        "/admin/v1/knowledge/documents/a.md", json={"title": ""}
+    )
+    assert resp.status_code == 422  # min_length=1
+
+
+def test_delete_document_endpoint():
+    client = _client(detail=_detail())
+    assert client.delete("/admin/v1/knowledge/documents/a.md").status_code == 204
+    # Gone now → second delete is a 404.
+    assert client.delete("/admin/v1/knowledge/documents/a.md").status_code == 404
+
+
+def test_delete_document_missing_is_404():
+    assert _client(detail=None).delete("/admin/v1/knowledge/documents/nope.md").status_code == 404
+
+
+# --- subject registry -------------------------------------------------------
+def test_subject_registry_create_list_rename_delete(tmp_path):
+    reg = SubjectRegistry(tmp_path / "subjects.json")
+    s = reg.create("Infra", "infrastructure")
+    assert s is not None and s.name == "Infra"
+    assert reg.create("infra") is None  # case-insensitive duplicate rejected
+    assert [x.name for x in reg.list()] == ["Infra"]
+    renamed = reg.rename(s.id, name="Infrastructure")
+    assert renamed.name == "Infrastructure"
+    assert reg.delete(s.id) is True
+    assert reg.list() == []
+
+
+def test_subjects_endpoints(tmp_path):
+    reg = SubjectRegistry(tmp_path / "subjects.json")
+    client = _client(subjects=reg)
+
+    created = client.post("/admin/v1/knowledge/subjects", json={"name": "Infra"})
+    assert created.status_code == 200
+    sid = created.json()["id"]
+    assert client.post("/admin/v1/knowledge/subjects", json={"name": "infra"}).status_code == 409
+
+    listed = client.get("/admin/v1/knowledge/subjects").json()
+    assert [s["name"] for s in listed["subjects"]] == ["Infra"]
+
+    edited = client.patch(f"/admin/v1/knowledge/subjects/{sid}", json={"name": "Infrastructure"})
+    assert edited.status_code == 200 and edited.json()["name"] == "Infrastructure"
+
+    assert client.delete(f"/admin/v1/knowledge/subjects/{sid}").status_code == 204
+    assert client.get("/admin/v1/knowledge/subjects").json()["subjects"] == []
+
+
+def test_subject_rename_cascades_to_corpus(tmp_path):
+    reg = SubjectRegistry(tmp_path / "subjects.json")
+    sid = reg.create("Infra").id
+    fake = _FakeKnowledge([], detail=None)
+    app = create_admin_app(fake, FileMemoryStore(tmp_path / "m"), reg)
+    client = TestClient(app)
+    client.patch(f"/admin/v1/knowledge/subjects/{sid}", json={"name": "Infrastructure"})
+    assert fake.rename_subject_calls == [("Infra", "Infrastructure")]
+
+
+def test_set_document_subject_requires_known_subject(tmp_path):
+    reg = SubjectRegistry(tmp_path / "subjects.json")
+    detail = DocumentDetail(
+        doc_id="a.md", source="a.md", title="A", subject="", tags=[], scope="global",
+        chunks=[DocumentChunk(chunk_index=0, text="x")],
+    )
+    client = _client(detail=detail, subjects=reg)
+    # Unknown subject rejected...
+    assert client.put(
+        "/admin/v1/knowledge/documents/a.md/subject", json={"subject": "Ghost"}
+    ).status_code == 422
+    # ...known subject accepted.
+    reg.create("Infra")
+    ok = client.put("/admin/v1/knowledge/documents/a.md/subject", json={"subject": "Infra"})
+    assert ok.status_code == 200 and ok.json()["subject"] == "Infra"
+    # Clearing ('') is always allowed.
+    assert client.put(
+        "/admin/v1/knowledge/documents/a.md/subject", json={"subject": ""}
+    ).status_code == 200
+
+
+# --- memory viewer (read-only) ----------------------------------------------
+def _seed_memory(tmp_path):
+    """A FileMemoryStore with one user's facts/episodes/session + a persona."""
+    store = FileMemoryStore(tmp_path)
+    mem = store.scoped("u1", "s1")
+    mem.long_term_facts.add("lives in Berlin")
+    mem.long_term_facts.add("likes anime")
+    mem.long_term.append("raw fact one")
+    mem.episodes.append("talked about docker")
+    mem.live_turns.append("user", "hi", 20)
+    mem.live_turns.append("assistant", "hello", 20)
+    mem.session_summary.write("earlier we said hi")
+    mem.pending.extend([{"role": "user", "content": "older", "ts": "t"}])
+    store.persona.append("be concise")
+    return store
+
+
+def test_list_users_aggregates_counts(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    data = client.get("/admin/v1/memory/users").json()
+    assert data == {
+        "users": [
+            {"user_id": "u1", "fact_count": 2, "episode_count": 1, "session_count": 1}
+        ]
+    }
+
+
+def test_list_users_empty_when_no_memory(tmp_path):
+    client = _client(memory=FileMemoryStore(tmp_path))
+    assert client.get("/admin/v1/memory/users").json() == {"users": []}
+
+
+def test_get_profile_returns_facts_and_episodes(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    data = client.get("/admin/v1/memory/users/u1/profile").json()
+    assert [f["text"] for f in data["facts"]] == ["lives in Berlin", "likes anime"]
+    assert all(f["id"] for f in data["facts"])
+    assert data["raw_long_term"] == ["raw fact one"]
+    assert data["episodes"] == ["talked about docker"]
+
+
+def test_list_sessions(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    assert client.get("/admin/v1/memory/users/u1/sessions").json() == {"sessions": ["s1"]}
+
+
+def test_get_session_detail(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    data = client.get("/admin/v1/memory/users/u1/sessions/s1").json()
+    assert [(t["role"], t["content"]) for t in data["turns"]] == [
+        ("user", "hi"),
+        ("assistant", "hello"),
+    ]
+    assert "earlier we said hi" in data["summary"]
+    assert data["pending"][0]["content"] == "older"
+
+
+def test_get_persona(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    assert "be concise" in client.get("/admin/v1/memory/persona").json()["text"]
+
+
+def test_memory_requires_bearer_when_token_set(tmp_path):
+    client = _client(auth_token="secret", memory=_seed_memory(tmp_path))
+    assert client.get("/admin/v1/memory/users").status_code == 401
+    ok = client.get("/admin/v1/memory/users", headers={"Authorization": "Bearer secret"})
+    assert ok.status_code == 200
+
+
+# --- fact CRUD + optimistic concurrency + semantic reset --------------------
+def _profile(client, user="u1"):
+    return client.get(f"/admin/v1/memory/users/{user}/profile").json()
+
+
+def test_add_fact_appends_and_returns_new_version(tmp_path):
+    store = _seed_memory(tmp_path)
+    retriever = _FakeRetriever()
+    client = _client(memory=store, retriever=retriever)
+    before = _profile(client)
+
+    resp = client.post("/admin/v1/memory/users/u1/facts", json={"text": "new fact"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [f["text"] for f in body["facts"]][-1] == "new fact"
+    assert body["version"] != before["version"]  # version moved
+    # Re-index rebuilt the whole long_term slice from current facts.
+    assert retriever.reset_calls == [("u1", "long_term")]
+    assert ("u1", "long_term", "new fact") in retriever.index_calls
+
+
+def test_update_fact(tmp_path):
+    store = _seed_memory(tmp_path)
+    client = _client(memory=store)
+    fact_id = _profile(client)["facts"][0]["id"]
+
+    resp = client.patch(
+        f"/admin/v1/memory/users/u1/facts/{fact_id}", json={"text": "moved to Munich"}
+    )
+    assert resp.status_code == 200
+    assert any(f["text"] == "moved to Munich" for f in resp.json()["facts"])
+
+
+def test_update_missing_fact_is_404(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    assert (
+        client.patch("/admin/v1/memory/users/u1/facts/nope", json={"text": "x"}).status_code == 404
+    )
+
+
+def test_delete_fact(tmp_path):
+    store = _seed_memory(tmp_path)
+    client = _client(memory=store)
+    fact_id = _profile(client)["facts"][0]["id"]
+
+    resp = client.delete(f"/admin/v1/memory/users/u1/facts/{fact_id}")
+    assert resp.status_code == 200
+    assert fact_id not in [f["id"] for f in resp.json()["facts"]]
+
+
+def test_stale_version_is_409(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    resp = client.post(
+        "/admin/v1/memory/users/u1/facts",
+        json={"text": "x", "expected_version": "deadbeef"},
+    )
+    assert resp.status_code == 409
+
+
+def test_current_version_is_accepted(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    version = _profile(client)["version"]
+    resp = client.post(
+        "/admin/v1/memory/users/u1/facts",
+        json={"text": "x", "expected_version": version},
+    )
+    assert resp.status_code == 200
+
+
+# --- raw-file editor --------------------------------------------------------
+def test_get_and_put_persona_raw(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    got = client.get("/admin/v1/memory/files/persona").json()
+    assert "be concise" in got["content"]
+
+    resp = client.put(
+        "/admin/v1/memory/files/persona",
+        json={"content": "# Persona\n\nbe terse\n", "expected_version": got["version"]},
+    )
+    assert resp.status_code == 200
+    assert "be terse" in client.get("/admin/v1/memory/files/persona").json()["content"]
+
+
+def test_put_raw_stale_version_409(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    resp = client.put(
+        "/admin/v1/memory/files/persona",
+        json={"content": "x", "expected_version": "deadbeef"},
+    )
+    assert resp.status_code == 409
+
+
+def test_put_session_window_validates_json(tmp_path):
+    client = _client(memory=_seed_memory(tmp_path))
+    base = "/admin/v1/memory/files/session_window?user_id=u1&session_id=s1"
+    # A valid JSON list is accepted...
+    ok = client.put(base, json={"content": '[{"role": "user", "content": "hi"}]'})
+    assert ok.status_code == 200
+    # ...a non-list and broken JSON are rejected.
+    assert client.put(base, json={"content": '{"not": "a list"}'}).status_code == 422
+    assert client.put(base, json={"content": "{bad json"}).status_code == 422
+
+
+def test_episodes_raw_edit_reindexes(tmp_path):
+    retriever = _FakeRetriever()
+    client = _client(memory=_seed_memory(tmp_path), retriever=retriever)
+    body = "# Episodic memory\n\n- 2026-01-01 :: talked about k8s\n"
+    resp = client.put(
+        "/admin/v1/memory/files/episodes?user_id=u1", json={"content": body}
+    )
+    assert resp.status_code == 200
+    assert retriever.reset_calls == [("u1", "episode")]
+    assert ("u1", "episode", "talked about k8s") in retriever.index_calls
+
+
+def test_unknown_file_kind_404(tmp_path):
+    assert _client(memory=_seed_memory(tmp_path)).get(
+        "/admin/v1/memory/files/bogus?user_id=u1"
+    ).status_code == 404
+
+
+def test_session_kind_requires_session_id(tmp_path):
+    assert _client(memory=_seed_memory(tmp_path)).get(
+        "/admin/v1/memory/files/session_window?user_id=u1"
+    ).status_code == 422

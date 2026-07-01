@@ -161,6 +161,14 @@ class S3Store:
         except Exception:  # noqa: BLE001 — 404/403 both mean "not usable here".
             return False
 
+    def delete_bytes(self, key: str) -> None:
+        """Remove the object at `key` (idempotent — deleting an absent key is fine)."""
+        client = self._client()
+        try:
+            client.delete_object(Bucket=self.bucket, Key=key)
+        except Exception as exc:  # noqa: BLE001
+            raise StorageError(f"delete failed for {key!r}: {exc}") from exc
+
     def presigned_url(self, key: str, *, expires_in: int | None = None) -> str:
         """A time-limited GET URL for `key` (for files too big to attach inline)."""
         client = self._client()
@@ -211,6 +219,17 @@ def build_s3_store_from_config() -> Optional[S3Store]:
     """
     if not config.storage_enabled:
         return None
+    return s3_store_from_config()
+
+
+def s3_store_from_config() -> Optional[S3Store]:
+    """Build the S3 store from `config`, *ungated* by `storage_enabled`.
+
+    The `build_*` variant above honors the model-file-archive gate; this one builds
+    whenever its caller is responsible for gating (the item archive has its own
+    flag). Still returns `None` (with a warning) when boto3 is absent, so nothing
+    raises on a base install.
+    """
     try:
         import boto3  # noqa: F401, PLC0415 — presence probe; real client built lazily.
     except ImportError:

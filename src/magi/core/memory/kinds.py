@@ -170,20 +170,21 @@ class LongTerm:
     def apply_ops(self, mem: ScopedMemory, operations: Iterable[FactOp]) -> list[str]:
         """Apply the curator's per-fact operations to the fact sheet, in order.
 
-        Each op is clamped (size guardrail) and mirrored into the retriever on
-        add/update. UPDATE/DELETE against an unknown id is skipped (the curator
-        worked from a snapshot). Returns the kinds actually applied (for logging)."""
+        Each op is clamped (size guardrail). UPDATE/DELETE against an unknown id is
+        skipped (the curator worked from a snapshot). Returns the kinds actually
+        applied (for logging). The vector mirror is reconciled once at the end (see
+        `_sync_mirror`) so deletes/edits don't leave ghost vectors."""
         applied: list[str] = []
+        added: list[str] = []
         for op in operations:
             if op.op == "add" and op.text and op.text.strip():
                 text = clamp(op.text.strip(), self.fact_max_chars, "long-term fact")
                 mem.long_term_facts.add(text)
-                index(self.retriever, mem.user_id, self.retriever_key, text)
+                added.append(text)
                 applied.append("add")
             elif op.op == "update" and op.fact_id and op.text and op.text.strip():
                 text = clamp(op.text.strip(), self.fact_max_chars, "long-term fact")
                 if mem.long_term_facts.update(op.fact_id, text):
-                    index(self.retriever, mem.user_id, self.retriever_key, text)
                     applied.append("update")
             elif op.op == "delete" and op.fact_id:
                 if mem.long_term_facts.remove(op.fact_id):
@@ -194,7 +195,28 @@ class LongTerm:
                 f"memory: long-term facts over cap {self.facts_max}; dropped "
                 f"{dropped} oldest for user {mem.user_id} — is the curator pruning?"
             )
+        self._sync_mirror(mem, applied, added, dropped)
         return applied
+
+    def _sync_mirror(
+        self, mem: ScopedMemory, applied: list[str], added: list[str], dropped: int
+    ) -> None:
+        """Keep the vector mirror consistent with the fact sheet.
+
+        `SemanticIndex.index` only ever upserts, so an UPDATE (old text lingers), a
+        DELETE, or a trim drop would orphan a vector and the lead could retrieve a
+        fact it no longer holds. Those cases rebuild the whole `(user, long_term)`
+        slice from the current facts; an add-only change just indexes the new facts
+        (no orphan possible, so no need to pay the rebuild)."""
+        if self.retriever is None:
+            return
+        if "update" in applied or "delete" in applied or dropped:
+            self.retriever.reset(mem.user_id, self.retriever_key)
+            for text in mem.long_term_facts.texts():
+                index(self.retriever, mem.user_id, self.retriever_key, text)
+        else:
+            for text in added:
+                index(self.retriever, mem.user_id, self.retriever_key, text)
 
     def remember(self, mem: ScopedMemory, fact: str) -> None:
         mem.long_term.append(fact)

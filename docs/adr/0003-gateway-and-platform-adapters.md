@@ -2,7 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-07-01
-- Builds on: `core/conversation.py` (the `Runner` Protocol precedent)
+- Builds on: `core/conversation.py` (the `Runner` Protocol precedent), ADR 0002
+  (`admin_enabled` / `serve_with_admin`, the orchestration this generalizes)
 
 ## Context
 
@@ -13,11 +14,10 @@ layer" and "the shared brain" — they just happen to call the same
 `ConversationService` methods by convention, not by anything enforced. Two
 concrete gaps fell out of formalizing that convention:
 
-- Nothing describes what a platform's presentation layer must expose for the
-  gateway to run it, or names the general "run N long-lived service
-  coroutines, first to end takes the rest down" shape a concurrent deployment
-  needs (e.g. serving a chat adapter alongside an unrelated HTTP surface in
-  one process) — every adapter would otherwise re-derive it ad hoc.
+- `channels/discord.py`'s `_run_until_first_exit` — the "run N long-lived
+  service coroutines, first to end takes the rest down" helper backing
+  `serve_with_admin` (`config.admin_enabled`) — has nothing Discord-specific
+  about its logic, but lived only in Discord's module.
 - Every channel hands `ConversationService` a bare, platform-native `user_id`:
   a Discord snowflake, a client-chosen string on the API. `FileMemoryStore`
   keys memory on `user_id` alone, so a Discord user `"123"` and an API caller
@@ -44,12 +44,9 @@ concrete gaps fell out of formalizing that convention:
    `ConversationService`/`MemoryManager` keep taking an opaque string and must
    not learn about "platforms" (the existing strict downward-layering rule,
    `docs/architecture.md`).
-3. **`run_gateway(*coros)`** — the general "run N long-lived service
-   coroutines concurrently, first to end takes the rest down" primitive,
-   living with the contract it serves. No caller on `master` needs it yet
-   today, but it's the shape any future concurrent-adapter deployment (e.g.
-   an admin HTTP surface alongside a chat adapter in one process) will want,
-   so it's added now rather than re-derived per deployment.
+3. **`run_gateway(*coros)`** — `_run_until_first_exit` relocated verbatim and
+   renamed; the general orchestration primitive now lives with the contract
+   it serves. `serve_with_admin` becomes a two-line caller of it.
 4. **Migration: clean break, no migration.** Existing Discord memory under
    the old bare-snowflake path is intentionally allowed to become orphaned —
    `slug()` (`core/memory/adapters.py`) already makes `"discord:123"` a

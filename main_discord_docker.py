@@ -24,9 +24,14 @@ def main() -> None:
     apply_deployment_config()
     apply_container_overrides()
 
-    from magi.channels.discord import build_discord_client
+    from magi.channels.discord import build_discord_client, serve_with_admin
+    from magi.core.config import config
 
-    build_discord_client().serve()
+    discord_client = build_discord_client()
+    if config.admin_enabled:
+        serve_with_admin(discord_client)
+    else:
+        discord_client.serve()
 
 
 if __name__ == "__main__":

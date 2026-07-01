@@ -677,12 +677,11 @@ class DiscordClient:
         asyncio.run(self.serve_async())
 
     async def serve_async(self) -> None:
-        """Connect to the gateway and run until shutdown — the coroutine form
-        of `serve()`. This is what lets the adapter be composed with another
-        long-lived service (e.g. an admin HTTP surface) in one event loop via
-        `gateway.run_gateway` (ADR 0003), and is the method `PlatformAdapter`
-        requires. Mirrors what `discord.Client.run` does under the hood
-        (`async with client: await client.start(token)`), plus the same
+        """Connect to the gateway and run until shutdown (the coroutine form of
+        `serve()`, for composing with another async service in the same process —
+        see `channels.discord.serve_with_admin`, and the method `PlatformAdapter`
+        requires, ADR 0003). Mirrors what `discord.Client.run` does under the
+        hood (`async with client: await client.start(token)`), plus the same
         default logging setup `run()` gives you for free.
         """
         discord.utils.setup_logging()

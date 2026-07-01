@@ -401,12 +401,15 @@ def create_app(
     *,
     cors_origins: Optional[Sequence[str]] = None,
     mcp_toolkits: Optional[Sequence[MCPConnection]] = None,
+    admin_app: Optional[FastAPI] = None,
 ) -> FastAPI:
     """The FastAPI app over an already-built `ConversationService` (pure factory).
 
     `cors_origins`: web origins allowed to call /v1 from a browser (empty/None =
     no CORS headers). `mcp_toolkits`: agno MCP toolkits to connect at startup and
-    close at shutdown (empty/None = none) — see `_mcp_lifespan`.
+    close at shutdown (empty/None = none) — see `_mcp_lifespan`. `admin_app`, when
+    given, is mounted onto this same app (see `config.admin_enabled` / ADR 0002)
+    so one process/port serves both the chat API and the admin surface.
     """
     app = FastAPI(title="chatbot", version="1", lifespan=_mcp_lifespan(mcp_toolkits or ()))
 
@@ -577,6 +580,13 @@ def create_app(
             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
         )
 
+    if admin_app is not None:
+        # Mounted at "/" LAST so it only catches what the routes above don't —
+        # i.e. everything under /admin/... — the same fallback-mount pattern used
+        # to serve an SPA behind an API. One process, one port; admin_host/
+        # admin_port are unused in this mode (see config.admin_enabled).
+        app.mount("/", admin_app)
+
     return app
 
 
@@ -613,12 +623,21 @@ def build_api_app(db: Optional[BaseDb] = None) -> FastAPI:
         log_info("api: auth DISABLED (API_AUTH_TOKEN not set) — keep the bind local")
     if config.api_cors_origins:
         log_info(f"api: CORS enabled for origins {config.api_cors_origins}")
+
+    admin_app = None
+    if config.admin_enabled:
+        from magi.channels.admin import build_admin_app
+
+        log_info("api: admin surface ALSO mounted on this app, under /admin/v1/* (config.admin_enabled)")
+        admin_app = build_admin_app()
+
     return create_app(
         conversation,
         auth_token=config.api_auth_token,
         cors_origins=config.api_cors_origins,
         # Seanime-over-MCP is the only MCP member today; connect it at startup.
         mcp_toolkits=_collect_mcp_toolkits(conversation.runner),
+        admin_app=admin_app,
     )
 
 

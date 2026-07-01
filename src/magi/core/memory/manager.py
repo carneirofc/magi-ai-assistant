@@ -30,6 +30,8 @@ from typing import Optional
 from agno.utils.log import log_info, log_warning
 
 from magi.core.config import config
+from magi.core.items import ItemArchive
+from magi.core.memory.adapters import slug
 from magi.core.memory.curation import CurateFn, CurationInput
 from magi.core.memory.kinds import Episodes, LongTerm, Session, SummarizeFn
 from magi.core.memory.semantic import MemoryRetriever
@@ -79,8 +81,14 @@ class MemoryManager:
         curate_fn: Optional[CurateFn] = None,
         long_term_fact_max_chars: int = 1_000,
         long_term_facts_max: int = 200,
+        archive: Optional[ItemArchive] = None,
     ):
         self.store = store
+        # The item archive (None = off). When set, the durable fact sheet is
+        # snapshotted to the object store after each fact write, so a user's curated
+        # profile has an off-disk source-of-truth copy alongside the JSON on disk and
+        # the semantic mirror in Qdrant. See magi/core/items.
+        self._archive = archive
         # Post-turn durable-memory curator (injected; None disables it). Owns the
         # long-term fact sheet when on — it revises it per-fact each turn (ADD/
         # UPDATE/DELETE) instead of the lead appending raw facts. See
@@ -176,6 +184,7 @@ class MemoryManager:
         if fact_ops:
             applied.append("profile")
             log_info(f"memory: applied fact ops [{', '.join(fact_ops)}] for user {mem.user_id}")
+            self._snapshot_facts(mem)
         if result.episode and result.episode.strip():
             self.episodes.record_episode(mem, result.episode.strip())
             applied.append("episode")
@@ -203,8 +212,33 @@ class MemoryManager:
         log_info(f"memory: flushed {dropped} short-term turn(s) for session {mem.session_id}")
         return dropped
 
+    # --- item archive snapshot ----------------------------------------------
+    def _snapshot_facts(self, mem: ScopedMemory) -> None:
+        """Archive the durable fact sheet as the item-archive original for this user.
+
+        Bytes-only (the per-fact vectors live in the semantic mirror, so no doc
+        vector here). No-op when the archive is off; never raises — a memory write
+        must not break a chat."""
+        if self._archive is None:
+            return
+        try:
+            path = mem.long_term_facts.path
+            data = path.read_bytes() if path.exists() else b"[]"
+            self._archive.persist(
+                "memory",
+                slug(mem.user_id),
+                data=data,
+                content_type="application/json",
+                metadata={"file": "long_term_facts.json", "user_id": mem.user_id},
+            )
+        except Exception as exc:  # noqa: BLE001 — archival must never break a chat.
+            log_warning(f"memory: fact snapshot failed for {mem.user_id}: {type(exc).__name__}: {exc}")
+
     # --- deliberate writes (the model calls these via tools) ----------------
     def remember(self, fact: str) -> str:
+        # Appends a raw bullet to long_term.md (the legacy raw log), NOT the curated
+        # fact sheet — so this is deliberately not archived. The durable "items" are
+        # the curator-owned facts in long_term_facts.json, snapshotted in maybe_curate.
         self.long_term.remember(self.mem, fact)
         log_info(f"memory: long-term written for user {self.scope().user_id}: {fact!r}")
         return "Stored to long-term memory."

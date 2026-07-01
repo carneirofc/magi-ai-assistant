@@ -34,10 +34,10 @@ formalizes the seam every adapter plugs into (see
   `user_id` through this (`f"{platform}:{external_id}"`, e.g. `discord:123`,
   `api:u1`) before calling `ConversationService`, so two platforms whose
   native ids happen to collide never silently share one user's memory.
-- **`run_gateway(*coros)`** — runs several long-lived service coroutines (e.g.
-  two adapters' `serve_async()`, or an adapter alongside another HTTP surface)
-  concurrently in one process; the first to finish or raise takes the rest
-  down with it.
+- **`run_gateway(*coros)`** — runs several long-lived service coroutines (an
+  adapter's `serve_async()`, an admin uvicorn server) concurrently in one
+  process; the first to finish or raise takes the rest down with it. Backs
+  `serve_with_admin` (`config.admin_enabled`).
 
 ## Discord bot
 

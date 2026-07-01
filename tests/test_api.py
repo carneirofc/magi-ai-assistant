@@ -266,6 +266,48 @@ def test_mcp_connect_failure_does_not_crash_startup():
         assert resp.status_code == 200
 
 
+# --- Admin surface mounted alongside (config.admin_enabled) ------------------
+def test_admin_app_not_mounted_by_default():
+    """Without `admin_app`, nothing falls through — an unknown path 404s same as
+    any other app, it doesn't accidentally reach an admin surface."""
+    client, _ = _client()
+    assert client.get("/admin/v1/knowledge/documents").status_code == 404
+
+
+def test_admin_app_is_reachable_through_the_merged_app_when_given():
+    """`admin_app`, when given, is mounted so its own routes are reachable
+    through the SAME app/port — one process for both surfaces."""
+    from fastapi import FastAPI
+
+    admin = FastAPI()
+
+    @admin.get("/admin/v1/ping")
+    def _ping() -> dict:
+        return {"admin": "pong"}
+
+    app = create_app(_FakeConversation(), admin_app=admin)
+    client = TestClient(app)
+
+    assert client.get("/admin/v1/ping").json() == {"admin": "pong"}
+
+
+def test_api_own_routes_take_priority_over_the_mounted_admin_app():
+    """A path the api app itself defines (e.g. /healthz) is never shadowed by the
+    mounted admin app, even if the admin app defines the same path."""
+    from fastapi import FastAPI
+
+    admin = FastAPI()
+
+    @admin.get("/healthz")
+    def _admin_healthz() -> dict:
+        return {"status": "admin-should-not-win"}
+
+    app = create_app(_FakeConversation(), admin_app=admin)
+    client = TestClient(app)
+
+    assert client.get("/healthz").json() == {"status": "ok"}
+
+
 # --- OpenAI-compatible shim (stock chat UIs) ---------------------------------
 def test_models_advertises_one_model():
     client, _ = _client()

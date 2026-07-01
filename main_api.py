@@ -50,6 +50,12 @@ def apply_deployment_config() -> None:
         # install the optional extra: `uv sync --extra mcp`). The app opens the MCP
         # connection at startup. One anime member either way.
         # seanime_use_mcp=True,
+        # Admin surface (memory + knowledge management, see channels/admin.py)
+        # mounted onto THIS SAME app under /admin/v1/* instead of running
+        # main_admin.py separately — one process, one port (admin_host/
+        # admin_port are unused in this mode). Uncomment and set an
+        # ADMIN_AUTH_TOKEN in .env if this ever leaves localhost:
+        # admin_enabled=True,
     )
 
 

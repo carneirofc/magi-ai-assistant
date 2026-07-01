@@ -67,6 +67,14 @@ python main_api.py      # standalone HTTP service for external clients
 
 Both serve the same brain (`magi/channels/bootstrap.py`); only the transport differs.
 
+The admin surface (memory + knowledge management, `magi/channels/admin.py`, see
+ADR 0002) normally runs as its own process (`main_admin.py`) behind the Next.js
+BFF. Set `admin_enabled=True` in `main.py` / `main_api.py` to serve it alongside
+the bot instead — one process, no second `python main_admin.py` to keep running.
+On the HTTP API it rides the same port (`/admin/v1/*`); on Discord it opens a
+second local port (`admin_host`/`admin_port`). Keep `ADMIN_AUTH_TOKEN` set and the
+admin port unpublished either way.
+
 ### Run in Docker
 
 To run the app itself in a container, build it locally and bring it up with the

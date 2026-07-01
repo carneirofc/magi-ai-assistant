@@ -33,6 +33,7 @@ from magi.agent.tools.thinking import build_thinking_tools
 from magi.agent.tools.vision import VISION_TOOLS
 from magi.core.config import config
 from magi.core.db import get_db
+from magi.core.items import build_item_archive_from_config
 from magi.core.knowledge import build_knowledge_from_config
 from magi.core.memory import MemoryManager
 from magi.core.prompts import load_prompt
@@ -138,7 +139,8 @@ def build_team(
                 store.ensure_bucket()
             except Exception as exc:  # noqa: BLE001 — a down backend must not abort startup.
                 log_info(f"storage: backend check skipped ({type(exc).__name__}: {exc})")
-            storage_tools = build_storage_tools(store, memory)
+            # The item archive (None unless enabled) adds meaning-based file search.
+            storage_tools = build_storage_tools(store, memory, build_item_archive_from_config())
             log_info(
                 f"storage: ENABLED ({len(storage_tools)} tools, backend={config.storage_backend})"
             )
@@ -149,9 +151,10 @@ def build_team(
     knowledge_tools: list = []
     knowledge = build_knowledge_from_config()
     if knowledge is not None:
-        knowledge_tools = build_knowledge_tools(knowledge)
+        # The store is both searcher and tagger, so it powers read + tag-write tools.
+        knowledge_tools = build_knowledge_tools(knowledge, knowledge)
         log_info(
-            f"knowledge: ENABLED ({len(knowledge_tools)} tool, "
+            f"knowledge: ENABLED ({len(knowledge_tools)} tool(s), "
             f"collection={config.knowledge_collection})"
         )
 

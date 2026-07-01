@@ -107,6 +107,31 @@ def _tools():
     return store, store_file, retrieve_file, list_files
 
 
+class _FakeArchive:
+    """Records persist calls and serves canned search hits — no Qdrant needed."""
+
+    def __init__(self, hits=()):
+        self.persisted: list[tuple] = []
+        self.searched: list[tuple] = []
+        self._hits = list(hits)
+
+    def persist(self, kind, item_id, *, scope="global", data=None, text=None,
+                content_type=None, metadata=None):
+        self.persisted.append((kind, item_id, scope, text, metadata))
+        return True
+
+    def search(self, query, top_k, *, kinds=(), scopes=()):
+        self.searched.append((query, top_k, tuple(kinds), tuple(scopes)))
+        return self._hits
+
+
+def _tools_with_archive(hits=()):
+    store = _FakeStore()
+    archive = _FakeArchive(hits)
+    tools = build_storage_tools(store, _Memory("u1"), archive)
+    return store, archive, tools
+
+
 def _prefix(user_id="u1"):
     return f"users/{slug(user_id)}/artifacts/"
 
@@ -141,6 +166,64 @@ async def test_store_file_refuses_unsourced_url(monkeypatch):
     finally:
         close_allowed_media_urls(token)
     assert result.get("success") is False and "unsourced" in result.get("message")
+
+
+# --- item archive integration -----------------------------------------------
+def test_no_search_tool_without_archive():
+    """The bare wiring has exactly the three classic tools (no semantic search)."""
+    tools = build_storage_tools(_FakeStore(), _Memory("u1"))
+    assert len(tools) == 3 and "search_files" not in {t.name for t in tools}
+
+
+def test_search_tool_added_with_archive():
+    _, _, tools = _tools_with_archive()
+    names = {t.name for t in tools}
+    assert "search_files" in names and len(tools) == 4
+
+
+async def test_store_file_indexes_into_archive(monkeypatch):
+    store, archive, tools = _tools_with_archive()
+    store_file = tools[0]
+    url = "https://cdn.example/pic.png"
+    _patch_client(monkeypatch, response=_FakeResponse(content=b"png", headers={"content-type": "image/png"}))
+    token = open_allowed_media_urls(f"keep this {url}")
+    try:
+        result = await store_file.entrypoint(source_url=url, note="a cat")
+    finally:
+        close_allowed_media_urls(token)
+
+    ref = result.get("data")["reference"]
+    assert len(archive.persisted) == 1
+    kind, item_id, scope, text, metadata = archive.persisted[0]
+    assert kind == "file" and item_id == ref and scope == f"user:{slug('u1')}"
+    assert "pic.png" in text and "a cat" in text
+    assert metadata["filename"] == "pic.png" and metadata["note"] == "a cat"
+
+
+async def test_search_files_returns_matches():
+    from magi.core.items import ItemHit
+
+    hits = [
+        ItemHit(kind="file", item_id="ref1", scope="user:u1", text="a cat photo",
+                score=0.88, metadata={"filename": "cat.png", "note": "fluffy"}),
+    ]
+    _, archive, tools = _tools_with_archive(hits)
+    search_files = next(t for t in tools if t.name == "search_files")
+    result = await search_files.entrypoint(query="cat picture")
+    assert result.get("success") is True
+    data = result.get("data")
+    assert data["count"] == 1
+    match = data["matches"][0]
+    assert match["reference"] == "ref1" and match["filename"] == "cat.png"
+    # Search was scoped to this user and to the file kind.
+    assert archive.searched == [("cat picture", 5, ("file",), (f"user:{slug('u1')}",))]
+
+
+async def test_search_files_empty_is_friendly():
+    _, _, tools = _tools_with_archive(hits=())
+    search_files = next(t for t in tools if t.name == "search_files")
+    result = await search_files.entrypoint(query="nothing here")
+    assert result.get("success") is True and result.get("data")["count"] == 0
 
 
 async def test_store_file_refuses_non_http():

@@ -29,6 +29,7 @@ def test_provider_resolves_known_names():
     assert _provider("litellm") is ModelProviderEnum.LITELLM
     assert _provider("ollama") is ModelProviderEnum.OLLAMA
     assert _provider("llamacpp") is ModelProviderEnum.LLAMACPP
+    assert _provider("openai") is ModelProviderEnum.OPENAI
 
 
 def test_provider_rejects_unknown_name():
@@ -191,6 +192,35 @@ def test_llamacpp_defers_sampling_to_server_by_default():
 def test_llamacpp_temperature_override_applied():
     model = _llamacpp(temperature=0.6)
     assert model.get_request_params()["temperature"] == 0.6
+
+
+def _openai(model_id: str = "gpt-4o-mini", **kwargs):
+    return build_model(
+        ModelDefinition(
+            has_tools=True,
+            provider=ModelProviderEnum.OPENAI,
+            model_id=model_id,
+            **kwargs,
+        )
+    )
+
+
+def test_openai_targets_remote_base_url_with_bare_id():
+    """The generic OpenAI-compatible remote hits openai_base_url with the bare id."""
+    model = _openai()
+    assert model.id == "gpt-4o-mini"
+    assert model.base_url == config.openai_base_url
+
+
+def test_openai_sampling_rides_extra_body():
+    """Like llamacpp, native sampling overrides ride extra_body verbatim."""
+    model = _openai(extra_body={"top_k": 40})
+    assert model.get_request_params()["extra_body"] == {"top_k": 40}
+
+
+def test_openai_defers_to_server_without_overrides():
+    """No overrides set -> nothing sent; the remote server's defaults rule."""
+    assert _openai().get_request_params() == {}
 
 
 def test_lead_spec_is_multimodal_router_brain():

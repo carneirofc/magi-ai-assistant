@@ -30,6 +30,8 @@ class MemoryRetriever(Protocol):
 
     def search(self, user_id: str, query: str, kind: str, top_k: int) -> list[str]: ...
 
+    def reset(self, user_id: str, kind: str) -> None: ...
+
 
 class SemanticIndex:
     """Qdrant-backed retriever. All public methods are crash-proof by design."""
@@ -98,6 +100,56 @@ class SemanticIndex:
             )
         except Exception as exc:  # noqa: BLE001
             log_warning(f"semantic: upsert failed ({type(exc).__name__}: {exc})")
+
+    def _connect_existing(self):
+        """A client bound to the collection *without* creating it — so `reset` works
+        on a process that hasn't embedded yet (the admin service, or any cold start).
+
+        Unlike `_ensure_client`, this needs no embedding dim and never creates the
+        collection: if it's absent there's nothing to reset, so return None. Caches
+        the client on success. All failures degrade to None."""
+        if self._client is not None:
+            return self._client
+        try:
+            from qdrant_client import QdrantClient
+
+            client = QdrantClient(url=config.qdrant_url, api_key=config.qdrant_api_key)
+            if not client.collection_exists(self.collection):
+                return None
+            self._client = client
+            return client
+        except Exception as exc:  # noqa: BLE001
+            log_warning(f"semantic: Qdrant unavailable ({type(exc).__name__}: {exc})")
+            return None
+
+    def reset(self, user_id: str, kind: str) -> None:
+        """Drop every indexed point for one `(user_id, kind)` slice. No-op when the
+        backend / collection is unavailable.
+
+        The mirror is otherwise append-only, so a deleted/edited memory entry would
+        linger as a ghost vector; callers re-`index` the current entries after this,
+        making semantic recall reflect the edit. Connects to the existing collection
+        on a cold client so a fresh process actually purges (not a silent no-op).
+        See ADR 0002."""
+        client = self._connect_existing()
+        if client is None:
+            return
+        try:
+            from qdrant_client import models
+
+            client.delete(
+                collection_name=self.collection,
+                points_selector=models.FilterSelector(
+                    filter=models.Filter(
+                        must=[
+                            models.FieldCondition(key="user_id", match=models.MatchValue(value=str(user_id))),
+                            models.FieldCondition(key="kind", match=models.MatchValue(value=kind)),
+                        ]
+                    )
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            log_warning(f"semantic: reset failed ({type(exc).__name__}: {exc})")
 
     def search(self, user_id: str, query: str, kind: str, top_k: int) -> list[str]:
         """Return up to `top_k` stored texts most relevant to `query`. [] on failure."""
