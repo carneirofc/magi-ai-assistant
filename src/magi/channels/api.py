@@ -74,7 +74,17 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, model_validator
 
+from magi.channels.gateway import scoped_user_id
 from magi.core.conversation import ConversationDelta, ConversationReply, ConversationService
+
+# This channel's namespace for `scoped_user_id` (ADR 0003) — the native
+# contract and the OpenAI-compatible shim below are one transport/platform,
+# so both share it.
+_PLATFORM = "api"
+
+
+def _scoped(user_id: str) -> str:
+    return scoped_user_id(_PLATFORM, user_id)
 
 
 # --- wire format (the public contract; version it, don't break it) -----------
@@ -433,7 +443,7 @@ def create_app(
     )
     async def post_message(session_id: str, body: MessageRequest) -> MessageReply:
         reply = await conversation.handle(
-            user_id=body.user_id,
+            user_id=_scoped(body.user_id),
             session_id=session_id,
             text=body.text,
             media=_inbound_media(body.images),
@@ -451,7 +461,7 @@ def create_app(
 
         async def events():
             async for item in conversation.handle_stream(
-                user_id=body.user_id, session_id=session_id, text=body.text, media=media
+                user_id=_scoped(body.user_id), session_id=session_id, text=body.text, media=media
             ):
                 if isinstance(item, ConversationDelta):
                     yield _sse("delta", {"text": item.text})
@@ -471,11 +481,11 @@ def create_app(
         dependencies=[Depends(require_auth)],
     )
     def post_flush(session_id: str, body: FlushRequest) -> FlushReply:
-        return FlushReply(dropped_turns=conversation.flush(body.user_id, session_id))
+        return FlushReply(dropped_turns=conversation.flush(_scoped(body.user_id), session_id))
 
     @app.get("/v1/sessions/{session_id}/context", dependencies=[Depends(require_auth)])
     def get_context(session_id: str, user_id: str = Query(min_length=1)) -> dict:
-        return conversation.context_stats(user_id, session_id)
+        return conversation.context_stats(_scoped(user_id), session_id)
 
     # --- OpenAI-compatible shim -------------------------------------------
     @app.get("/v1/models", dependencies=[Depends(require_auth)])
@@ -510,6 +520,7 @@ def create_app(
             )
         user_id = x_user_id or body.user or "openai"
         session_id = x_session_id or _derive_session_id(body.messages, user_id)
+        user_id = _scoped(user_id)
         media = {"images": images} if images else {}
         model = body.model or _OPENAI_MODEL_ID
         created = int(time.time())
@@ -609,3 +620,30 @@ def build_api_app(db: Optional[BaseDb] = None) -> FastAPI:
         # Seanime-over-MCP is the only MCP member today; connect it at startup.
         mcp_toolkits=_collect_mcp_toolkits(conversation.runner),
     )
+
+
+class ApiAdapter:
+    """This channel as a `gateway.PlatformAdapter` (ADR 0003) — lets the HTTP
+    API be run through `gateway.run_gateway` alongside another adapter in one
+    process, the same role `DiscordClient` already plays. Additive: `main_api.py`
+    keeps calling `uvicorn.run(build_api_app(), ...)` directly; nothing requires
+    switching to this.
+    """
+
+    platform: str = _PLATFORM
+
+    def __init__(self, app: FastAPI, host: str, port: int) -> None:
+        import uvicorn
+
+        self._server = uvicorn.Server(uvicorn.Config(app, host=host, port=port))
+
+    async def serve_async(self) -> None:
+        await self._server.serve()
+
+
+def build_api_adapter(db: Optional[BaseDb] = None) -> ApiAdapter:
+    """Composition root for the `PlatformAdapter` form — wraps `build_api_app`,
+    it does not reimplement it, so the two stay in lockstep."""
+    from magi.core.config import config
+
+    return ApiAdapter(build_api_app(db), host=config.api_host, port=config.api_port)

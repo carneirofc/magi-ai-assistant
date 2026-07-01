@@ -5,6 +5,62 @@ from clients.mydiscord import DiscordClient
 from magi.core.conversation import ConversationReply
 
 
+class DummyCommandChannel:
+    def __init__(self):
+        self.id = 555
+        self.sent = []
+
+    async def send(self, message):
+        self.sent.append(message)
+
+
+class _FakeConversation:
+    """Records the (verb, user_id, session_id) each control command called
+    with, so tests can assert the id was namespaced (see gateway.scoped_user_id,
+    ADR 0003) before it reached `ConversationService`."""
+
+    def __init__(self):
+        self.calls: list[tuple] = []
+
+    def flush(self, user_id, session_id):
+        self.calls.append(("flush", user_id, session_id))
+        return 3
+
+    def context_stats(self, user_id, session_id):
+        self.calls.append(("context_stats", user_id, session_id))
+        return {
+            "est_tokens": 10,
+            "ratio": 0.1,
+            "budget_tokens": 100,
+            "short_term_turns": 1,
+            "sections": {"short_term": 1, "long_term": 2, "episodes": 3, "persona": 4},
+        }
+
+
+@pytest.mark.asyncio
+async def test_flush_command_scopes_user_id_by_platform():
+    client = DiscordClient.__new__(DiscordClient)
+    client.conversation = _FakeConversation()
+    channel = DummyCommandChannel()
+
+    handled = await client._maybe_handle_command(channel, "!flush", 42)
+
+    assert handled is True
+    assert client.conversation.calls == [("flush", "discord:42", "555")]
+
+
+@pytest.mark.asyncio
+async def test_context_command_scopes_user_id_by_platform():
+    client = DiscordClient.__new__(DiscordClient)
+    client.conversation = _FakeConversation()
+    channel = DummyCommandChannel()
+
+    handled = await client._maybe_handle_command(channel, "!ctx", 42)
+
+    assert handled is True
+    assert client.conversation.calls == [("context_stats", "discord:42", "555")]
+
+
 class DummyTyping:
     def __init__(self):
         self.exit_args = None

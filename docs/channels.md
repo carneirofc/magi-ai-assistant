@@ -19,6 +19,26 @@ flowchart LR
 The client owns the ids: **`user_id`** scopes memory (durable per person),
 **`session_id`** scopes one conversation.
 
+## Gateway and platform adapters
+
+Each channel's presentation layer (`DiscordClient`, the API's route handlers)
+is a **platform adapter**: it normalizes one transport's native events into
+calls against `ConversationService` and renders replies back out in that
+transport's format. [`magi/channels/gateway.py`](../src/magi/channels/gateway.py)
+formalizes the seam every adapter plugs into (see
+[ADR 0003](adr/0003-gateway-and-platform-adapters.md)):
+
+- **`PlatformAdapter`** — the minimal structural contract (a `platform` name +
+  `serve_async()`) both `DiscordClient` and the API's `ApiAdapter` satisfy.
+- **`scoped_user_id(platform, external_id)`** — every adapter derives its
+  `user_id` through this (`f"{platform}:{external_id}"`, e.g. `discord:123`,
+  `api:u1`) before calling `ConversationService`, so two platforms whose
+  native ids happen to collide never silently share one user's memory.
+- **`run_gateway(*coros)`** — runs several long-lived service coroutines (e.g.
+  two adapters' `serve_async()`, or an adapter alongside another HTTP surface)
+  concurrently in one process; the first to finish or raise takes the rest
+  down with it.
+
 ## Discord bot
 
 ```bash
