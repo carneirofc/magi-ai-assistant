@@ -29,6 +29,7 @@ it is the engine that several bots share:
 | **Code-first config** | All settings are plain Python set at the entrypoint via `configure(...)`. Only *secrets* come from `.env`. See [configuration.md](configuration.md). |
 | **Graceful degradation** | Optional features (storage, knowledge, semantic search, MCP) degrade to "tool not attached" when their backend is missing or down. The bot always boots. |
 | **Pluggable extension points** | Members are a registry (`register_member`), prompts are an overlay (`load_prompt`), tools are a list. A persona extends all three from the outside. |
+| **Structural contracts over base classes** | `Runner` (`core/conversation.py`) and `PlatformAdapter` (`channels/gateway.py`, [ADR 0003](adr/0003-gateway-and-platform-adapters.md)) are narrow `Protocol`s a class satisfies by shape, not by inheriting. |
 
 ## Layered package map
 
@@ -41,6 +42,7 @@ flowchart TD
 
     subgraph ch["magi.channels (transport)"]
         BOOT[bootstrap.py<br/>shared wiring]
+        GATE[gateway.py<br/>PlatformAdapter + scoped_user_id]
         DISC[discord.py]
         API[api.py]
     end
@@ -67,6 +69,8 @@ flowchart TD
 
     M1 --> DISC --> BOOT
     M2 --> API --> BOOT
+    DISC -. satisfies .-> GATE
+    API -. satisfies .-> GATE
     BOOT --> TEAM
     BOOT --> CONV
     BOOT --> MEMMOD

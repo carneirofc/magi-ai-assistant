@@ -37,15 +37,27 @@ def apply_deployment_config() -> None:
         # S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY in .env, then uncomment:
         # s3_enabled=True,
         # s3_endpoint_url="http://localhost:9000",  # RustFS; None => AWS S3
+        # Admin surface (memory + knowledge management, see channels/admin.py) in
+        # this SAME process instead of running main_admin.py separately — one
+        # process, no BFF required for local/single-operator use. Starts a second
+        # uvicorn server on admin_host:admin_port alongside the gateway
+        # connection (see channels/discord.py: serve_with_admin). Uncomment and
+        # set an ADMIN_AUTH_TOKEN in .env if this ever leaves localhost:
+        # admin_enabled=True,
     )
 
 
 def main() -> None:
     apply_deployment_config()
 
-    from magi.channels.discord import build_discord_client
+    from magi.channels.discord import build_discord_client, serve_with_admin
+    from magi.core.config import config
 
-    build_discord_client().serve()
+    discord_client = build_discord_client()
+    if config.admin_enabled:
+        serve_with_admin(discord_client)
+    else:
+        discord_client.serve()
 
 
 if __name__ == "__main__":

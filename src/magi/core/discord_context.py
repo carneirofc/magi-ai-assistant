@@ -51,6 +51,10 @@ class DiscordRunContext:
     message_id: str
     message_url: str
     message_text: str
+    # The RAW Discord snowflake — for Discord-native tool use (e.g. moderation
+    # tools that address Discord's own API). NOT the same string as the
+    # memory-scoping user_id ConversationService sees, which is namespaced via
+    # magi.channels.gateway.scoped_user_id (see ADR 0003).
     user_id: str
     username: str
     channel: DiscordChannel

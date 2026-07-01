@@ -27,6 +27,7 @@ from agno.utils.log import log_info, log_warning
 from pydantic import BaseModel, Field
 
 from magi.agent.tools.outputs import ToolOutput, fail, ok
+from magi.core.items import ItemArchive
 from magi.core.media import is_media_url_allowed, stage_bytes
 from magi.core.memory import MemoryManager
 from magi.core.memory.adapters import slug
@@ -74,6 +75,18 @@ class StoredFileListData(BaseModel):
     count: int = Field(description="How many files are archived.")
 
 
+class FileMatch(BaseModel):
+    reference: str = Field(description="Reference id to recall this file with retrieve_file.")
+    filename: str | None = Field(default=None, description="Stored filename, when known.")
+    note: str | None = Field(default=None, description="Note kept with the file, if any.")
+    score: float = Field(description="Relevance to the query (0..1).")
+
+
+class FileSearchData(BaseModel):
+    matches: list[FileMatch] = Field(description="Archived files most relevant to the query.")
+    count: int = Field(description="How many matches were returned.")
+
+
 def _filename(url: str, content_type: str, explicit: Optional[str]) -> str:
     """A sensible filename: explicit > URL basename > a generic one."""
     if explicit:
@@ -87,17 +100,31 @@ def _filename(url: str, content_type: str, explicit: Optional[str]) -> str:
     return f"file{ext}"
 
 
-def build_storage_tools(store: S3Store | LocalStore, memory: MemoryManager) -> list:
+def build_storage_tools(
+    store: S3Store | LocalStore,
+    memory: MemoryManager,
+    archive: Optional[ItemArchive] = None,
+) -> list:
     """Return the object-storage tool set bound to `store` + `memory` (injected).
 
     `store` is any object-store backend (`LocalStore` or `S3Store`) — the tools
     use only the shared duck-typed surface (put/get/presign/list), so they don't
     care which is wired in.
+
+    `archive` (the item archive, or None) makes archived files searchable by meaning:
+    when set, `store_file` indexes each file's name + note into the cross-item vector
+    index and a `search_files` tool is added. The file bytes still live only under the
+    user's archive prefix (the index holds no second copy) — a match hands back the
+    reference to recall with `retrieve_file`.
     """
 
     def _prefix() -> str:
         """Key prefix for the current user's archive (scope set by the channel)."""
         return f"users/{slug(memory.scope().user_id)}/artifacts/"
+
+    def _file_scope() -> str:
+        """Item-archive scope partition for the current user's files (per-user search)."""
+        return f"user:{slug(memory.scope().user_id)}"
 
     @tool(
         description="Archive a file or image to the user's durable private storage for later reference.",
@@ -184,6 +211,20 @@ def build_storage_tools(store: S3Store | LocalStore, memory: MemoryManager) -> l
         except StorageError as exc:
             log_warning(f"store_file: {exc}")
             return fail(f"Could not archive the file: {exc}", StoredFileData(source_url=url))
+
+        # Index the file's name + note for meaning-based recall (no-op when the
+        # archive is off). The bytes are NOT re-stored — they live under the user's
+        # prefix above; the index just maps a query back to this reference.
+        if archive is not None:
+            index_text = " ".join(p for p in (name, note or "") if p).strip() or name
+            await asyncio.to_thread(
+                archive.persist,
+                "file",
+                reference,
+                scope=_file_scope(),
+                text=index_text,
+                metadata={"filename": name, "note": note or "", "content_type": ctype},
+            )
 
         log_info(
             f"storage: archived {reference} ('{name}', {len(data)} bytes, {ctype}) "
@@ -309,4 +350,53 @@ def build_storage_tools(store: S3Store | LocalStore, memory: MemoryManager) -> l
         )
         return ok(msg, StoredFileListData(files=entries, count=len(entries)))
 
-    return [store_file, retrieve_file, list_files]
+    @tool(
+        description="Find archived files by what they are, using a natural-language query.",
+        instructions=(
+            "Use to locate a file the user archived earlier when you don't have its reference — "
+            "search by description ('the invoice PDF', 'that cat picture'). Returns matching "
+            "references; recall one with retrieve_file. Prefer this over list_files when the user "
+            "has many files."
+        ),
+        show_result=True,
+    )
+    async def search_files(
+        query: Annotated[
+            str,
+            Field(min_length=1, description="What the file is about (name, subject, or contents)."),
+        ],
+        limit: Annotated[
+            int,
+            Field(default=5, ge=1, le=20, description="Maximum matches to return."),
+        ] = 5,
+    ) -> ToolOutput[FileSearchData]:
+        """Search the current user's archived files by meaning and return the best
+        matches with their reference ids (recall one with retrieve_file).
+
+        Use when the user describes a file they kept but you don't have its reference.
+        Matches are scoped to the current user. Empty when nothing relevant is found.
+        """
+        hits = await asyncio.to_thread(
+            archive.search, query, limit, kinds=["file"], scopes=[_file_scope()]
+        )
+        matches = [
+            FileMatch(
+                reference=h.item_id,
+                filename=h.metadata.get("filename") or None,
+                note=h.metadata.get("note") or None,
+                score=round(h.score, 4),
+            )
+            for h in hits
+        ]
+        msg = (
+            f"{len(matches)} matching file(s)."
+            if matches
+            else "No archived files matched that query."
+        )
+        return ok(msg, FileSearchData(matches=matches, count=len(matches)))
+
+    tools = [store_file, retrieve_file, list_files]
+    # The semantic search tool only works with the item archive wired in.
+    if archive is not None:
+        tools.append(search_files)
+    return tools

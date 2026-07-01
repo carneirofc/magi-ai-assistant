@@ -6,11 +6,14 @@ guidance prompt, the gateway client, and the `DiscordClient` presentation layer.
 Everything is injected — no globals, nothing constructed inside a constructor.
 """
 
+import asyncio
+
 from agno.db.base import BaseDb
 from agno.utils.log import log_info
 
 from magi.agent.model import lead_model_def
 from magi.channels.bootstrap import build_conversation_service
+from magi.channels.gateway import run_gateway
 from clients.mydiscord import DiscordClient
 from magi.core.config import config
 from magi.core.prompts import load_prompt
@@ -44,3 +47,28 @@ def build_discord_client(db: BaseDb | None = None) -> DiscordClient:
         # it (vision-only backends reject `input_audio` parts).
         supports_audio=lead_model_def().supports_audio,
     )
+
+
+def serve_with_admin(client: DiscordClient) -> None:
+    """Run the Discord gateway connection and the admin HTTP surface together in
+    one process (`config.admin_enabled`) — the alongside-admin alternative to
+    `client.serve()`.
+
+    Unlike the HTTP API channel (`channels/api.py`), Discord has no ASGI app to
+    mount the admin surface onto, so this instead starts a second uvicorn server
+    (bound to `admin_host`/`admin_port`, same as `main_admin.py` standalone) and
+    runs it concurrently with the gateway connection via `gateway.run_gateway`.
+    See ADR 0002, ADR 0003, and `admin_enabled` in `core/config.py`.
+    """
+    import uvicorn
+
+    from magi.channels.admin import build_admin_app
+
+    log_info(
+        f"discord: admin surface ALSO served at http://{config.admin_host}:{config.admin_port} "
+        "(config.admin_enabled)"
+    )
+    admin_server = uvicorn.Server(
+        uvicorn.Config(build_admin_app(), host=config.admin_host, port=config.admin_port)
+    )
+    asyncio.run(run_gateway(client.serve_async(), admin_server.serve()))

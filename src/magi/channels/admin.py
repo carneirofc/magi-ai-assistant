@@ -30,6 +30,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
+from magi.core.items import ItemArchive
 from magi.core.knowledge import (
     DocumentDetail,
     DocumentSummary,
@@ -37,6 +38,7 @@ from magi.core.knowledge import (
     Subject,
     SubjectRegistry,
 )
+from magi.core.memory.adapters import slug as _mem_slug
 from magi.core.memory.semantic import MemoryRetriever
 from magi.core.memory.store import FileMemoryStore, ScopedMemory
 
@@ -266,13 +268,15 @@ def create_admin_app(
     subjects: SubjectRegistry,
     retriever: Optional[MemoryRetriever] = None,
     auth_token: Optional[str] = None,
+    archive: Optional[ItemArchive] = None,
 ) -> FastAPI:
     """The FastAPI admin app over already-built stores (pure factory).
 
     `subjects` is the controlled-vocabulary registry; `retriever` (the semantic
     index, or None when semantic memory is off) is reset and re-indexed on a fact
-    write so recall reflects the edit. No CORS: the only caller is the server-side
-    BFF, never a browser directly.
+    write so recall reflects the edit. `archive` (the item archive, or None) keeps
+    the durable fact-sheet snapshot current on admin fact edits, matching the chat
+    path. No CORS: the only caller is the server-side BFF, never a browser directly.
     """
     app = FastAPI(title="magi-admin", version="1")
 
@@ -288,12 +292,23 @@ def create_admin_app(
 
     def _reindex_facts(mem: ScopedMemory) -> None:
         """Rebuild the user's long-term semantic slice from the current facts, so a
-        deleted/edited fact stops surfacing in recall. No-op when semantic is off."""
-        if retriever is None:
-            return
-        retriever.reset(mem.user_id, _LONG_TERM_KIND)
-        for text in mem.long_term_facts.texts():
-            retriever.index(mem.user_id, _LONG_TERM_KIND, text)
+        deleted/edited fact stops surfacing in recall, and refresh the durable
+        fact-sheet snapshot in the item archive. Each side no-ops when its backend is
+        off, so an admin fact edit stays consistent with the chat path."""
+        if retriever is not None:
+            retriever.reset(mem.user_id, _LONG_TERM_KIND)
+            for text in mem.long_term_facts.texts():
+                retriever.index(mem.user_id, _LONG_TERM_KIND, text)
+        if archive is not None:
+            path = mem.long_term_facts.path
+            data = path.read_bytes() if path.exists() else b"[]"
+            archive.persist(
+                "memory",
+                _mem_slug(mem.user_id),
+                data=data,
+                content_type="application/json",
+                metadata={"file": "long_term_facts.json", "user_id": mem.user_id},
+            )
 
     def _facts_result(mem: ScopedMemory) -> FactsResult:
         return FactsResult(facts=_facts(mem), version=mem.long_term_facts.version())
@@ -675,17 +690,23 @@ def build_admin_app() -> FastAPI:
     from pathlib import Path
 
     from magi.core.config import config
+    from magi.core.items import build_item_archive_from_config
     from magi.core.memory.semantic import build_semantic_index
 
     log_info("building admin app")
     if config.admin_auth_token is None:
         log_info("admin: auth DISABLED (ADMIN_AUTH_TOKEN not set) — keep the port unpublished")
     # Same semantic index as the chat stack (None when semantic memory is off), so
-    # an admin fact edit re-indexes the same slice the lead retrieves from.
+    # an admin fact edit re-indexes the same slice the lead retrieves from. One item
+    # archive (None unless enabled) is shared by the knowledge store and the fact
+    # endpoints, so knowledge deletes cascade to the stored original and fact edits
+    # keep the durable snapshot current.
+    archive = build_item_archive_from_config()
     return create_admin_app(
-        KnowledgeStore(),
+        KnowledgeStore(archive=archive),
         FileMemoryStore(Path(config.memory_dir)),
         SubjectRegistry(config.knowledge_subjects_path),
         retriever=build_semantic_index(),
         auth_token=config.admin_auth_token,
+        archive=archive,
     )

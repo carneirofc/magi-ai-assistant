@@ -46,7 +46,10 @@ services:
   # Operator admin API (main_admin_docker.py → channels/admin.py). Manages memory +
   # the knowledge corpus. Reuses the app image, different command. NOT published —
   # reachable only on the compose network, fronted by the `web` BFF below. Started
-  # with `--profile admin`. See ADR 0002.
+  # with `--profile admin`. See ADR 0002. Alternative for a single-operator setup
+  # that would rather not run this as its own service: set `admin_enabled=True` in
+  # the `api`/`discord` entrypoint's apply_deployment_config() and drop this
+  # service — the chat process serves /admin/v1/* itself (see the ADR addendum).
   admin-api:
     build:
       context: .

@@ -146,3 +146,23 @@ admin write paths reuse each kind's existing IO rather than inventing new ones.
 Tests follow the existing per-module pattern (`tests/test_knowledge.py`,
 `tests/test_memory*.py`, `tests/test_api.py`): list/rename/tag-filter on the store,
 concurrency-token 409 on the admin app, resolver seam on ingest.
+
+## Addendum — optional in-process admin (`admin_enabled`)
+
+Decisions #2/#19 (separate deployable, admin-api unpublished) stay the default
+and the recommended production posture. For a single-operator/dev deployment
+that would rather not run a second process, `config.admin_enabled` (off by
+default) serves the admin surface **alongside** whichever channel entrypoint is
+running, instead of via `main_admin.py`:
+
+- **HTTP API** (`channels/api.py`) — the admin app is mounted onto the same
+  FastAPI app (`app.mount("/", admin_app)`, added last so it only catches what
+  the chat API's own routes don't). One process, one port; `admin_host`/
+  `admin_port` go unused in this mode.
+- **Discord** (`channels/discord.py`) — there's no ASGI app to mount onto, so
+  `serve_with_admin` runs a second uvicorn server (on `admin_host`/`admin_port`)
+  concurrently with the gateway connection in one asyncio event loop
+  (`_run_until_first_exit`); either finishing takes the other down with it.
+
+`admin_auth_token` still gates every `/admin` route the same way regardless of
+how it's served — this only changes process topology, not the auth model.

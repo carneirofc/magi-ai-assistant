@@ -16,6 +16,7 @@ from typing import Optional
 from agno.utils.log import log_info
 
 from magi.core.config import config
+from magi.core.items import ItemArchive, build_item_archive_from_config
 from magi.core.memory.curation import CurateFn, CurationInput, CurationResult, FactOp
 from magi.core.memory.manager import MemoryManager, MemoryScope, SummarizeFn
 from magi.core.memory.semantic import MemoryRetriever, build_semantic_index
@@ -49,6 +50,7 @@ def build_memory(
     curate_fn: Optional[CurateFn] = None,
     long_term_fact_max_chars: int = 1_000,
     long_term_facts_max: int = 200,
+    archive: Optional[ItemArchive] = None,
 ) -> MemoryManager:
     """Assemble a `MemoryManager` from already-built dependencies."""
     return MemoryManager(
@@ -66,6 +68,7 @@ def build_memory(
         curate_fn=curate_fn,
         long_term_fact_max_chars=long_term_fact_max_chars,
         long_term_facts_max=long_term_facts_max,
+        archive=archive,
     )
 
 
@@ -96,4 +99,5 @@ def build_memory_from_config(
         curate_fn=curate_fn,
         long_term_fact_max_chars=config.long_term_fact_max_chars,
         long_term_facts_max=config.long_term_facts_max,
+        archive=build_item_archive_from_config(),  # None unless items_archive_enabled
     )

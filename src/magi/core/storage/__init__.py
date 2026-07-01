@@ -31,6 +31,7 @@ from magi.core.storage.s3 import (
     StorageError,
     StoredObject,
     build_s3_store_from_config,
+    s3_store_from_config,
 )
 
 __all__ = [
@@ -40,28 +41,43 @@ __all__ = [
     "StorageError",
     "StoredObject",
     "build_local_store_from_config",
+    "build_object_store",
     "build_object_store_from_config",
     "build_s3_store_from_config",
 ]
 
 
-def build_object_store_from_config() -> Optional[Union[LocalStore, S3Store]]:
-    """The configured object store, or `None` when storage is off / unbuildable.
+def build_object_store(
+    backend: Optional[str] = None,
+) -> Optional[Union[LocalStore, S3Store]]:
+    """Build the object store for `backend` (default `config.storage_backend`),
+    *ungated* by `storage_enabled`.
 
-    Dispatches on `config.storage_backend`: "local" => filesystem (always
-    buildable), "s3" => S3-compatible bucket (degrades to `None` without boto3).
-    Never raises — a misconfigured or down backend just leaves the storage tools
-    unattached so the rest of the app still boots.
+    Dispatches on the backend name: "local" => filesystem (always buildable), "s3"
+    => S3-compatible bucket (degrades to `None` without boto3). Use this when the
+    caller owns the gate (the item archive has its own flag); use
+    `build_object_store_from_config` for the model's file tools, which gate on
+    `storage_enabled`. Never raises — an unknown/down backend returns `None`.
     """
-    if not config.storage_enabled:
-        return None
-    backend = (config.storage_backend or "local").strip().lower()
-    if backend == "local":
+    name = (backend or config.storage_backend or "local").strip().lower()
+    if name == "local":
         return build_local_store_from_config()
-    if backend == "s3":
-        return build_s3_store_from_config()
+    if name == "s3":
+        return s3_store_from_config()
     log_warning(
-        f"storage: unknown storage_backend {config.storage_backend!r} "
+        f"storage: unknown storage_backend {name!r} "
         "(expected 'local' or 's3') — storage tools disabled"
     )
     return None
+
+
+def build_object_store_from_config() -> Optional[Union[LocalStore, S3Store]]:
+    """The configured object store, or `None` when storage is off / unbuildable.
+
+    Honors the model-file-archive gate (`storage_enabled`), then dispatches on
+    `config.storage_backend`. Never raises — a misconfigured or down backend just
+    leaves the storage tools unattached so the rest of the app still boots.
+    """
+    if not config.storage_enabled:
+        return None
+    return build_object_store(config.storage_backend)

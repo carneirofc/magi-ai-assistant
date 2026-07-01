@@ -31,9 +31,15 @@ from agno.utils.log import log_info, log_warning
 
 from magi.core.config import config
 from magi.core.embeddings import embed_text
+from magi.core.items import ItemArchive, build_item_archive_from_config
 from magi.core.knowledge.chunking import chunk_text
 
 GLOBAL_SCOPE = "global"
+
+# The item-archive kind tag for knowledge documents (see magi/core/items). doc_id is
+# globally unique in this store (index/delete key on it regardless of scope), so the
+# archived original is keyed by doc_id alone under the archive's global scope.
+_ARCHIVE_KIND = "knowledge"
 
 
 def _payload_tags(payload: dict) -> list[str]:
@@ -154,12 +160,17 @@ class KnowledgeStore:
         *,
         chunk_chars: Optional[int] = None,
         chunk_overlap: Optional[int] = None,
+        archive: Optional[ItemArchive] = None,
     ):
         self.collection = collection or config.knowledge_collection
         self.chunk_chars = chunk_chars if chunk_chars is not None else config.knowledge_chunk_chars
         self.chunk_overlap = (
             chunk_overlap if chunk_overlap is not None else config.knowledge_chunk_overlap
         )
+        # The "persist original + index" hook (None = off). When set, the verbatim
+        # source text is kept as a durable, re-indexable blob and a doc-level vector
+        # joins the cross-item search index on ingest; both are dropped on delete.
+        self.archive = archive
         self._client = None  # lazily built; None means "unavailable, no-op"
         self._dim: Optional[int] = None
 
@@ -269,7 +280,27 @@ class KnowledgeStore:
             log_warning(f"knowledge: upsert failed for doc {doc_id!r} ({type(exc).__name__}: {exc})")
             return 0
         log_info(f"knowledge: indexed {len(points)} chunk(s) for doc {doc_id!r} (source={source})")
+        self._archive_original(doc_id, text, source=source, title=title or source, subject=subject, tags=list(tags or []))
         return len(points)
+
+    def _archive_original(
+        self, doc_id: str, text: str, *, source: str, title: str, subject: str, tags: list[str]
+    ) -> None:
+        """Persist the verbatim source as a durable, re-indexable blob + a doc-level
+        vector via the item archive (no-op when the archive is off). The chunk
+        vectors stay in this collection; the archive holds the *original* so a
+        chunking-policy change can re-derive them — see `reindex_document`."""
+        if self.archive is None:
+            return
+        index_text = "\n".join(p for p in (title, subject, " ".join(tags)) if p).strip() or source
+        self.archive.persist(
+            _ARCHIVE_KIND,
+            doc_id,
+            data=text.encode("utf-8"),
+            text=index_text,
+            content_type="text/plain; charset=utf-8",
+            metadata={"source": source, "title": title},
+        )
 
     def delete_document(self, doc_id: str) -> bool:
         """Remove all chunks for `doc_id`. Returns whether any were removed (False
@@ -291,7 +322,37 @@ class KnowledgeStore:
             log_warning(f"knowledge: delete failed for {doc_id!r} ({type(exc).__name__}: {exc})")
             return False
         log_info(f"knowledge: deleted {len(ids)} chunk(s) for doc {doc_id!r}")
+        # Cascade to the archive so the original blob + doc vector don't outlive the
+        # chunks (no-op when the archive is off).
+        if self.archive is not None:
+            self.archive.remove(_ARCHIVE_KIND, doc_id)
         return True
+
+    def reindex_document(self, doc_id: str) -> int:
+        """Re-chunk and re-embed a document from its archived original — the payoff of
+        keeping the verbatim source in the archive. Use after a chunking-policy change
+        (chunk_chars/overlap) to refresh the index without the source file on hand.
+
+        Reads the original bytes from the archive, recovers the doc-level fields from
+        the live chunks (when still present), and re-runs `index_document` (which
+        replaces the prior chunks). Returns the new chunk count, or 0 when the archive
+        is off / the original is absent. See `magi/core/items`."""
+        if self.archive is None:
+            return 0
+        data = self.archive.read_bytes(_ARCHIVE_KIND, doc_id)
+        if data is None:
+            log_warning(f"knowledge: no archived original for {doc_id!r} — cannot reindex")
+            return 0
+        detail = self.get_document(doc_id)
+        text = data.decode("utf-8", "replace")
+        return self.index_document(
+            doc_id,
+            text,
+            source=detail.source if detail else doc_id,
+            title=detail.title if detail else doc_id,
+            subject=detail.subject if detail else "",
+            tags=detail.tags if detail else [],
+        )
 
     def tag_document(
         self, doc_id: str, *, add: Sequence[str] = (), remove: Sequence[str] = ()
@@ -692,11 +753,14 @@ class KnowledgeStore:
 
 
 def build_knowledge_from_config() -> Optional[KnowledgeStore]:
-    """Construct the store when enabled in config, else None (feature off)."""
+    """Construct the store when enabled in config, else None (feature off).
+
+    Attaches the item archive when `items_archive_enabled` so ingests keep a durable,
+    re-indexable original alongside the chunk index (no-op otherwise)."""
     if not config.knowledge_enabled:
         return None
     log_info(
         f"knowledge: ENABLED (qdrant={config.qdrant_url}, collection={config.knowledge_collection}, "
         f"embed={config.embedding_model_id}, top_k={config.knowledge_top_k})"
     )
-    return KnowledgeStore()
+    return KnowledgeStore(archive=build_item_archive_from_config())

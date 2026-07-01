@@ -74,7 +74,17 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, model_validator
 
+from magi.channels.gateway import scoped_user_id
 from magi.core.conversation import ConversationDelta, ConversationReply, ConversationService
+
+# This channel's namespace for `scoped_user_id` (ADR 0003) — the native
+# contract and the OpenAI-compatible shim below are one transport/platform,
+# so both share it.
+_PLATFORM = "api"
+
+
+def _scoped(user_id: str) -> str:
+    return scoped_user_id(_PLATFORM, user_id)
 
 
 # --- wire format (the public contract; version it, don't break it) -----------
@@ -391,12 +401,15 @@ def create_app(
     *,
     cors_origins: Optional[Sequence[str]] = None,
     mcp_toolkits: Optional[Sequence[MCPConnection]] = None,
+    admin_app: Optional[FastAPI] = None,
 ) -> FastAPI:
     """The FastAPI app over an already-built `ConversationService` (pure factory).
 
     `cors_origins`: web origins allowed to call /v1 from a browser (empty/None =
     no CORS headers). `mcp_toolkits`: agno MCP toolkits to connect at startup and
-    close at shutdown (empty/None = none) — see `_mcp_lifespan`.
+    close at shutdown (empty/None = none) — see `_mcp_lifespan`. `admin_app`, when
+    given, is mounted onto this same app (see `config.admin_enabled` / ADR 0002)
+    so one process/port serves both the chat API and the admin surface.
     """
     app = FastAPI(title="chatbot", version="1", lifespan=_mcp_lifespan(mcp_toolkits or ()))
 
@@ -433,7 +446,7 @@ def create_app(
     )
     async def post_message(session_id: str, body: MessageRequest) -> MessageReply:
         reply = await conversation.handle(
-            user_id=body.user_id,
+            user_id=_scoped(body.user_id),
             session_id=session_id,
             text=body.text,
             media=_inbound_media(body.images),
@@ -451,7 +464,7 @@ def create_app(
 
         async def events():
             async for item in conversation.handle_stream(
-                user_id=body.user_id, session_id=session_id, text=body.text, media=media
+                user_id=_scoped(body.user_id), session_id=session_id, text=body.text, media=media
             ):
                 if isinstance(item, ConversationDelta):
                     yield _sse("delta", {"text": item.text})
@@ -471,11 +484,11 @@ def create_app(
         dependencies=[Depends(require_auth)],
     )
     def post_flush(session_id: str, body: FlushRequest) -> FlushReply:
-        return FlushReply(dropped_turns=conversation.flush(body.user_id, session_id))
+        return FlushReply(dropped_turns=conversation.flush(_scoped(body.user_id), session_id))
 
     @app.get("/v1/sessions/{session_id}/context", dependencies=[Depends(require_auth)])
     def get_context(session_id: str, user_id: str = Query(min_length=1)) -> dict:
-        return conversation.context_stats(user_id, session_id)
+        return conversation.context_stats(_scoped(user_id), session_id)
 
     # --- OpenAI-compatible shim -------------------------------------------
     @app.get("/v1/models", dependencies=[Depends(require_auth)])
@@ -510,6 +523,7 @@ def create_app(
             )
         user_id = x_user_id or body.user or "openai"
         session_id = x_session_id or _derive_session_id(body.messages, user_id)
+        user_id = _scoped(user_id)
         media = {"images": images} if images else {}
         model = body.model or _OPENAI_MODEL_ID
         created = int(time.time())
@@ -566,6 +580,13 @@ def create_app(
             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
         )
 
+    if admin_app is not None:
+        # Mounted at "/" LAST so it only catches what the routes above don't —
+        # i.e. everything under /admin/... — the same fallback-mount pattern used
+        # to serve an SPA behind an API. One process, one port; admin_host/
+        # admin_port are unused in this mode (see config.admin_enabled).
+        app.mount("/", admin_app)
+
     return app
 
 
@@ -602,10 +623,46 @@ def build_api_app(db: Optional[BaseDb] = None) -> FastAPI:
         log_info("api: auth DISABLED (API_AUTH_TOKEN not set) — keep the bind local")
     if config.api_cors_origins:
         log_info(f"api: CORS enabled for origins {config.api_cors_origins}")
+
+    admin_app = None
+    if config.admin_enabled:
+        from magi.channels.admin import build_admin_app
+
+        log_info("api: admin surface ALSO mounted on this app, under /admin/v1/* (config.admin_enabled)")
+        admin_app = build_admin_app()
+
     return create_app(
         conversation,
         auth_token=config.api_auth_token,
         cors_origins=config.api_cors_origins,
         # Seanime-over-MCP is the only MCP member today; connect it at startup.
         mcp_toolkits=_collect_mcp_toolkits(conversation.runner),
+        admin_app=admin_app,
     )
+
+
+class ApiAdapter:
+    """This channel as a `gateway.PlatformAdapter` (ADR 0003) — lets the HTTP
+    API be run through `gateway.run_gateway` alongside another adapter in one
+    process, the same role `DiscordClient` already plays. Additive: `main_api.py`
+    keeps calling `uvicorn.run(build_api_app(), ...)` directly; nothing requires
+    switching to this.
+    """
+
+    platform: str = _PLATFORM
+
+    def __init__(self, app: FastAPI, host: str, port: int) -> None:
+        import uvicorn
+
+        self._server = uvicorn.Server(uvicorn.Config(app, host=host, port=port))
+
+    async def serve_async(self) -> None:
+        await self._server.serve()
+
+
+def build_api_adapter(db: Optional[BaseDb] = None) -> ApiAdapter:
+    """Composition root for the `PlatformAdapter` form — wraps `build_api_app`,
+    it does not reimplement it, so the two stay in lockstep."""
+    from magi.core.config import config
+
+    return ApiAdapter(build_api_app(db), host=config.api_host, port=config.api_port)

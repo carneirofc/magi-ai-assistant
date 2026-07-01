@@ -64,7 +64,7 @@ def test_post_message_runs_a_turn_and_returns_the_reply():
     assert resp.json() == {
         "text": "the answer", "reasoning": None, "is_error": False, "media": [],
     }
-    assert conversation.calls == [("handle", "u1", "win-1", "hi")]
+    assert conversation.calls == [("handle", "api:u1", "win-1", "hi")]
 
 
 def test_reply_media_is_serialized_on_the_wire():
@@ -133,7 +133,7 @@ def test_stream_emits_deltas_then_done():
         ("delta", {"text": "answer"}),
         ("done", {"text": "the answer", "reasoning": None, "is_error": False, "media": []}),
     ]
-    assert conversation.calls == [("handle_stream", "u1", "win-1", "hi")]
+    assert conversation.calls == [("handle_stream", "api:u1", "win-1", "hi")]
 
 
 def test_stream_requires_bearer_token_when_configured():
@@ -154,7 +154,7 @@ def test_flush_closes_the_session():
 
     assert resp.status_code == 200
     assert resp.json() == {"dropped_turns": 7}
-    assert conversation.calls == [("flush", "u1", "win-1")]
+    assert conversation.calls == [("flush", "api:u1", "win-1")]
 
 
 def test_context_stats_passthrough():
@@ -164,7 +164,7 @@ def test_context_stats_passthrough():
 
     assert resp.status_code == 200
     assert resp.json()["est_tokens"] == 42
-    assert conversation.calls == [("context_stats", "u1", "win-1")]
+    assert conversation.calls == [("context_stats", "api:u1", "win-1")]
 
 
 def test_v1_requires_bearer_token_when_configured():
@@ -266,6 +266,48 @@ def test_mcp_connect_failure_does_not_crash_startup():
         assert resp.status_code == 200
 
 
+# --- Admin surface mounted alongside (config.admin_enabled) ------------------
+def test_admin_app_not_mounted_by_default():
+    """Without `admin_app`, nothing falls through — an unknown path 404s same as
+    any other app, it doesn't accidentally reach an admin surface."""
+    client, _ = _client()
+    assert client.get("/admin/v1/knowledge/documents").status_code == 404
+
+
+def test_admin_app_is_reachable_through_the_merged_app_when_given():
+    """`admin_app`, when given, is mounted so its own routes are reachable
+    through the SAME app/port — one process for both surfaces."""
+    from fastapi import FastAPI
+
+    admin = FastAPI()
+
+    @admin.get("/admin/v1/ping")
+    def _ping() -> dict:
+        return {"admin": "pong"}
+
+    app = create_app(_FakeConversation(), admin_app=admin)
+    client = TestClient(app)
+
+    assert client.get("/admin/v1/ping").json() == {"admin": "pong"}
+
+
+def test_api_own_routes_take_priority_over_the_mounted_admin_app():
+    """A path the api app itself defines (e.g. /healthz) is never shadowed by the
+    mounted admin app, even if the admin app defines the same path."""
+    from fastapi import FastAPI
+
+    admin = FastAPI()
+
+    @admin.get("/healthz")
+    def _admin_healthz() -> dict:
+        return {"status": "admin-should-not-win"}
+
+    app = create_app(_FakeConversation(), admin_app=admin)
+    client = TestClient(app)
+
+    assert client.get("/healthz").json() == {"status": "ok"}
+
+
 # --- OpenAI-compatible shim (stock chat UIs) ---------------------------------
 def test_models_advertises_one_model():
     client, _ = _client()
@@ -351,7 +393,7 @@ def test_chat_completions_scopes_user_from_field_and_header():
 
     client.post("/v1/chat/completions", json={"user": "field-user", "messages": [
         {"role": "user", "content": "hi"}]})
-    assert conversation.calls[0][1] == "field-user"
+    assert conversation.calls[0][1] == "api:field-user"
 
     conversation.calls.clear()
     client.post(
@@ -359,7 +401,17 @@ def test_chat_completions_scopes_user_from_field_and_header():
         json={"user": "field-user", "messages": [{"role": "user", "content": "hi"}]},
         headers={"X-User-Id": "header-user"},
     )
-    assert conversation.calls[0][1] == "header-user"  # header wins
+    assert conversation.calls[0][1] == "api:header-user"  # header wins
+
+
+def test_chat_completions_defaults_user_to_openai_when_unset():
+    """No `user` field and no `X-User-Id` header: falls back to the constant
+    "openai", still namespaced under the api platform."""
+    client, conversation = _client()
+
+    client.post("/v1/chat/completions", json={"messages": [{"role": "user", "content": "hi"}]})
+
+    assert conversation.calls[0][1] == "api:openai"
 
 
 def test_chat_completions_rejects_no_user_message():

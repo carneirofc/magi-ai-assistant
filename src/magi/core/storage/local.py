@@ -124,6 +124,15 @@ class LocalStore:
         except StorageError:
             return False
 
+    def delete_bytes(self, key: str) -> None:
+        """Remove the blob at `key` and its sidecar (idempotent — absent is fine)."""
+        path = self._path(key)
+        try:
+            path.unlink(missing_ok=True)
+            self._meta_path(path).unlink(missing_ok=True)
+        except OSError as exc:
+            raise StorageError(f"delete failed for {key!r}: {exc}") from exc
+
     def presigned_url(self, key: str, *, expires_in: int | None = None) -> str:
         """A `file://` URL to the on-disk path (no signing server for local).
 

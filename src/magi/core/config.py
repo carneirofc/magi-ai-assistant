@@ -9,7 +9,7 @@ prints the effective values at runtime.
 
 Only *secrets* come from the environment / `.env` (tokens and API keys never
 belong in code): DISCORD_BOT_TOKEN, LITELLM_MASTER_KEY, LLAMACPP_API_KEY,
-QDRANT_API_KEY, API_AUTH_TOKEN.
+OPENAI_API_KEY, QDRANT_API_KEY, API_AUTH_TOKEN.
 """
 
 import os
@@ -53,8 +53,19 @@ class Config:
     # Only used by the direct-Ollama builder (dormant fallback).
     ollama_host: str = "http://localhost:11434"
 
+    # --- Generic OpenAI-compatible remote serving endpoint. Point this at any
+    # hosted model server that speaks the OpenAI /v1 API — real OpenAI, OpenRouter,
+    # Together, Fireworks, a remote vLLM / llama-server, … — and select it with
+    # `model_provider="openai"`. Differs from `litellm` (which routes through our
+    # own proxy) and `llamacpp` (a local server) only in where it points; the same
+    # endpoint can also serve embeddings (see `embeddings_provider`). The key is a
+    # secret; the base URL lives here in code. ---
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_api_key: str | None = _secret("OPENAI_API_KEY")
+
     # --- Models. Which builder serves the roles: `litellm` (proxy gateway),
-    # `llamacpp` (direct to llamacpp_base_url), or `ollama` (dormant). ---
+    # `llamacpp` (direct to llamacpp_base_url), `openai` (a remote OpenAI-compatible
+    # server at openai_base_url), or `ollama` (dormant). ---
     model_provider: str = "litellm"
     # Lead / router brain. For the proxy the id is a litellm model_name
     # (litellm.config.yaml); for direct llama-server it is cosmetic.
@@ -161,6 +172,13 @@ class Config:
     # instance) before turning on. ---
     semantic_memory: bool = False
     embedding_model_id: str = "nomic-embed-text"
+    # Where embeddings are served, independent of the chat backend: `litellm`
+    # (default — through our proxy, the historical path) or `openai` (a remote
+    # OpenAI-compatible endpoint at openai_base_url / openai_api_key). Lets a
+    # deployment run chat on a local llama-server while sourcing embeddings from a
+    # remote model — llama-server serves only one model per instance, so semantic
+    # memory + knowledge otherwise need a second local instance.
+    embeddings_provider: str = "litellm"  # "litellm" | "openai"
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str | None = _secret("QDRANT_API_KEY")
     semantic_top_k: int = 5
@@ -215,6 +233,20 @@ class Config:
     # too large to attach inline.
     s3_presign_expiry: int = 3600
 
+    # --- Item archive (see magi/core/items). The "persist original + index" hook
+    # shared by the admin-managed items — knowledge documents, durable memory facts,
+    # and stored files. On a write it keeps the item's *canonical bytes* in the
+    # object store (the source of truth, re-indexable) AND a *searchable vector* in a
+    # Qdrant collection; on delete it drops both, so the byte original and the search
+    # index never drift. It pairs the object-store backend (config.storage_backend +
+    # s3_*/storage_local_dir above) with Qdrant (config.qdrant_url) — but is gated by
+    # its OWN flag, independent of storage_enabled / semantic_memory, so an operator
+    # can turn durable item archival on without enabling the model's file tools or
+    # semantic recall. Off by default; degrades to a no-op when the object store or
+    # Qdrant is unreachable (item writes must never break a chat or an ingest). ---
+    items_archive_enabled: bool = False
+    items_collection: str = "chatbot_items"
+
     # --- Seanime media server (magi/agent/tools/seanime). A dedicated client with a
     # fixed base URL — the model never chooses the host, so the http-tool SSRF
     # guard doesn't apply here. Token only needed when the server has a password
@@ -250,14 +282,27 @@ class Config:
     api_cors_origins: list[str] = field(default_factory=list)
 
     # --- Admin service (magi/channels/admin). An operator-only tool to view and
-    # manage memory + organize the knowledge corpus — a SEPARATE deployable from
-    # the chat API, so its write-capable surface never rides the public brain. See
-    # ADR 0002. Reached only through the Next.js BFF (web/), which holds the token
-    # server-side; bind localhost / keep the port unpublished. admin_auth_token
-    # (secret) gates every /admin route with `Authorization: Bearer`. ---
+    # manage memory + organize the knowledge corpus. ADR 0002's default is a
+    # SEPARATE deployable (main_admin.py) fronted by the Next.js BFF (web/), which
+    # holds the token server-side — keeps the write-capable surface off the public
+    # brain entirely. Reached only through the BFF; bind localhost / keep the port
+    # unpublished. admin_auth_token (secret) gates every /admin route with
+    # `Authorization: Bearer` regardless of how it's served. ---
     admin_host: str = "127.0.0.1"
     admin_port: int = 8100
     admin_auth_token: str | None = _secret("ADMIN_AUTH_TOKEN")
+    # Opt-in convenience for a single-operator/dev deployment that doesn't want a
+    # second process: serve the admin surface ALONGSIDE this entrypoint's own
+    # transport instead of running main_admin.py separately.
+    #   - HTTP API channel (channels/api.py) — mounted onto the SAME FastAPI app,
+    #     so it rides api_host:api_port; admin_host/admin_port are unused here.
+    #   - Discord channel (channels/discord.py) — there's no ASGI app to mount
+    #     onto, so a second uvicorn server is started on admin_host:admin_port,
+    #     running concurrently with the gateway connection in one process (see
+    #     `channels.discord.serve_with_admin`).
+    # Off by default — ADR 0002's separate-process posture stays the recommended
+    # production setup either way; this doesn't change auth or the bind defaults.
+    admin_enabled: bool = False
 
     def log_settings(self) -> None:
         """Dump the effective config to the console (secrets masked).
@@ -266,7 +311,7 @@ class Config:
         backend urls, model ids, context windows, paths — in one place.
         """
         # Secrets that must never hit the log verbatim.
-        masked = {"litellm_api_key", "llamacpp_api_key", "DISCORD_BOT_TOKEN", "qdrant_api_key", "api_auth_token", "admin_auth_token", "seanime_token", "s3_access_key_id", "s3_secret_access_key"}
+        masked = {"litellm_api_key", "llamacpp_api_key", "openai_api_key", "DISCORD_BOT_TOKEN", "qdrant_api_key", "api_auth_token", "admin_auth_token", "seanime_token", "s3_access_key_id", "s3_secret_access_key"}
         # Long prose: log the length, not the body.
         prose = {"system_prompt", "persona_seed"}
 

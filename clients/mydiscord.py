@@ -24,6 +24,7 @@ from agno.media import Audio, File, Image, Video
 from agno.utils.log import log_info, log_warning
 
 from clients.chunking import DISCORD_MESSAGE_LIMIT, chunk
+from magi.channels.gateway import scoped_user_id
 from magi.core.conversation import ConversationReply, ConversationService
 from magi.core.discord_context import (
     DiscordRunContext,
@@ -113,6 +114,10 @@ class RequiresConfirmationView(discord.ui.View):
 
 
 class DiscordClient:
+    # The gateway's namespace for this adapter's user ids (see
+    # magi.channels.gateway.scoped_user_id / PlatformAdapter, ADR 0003).
+    platform: str = "discord"
+
     def __init__(
         self,
         conversation: ConversationService,
@@ -213,7 +218,7 @@ class DiscordClient:
                 token = set_current_discord_context(run_context)
                 try:
                     reply = await self.conversation.handle(
-                        user_id=message_user_id,
+                        user_id=scoped_user_id(self.platform, message_user_id),
                         session_id=session_id,
                         text=message_text,
                         media=media,
@@ -452,7 +457,7 @@ class DiscordClient:
 
         if cmd in ("flush", "reset", "clear"):
             log_info(f"command !{cmd} from user={user_id} session={session_id}")
-            dropped = self.conversation.flush(user_id, session_id)
+            dropped = self.conversation.flush(scoped_user_id(self.platform, user_id), session_id)
             await channel.send(
                 f"🧹 Cleared **{dropped}** turn(s) of short-term history for this chat. "
                 "Long-term memory and past episodes are kept."
@@ -461,7 +466,7 @@ class DiscordClient:
 
         if cmd in ("ctx", "context"):
             log_info(f"command !{cmd} from user={user_id} session={session_id}")
-            st = self.conversation.context_stats(user_id, session_id)
+            st = self.conversation.context_stats(scoped_user_id(self.platform, user_id), session_id)
             sec = st["sections"]
             await channel.send(
                 f"📊 Context **~{st['est_tokens']} tok** ({st['ratio']:.0%} of {st['budget_tokens']})\n"
@@ -669,5 +674,16 @@ class DiscordClient:
 
     def serve(self) -> None:
         """Connect to the gateway and block until shutdown."""
+        asyncio.run(self.serve_async())
+
+    async def serve_async(self) -> None:
+        """Connect to the gateway and run until shutdown (the coroutine form of
+        `serve()`, for composing with another async service in the same process —
+        see `channels.discord.serve_with_admin`). Mirrors what `discord.Client.run`
+        does under the hood (`async with client: await client.start(token)`), plus
+        the same default logging setup `run()` gives you for free.
+        """
+        discord.utils.setup_logging()
         log_info("starting discord client (connecting to gateway)...")
-        self.client.run(self.token)
+        async with self.client:
+            await self.client.start(self.token)
