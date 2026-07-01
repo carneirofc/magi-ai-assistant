@@ -64,7 +64,7 @@ def test_post_message_runs_a_turn_and_returns_the_reply():
     assert resp.json() == {
         "text": "the answer", "reasoning": None, "is_error": False, "media": [],
     }
-    assert conversation.calls == [("handle", "u1", "win-1", "hi")]
+    assert conversation.calls == [("handle", "api:u1", "win-1", "hi")]
 
 
 def test_reply_media_is_serialized_on_the_wire():
@@ -133,7 +133,7 @@ def test_stream_emits_deltas_then_done():
         ("delta", {"text": "answer"}),
         ("done", {"text": "the answer", "reasoning": None, "is_error": False, "media": []}),
     ]
-    assert conversation.calls == [("handle_stream", "u1", "win-1", "hi")]
+    assert conversation.calls == [("handle_stream", "api:u1", "win-1", "hi")]
 
 
 def test_stream_requires_bearer_token_when_configured():
@@ -154,7 +154,7 @@ def test_flush_closes_the_session():
 
     assert resp.status_code == 200
     assert resp.json() == {"dropped_turns": 7}
-    assert conversation.calls == [("flush", "u1", "win-1")]
+    assert conversation.calls == [("flush", "api:u1", "win-1")]
 
 
 def test_context_stats_passthrough():
@@ -164,7 +164,7 @@ def test_context_stats_passthrough():
 
     assert resp.status_code == 200
     assert resp.json()["est_tokens"] == 42
-    assert conversation.calls == [("context_stats", "u1", "win-1")]
+    assert conversation.calls == [("context_stats", "api:u1", "win-1")]
 
 
 def test_v1_requires_bearer_token_when_configured():
@@ -351,7 +351,7 @@ def test_chat_completions_scopes_user_from_field_and_header():
 
     client.post("/v1/chat/completions", json={"user": "field-user", "messages": [
         {"role": "user", "content": "hi"}]})
-    assert conversation.calls[0][1] == "field-user"
+    assert conversation.calls[0][1] == "api:field-user"
 
     conversation.calls.clear()
     client.post(
@@ -359,7 +359,17 @@ def test_chat_completions_scopes_user_from_field_and_header():
         json={"user": "field-user", "messages": [{"role": "user", "content": "hi"}]},
         headers={"X-User-Id": "header-user"},
     )
-    assert conversation.calls[0][1] == "header-user"  # header wins
+    assert conversation.calls[0][1] == "api:header-user"  # header wins
+
+
+def test_chat_completions_defaults_user_to_openai_when_unset():
+    """No `user` field and no `X-User-Id` header: falls back to the constant
+    "openai", still namespaced under the api platform."""
+    client, conversation = _client()
+
+    client.post("/v1/chat/completions", json={"messages": [{"role": "user", "content": "hi"}]})
+
+    assert conversation.calls[0][1] == "api:openai"
 
 
 def test_chat_completions_rejects_no_user_message():
