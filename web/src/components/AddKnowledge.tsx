@@ -6,13 +6,28 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import {
+  OutlineButton,
+  SelectInput,
+  StatusMessage,
+  SurfacePanel,
+  TagSelect,
+  TextAreaInput,
+  TextInput,
+} from "@carneirofc/ui";
 
-export function AddKnowledge({ subjects }: { subjects: { id: string; name: string }[] }) {
+export function AddKnowledge({
+  subjects,
+  allTags = [],
+}: {
+  subjects: { id: string; name: string }[];
+  allTags?: string[];
+}) {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
   const [subject, setSubject] = useState("");
-  const [tags, setTags] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,12 +47,7 @@ export function AddKnowledge({ subjects }: { subjects: { id: string; name: strin
     const res = await fetch("/api/admin/ingest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title,
-        text,
-        subject,
-        tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
-      }),
+      body: JSON.stringify({ title, text, subject, tags }),
     });
     setBusy(false);
     if (res.ok) {
@@ -49,68 +59,87 @@ export function AddKnowledge({ subjects }: { subjects: { id: string; name: strin
       );
       setTitle("");
       setText("");
-      setTags("");
+      setTags([]);
       router.refresh();
     } else {
       setError(res.status === 422 ? "Unknown subject." : `Failed (${res.status}).`);
     }
   }
 
-  const field = {
-    width: "100%",
-    padding: "0.5rem 0.7rem",
-    background: "#15171b",
-    color: "var(--fg)",
-    border: "1px solid var(--border)",
-    borderRadius: 6,
-    marginBottom: "0.6rem",
-  } as const;
-
   return (
-    <form onSubmit={submit} style={{ maxWidth: 640 }}>
-      <input
-        aria-label="Title"
-        placeholder="Title"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        style={field}
-        required
-      />
-      <div style={{ marginBottom: "0.6rem" }}>
-        <input type="file" accept=".md,.markdown,.txt,.rst,.text" onChange={onFile} />
-        <span className="muted"> or paste below</span>
-      </div>
-      <textarea
-        aria-label="Text"
-        placeholder="Paste document text…"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        rows={10}
-        style={{ ...field, fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}
-        required
-      />
-      <div style={{ display: "flex", gap: "0.6rem" }}>
-        <select value={subject} onChange={(e) => setSubject(e.target.value)} style={{ ...field, width: "auto" }}>
-          <option value="">— subject —</option>
-          {subjects.map((s) => (
-            <option key={s.id} value={s.name}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-        <input
-          aria-label="Tags"
-          placeholder="tags, comma, separated"
-          value={tags}
-          onChange={(e) => setTags(e.target.value)}
-          style={field}
-        />
-      </div>
-      <button type="submit" disabled={busy || !title.trim() || !text.trim()}>
-        {busy ? "Adding…" : "Add document"}
-      </button>
-      {msg ? <p className="muted">{msg}</p> : null}
-      {error ? <p className="error">{error}</p> : null}
-    </form>
+    <SurfacePanel tone="soft" padding="lg" className="max-w-2xl">
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <label className="flex flex-col gap-1">
+          <span className="ui-text-label-sm text-[color:var(--ui-ink-accent)]">Title</span>
+          <TextInput
+            placeholder="Document title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            required
+          />
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="ui-text-label-sm text-[color:var(--ui-ink-accent)]">Content</span>
+          <span className="text-ui-xs text-[color:var(--ui-ink-subtle)]">
+            Upload a text file, or paste below.
+          </span>
+          <input
+            type="file"
+            accept=".md,.markdown,.txt,.rst,.text"
+            onChange={onFile}
+            className="text-ui-xs text-[color:var(--ui-ink-muted)] file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-ui-strong file:bg-panel file:px-3 file:py-1.5 file:text-ui-xs"
+          />
+          <TextAreaInput
+            placeholder="Paste document text…"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={12}
+            className="font-mono text-ui-xs"
+            required
+          />
+        </label>
+
+        <div className="flex flex-col gap-4 sm:flex-row">
+          <label className="flex flex-col gap-1">
+            <span className="ui-text-label-sm text-[color:var(--ui-ink-accent)]">Subject</span>
+            <SelectInput value={subject} onChange={(e) => setSubject(e.target.value)}>
+              <option value="">— none —</option>
+              {subjects.map((s) => (
+                <option key={s.id} value={s.name}>
+                  {s.name}
+                </option>
+              ))}
+            </SelectInput>
+          </label>
+          <label className="flex flex-1 flex-col gap-1">
+            <span className="ui-text-label-sm text-[color:var(--ui-ink-accent)]">Tags</span>
+            <TagSelect value={tags} onChange={setTags} suggestions={allTags} placeholder="add tag…" />
+          </label>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <OutlineButton
+            type="submit"
+            variant="accent"
+            controlSize="lg"
+            disabled={busy || !title.trim() || !text.trim()}
+          >
+            {busy ? "Adding…" : "Add document"}
+          </OutlineButton>
+        </div>
+
+        {msg ? (
+          <StatusMessage role="status" tone="success">
+            {msg}
+          </StatusMessage>
+        ) : null}
+        {error ? (
+          <StatusMessage role="alert" tone="error">
+            {error}
+          </StatusMessage>
+        ) : null}
+      </form>
+    </SurfacePanel>
   );
 }

@@ -75,6 +75,12 @@ services:
   web:
     build:
       context: ./web
+      secrets:
+        # The BFF depends on @carneirofc/ui (GitHub Packages) — the build needs a
+        # read:packages token. Export NODE_AUTH_TOKEN before `up --build`; it is
+        # passed as a build secret so it never lands in an image layer. See
+        # web/README.md "Installing @carneirofc/ui".
+        - node_auth_token
     image: magi-admin-web:local
     container_name: magi-admin-web
     restart: unless-stopped
@@ -107,3 +113,9 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/app/data
+
+# Build secret for the `web` image: the read:packages token used to install
+# @carneirofc/ui. Sourced from the NODE_AUTH_TOKEN env var at build time.
+secrets:
+  node_auth_token:
+    environment: NODE_AUTH_TOKEN

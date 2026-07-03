@@ -5,10 +5,12 @@
 // version; relays 409 (changed elsewhere) and 422 (invalid JSON shape).
 
 import { useState } from "react";
+import { OutlineButton, StatusMessage, TextAreaInput } from "@carneirofc/ui";
 
 export function RawFileEditor({
   kind,
   label,
+  description,
   userId,
   sessionId,
   initialContent,
@@ -16,6 +18,7 @@ export function RawFileEditor({
 }: {
   kind: string;
   label: string;
+  description?: string;
   userId?: string;
   sessionId?: string;
   initialContent: string;
@@ -23,21 +26,26 @@ export function RawFileEditor({
 }) {
   const [content, setContent] = useState(initialContent);
   const [version, setVersion] = useState(initialVersion);
+  const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function save() {
     setError(null);
     setSaved(false);
+    setBusy(true);
     const res = await fetch("/api/admin/raw-file", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind, userId, sessionId, content, expectedVersion: version }),
     });
+    setBusy(false);
     if (res.ok) {
       const data = (await res.json()) as { version: string };
       setVersion(data.version);
       setSaved(true);
+      setDirty(false);
       return;
     }
     if (res.status === 409) setError("Changed elsewhere since you loaded — reload.");
@@ -45,33 +53,42 @@ export function RawFileEditor({
     else setError(`Save failed (${res.status}).`);
   }
 
+  const rows = Math.min(24, Math.max(4, content.split("\n").length + 1));
+
   return (
-    <section>
-      <h2>{label}</h2>
-      <textarea
+    <div className="flex flex-col gap-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <div>
+          <h2 className="text-ui-md font-semibold">{label}</h2>
+          {description ? (
+            <p className="text-ui-xs text-[color:var(--ui-ink-subtle)]">{description}</p>
+          ) : null}
+        </div>
+      </div>
+      <TextAreaInput
         value={content}
         onChange={(e) => {
           setContent(e.target.value);
+          setDirty(true);
           setSaved(false);
         }}
-        rows={Math.min(20, Math.max(4, content.split("\n").length + 1))}
+        rows={rows}
         spellCheck={false}
-        style={{
-          width: "100%",
-          fontFamily: "ui-monospace, monospace",
-          fontSize: "0.85rem",
-          background: "#15171b",
-          color: "var(--fg)",
-          border: "1px solid var(--border)",
-          borderRadius: 6,
-          padding: "0.6rem",
-        }}
+        className="font-mono text-ui-xs"
       />
-      <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", marginTop: "0.4rem" }}>
-        <button onClick={save}>Save</button>
-        {saved ? <span className="muted">Saved.</span> : null}
-        {error ? <span className="error">{error}</span> : null}
+      <div className="flex items-center gap-3">
+        <OutlineButton variant="accent" controlSize="md" onClick={save} disabled={busy || !dirty}>
+          {busy ? "Saving…" : "Save"}
+        </OutlineButton>
+        {saved ? (
+          <span className="text-ui-xs text-[color:var(--status-success-text)]">Saved.</span>
+        ) : null}
       </div>
-    </section>
+      {error ? (
+        <StatusMessage role="alert" tone="error">
+          {error}
+        </StatusMessage>
+      ) : null}
+    </div>
   );
 }

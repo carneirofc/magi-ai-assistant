@@ -6,9 +6,14 @@
 
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app
-COPY package.json package-lock.json* ./
+# .npmrc scopes @carneirofc/* to GitHub Packages, which needs a read:packages
+# token. Pass it as a build secret so it never lands in an image layer:
+#   docker build --secret id=node_auth_token,env=NODE_AUTH_TOKEN ...
+COPY package.json package-lock.json* .npmrc ./
 # Use the lockfile when present; fall back to a plain install otherwise.
-RUN npm ci 2>/dev/null || npm install
+RUN --mount=type=secret,id=node_auth_token \
+    NODE_AUTH_TOKEN="$(cat /run/secrets/node_auth_token 2>/dev/null || true)" \
+    sh -c 'npm ci 2>/dev/null || npm install'
 
 FROM node:22-bookworm-slim AS build
 WORKDIR /app

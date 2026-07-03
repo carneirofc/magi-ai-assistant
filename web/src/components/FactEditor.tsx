@@ -1,11 +1,23 @@
 "use client";
 
-// Per-fact CRUD on a user's curated profile. Holds the optimistic-concurrency
-// version locally and advances it from each write's response, so consecutive edits
-// don't 409 against themselves; a real conflict (the curator wrote meanwhile)
-// surfaces as a 409 prompt to reload.
+// Per-fact CRUD on a user's curated profile, rendered as mem0-style memory cards.
+// Holds the optimistic-concurrency version locally and advances it from each
+// write's response, so consecutive edits don't 409 against themselves; a real
+// conflict (the curator wrote meanwhile) surfaces as a 409 prompt to reload.
 
 import { useState } from "react";
+import {
+  ConfirmationDialog,
+  EditIcon,
+  EmptyState,
+  OutlineButton,
+  PlusIcon,
+  StatusMessage,
+  SurfacePanel,
+  TextAreaInput,
+  TextInput,
+  TrashIcon,
+} from "@carneirofc/ui";
 
 type Fact = { id: string; text: string; ts: string };
 
@@ -21,15 +33,21 @@ export function FactEditor({
   const [facts, setFacts] = useState(initialFacts);
   const [version, setVersion] = useState(initialVersion);
   const [draft, setDraft] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<Fact | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function send(method: string, payload: object): Promise<boolean> {
     setError(null);
+    setBusy(true);
     const res = await fetch("/api/admin/facts", {
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId, expectedVersion: version, ...payload }),
     });
+    setBusy(false);
     if (res.ok) {
       const data = (await res.json()) as { facts: Fact[]; version: string };
       setFacts(data.facts);
@@ -46,58 +64,125 @@ export function FactEditor({
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
-    if (await send("POST", { text: draft })) setDraft("");
+    if (!draft.trim()) return;
+    if (await send("POST", { text: draft.trim() })) setDraft("");
   }
 
-  async function edit(f: Fact) {
-    const next = prompt("Edit fact:", f.text);
-    if (next && next !== f.text) await send("PATCH", { factId: f.id, text: next });
+  function startEdit(f: Fact) {
+    setEditingId(f.id);
+    setEditText(f.text);
   }
 
-  async function remove(f: Fact) {
-    if (confirm(`Delete fact "${f.text}"?`)) await send("DELETE", { factId: f.id });
+  async function saveEdit(f: Fact) {
+    const next = editText.trim();
+    if (next && next !== f.text) {
+      if (!(await send("PATCH", { factId: f.id, text: next }))) return;
+    }
+    setEditingId(null);
   }
 
   return (
-    <section>
-      <h2>Profile facts</h2>
+    <div className="flex flex-col gap-4">
+      <form onSubmit={add} className="flex flex-col gap-2 sm:flex-row">
+        <TextInput
+          aria-label="New fact"
+          placeholder="Add a memory — a durable fact about this user…"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          className="flex-1"
+        />
+        <OutlineButton
+          type="submit"
+          variant="accent"
+          controlSize="md"
+          disabled={busy || !draft.trim()}
+        >
+          <PlusIcon /> Add memory
+        </OutlineButton>
+      </form>
+
+      {error ? (
+        <StatusMessage role="alert" tone="error">
+          {error}
+        </StatusMessage>
+      ) : null}
+
       {facts.length === 0 ? (
-        <p className="muted">No curated facts.</p>
+        <EmptyState>No curated memories for this user yet.</EmptyState>
       ) : (
-        <ul>
+        <ul className="flex flex-col gap-2">
           {facts.map((f) => (
-            <li key={f.id} style={{ marginBottom: "0.3rem" }}>
-              {f.text}{" "}
-              <button className="ghost" onClick={() => edit(f)}>
-                Edit
-              </button>{" "}
-              <button className="ghost" onClick={() => remove(f)}>
-                Delete
-              </button>
+            <li key={f.id}>
+              <SurfacePanel tone="soft" padding="md" className="flex flex-col gap-2">
+                {editingId === f.id ? (
+                  <>
+                    <TextAreaInput
+                      aria-label="Edit memory"
+                      value={editText}
+                      onChange={(e) => setEditText(e.target.value)}
+                      rows={3}
+                      autoFocus
+                    />
+                    <div className="flex justify-end gap-2">
+                      <OutlineButton controlSize="sm" onClick={() => setEditingId(null)}>
+                        Cancel
+                      </OutlineButton>
+                      <OutlineButton
+                        variant="accent"
+                        controlSize="sm"
+                        disabled={busy || !editText.trim()}
+                        onClick={() => saveEdit(f)}
+                      >
+                        Save
+                      </OutlineButton>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="min-w-0 text-ui-sm text-[color:var(--ui-ink)]">{f.text}</p>
+                    <div className="flex shrink-0 gap-1">
+                      <OutlineButton
+                        controlSize="icon"
+                        aria-label="Edit memory"
+                        onClick={() => startEdit(f)}
+                      >
+                        <EditIcon />
+                      </OutlineButton>
+                      <OutlineButton
+                        variant="danger"
+                        controlSize="icon"
+                        aria-label="Delete memory"
+                        onClick={() => setPendingDelete(f)}
+                      >
+                        <TrashIcon />
+                      </OutlineButton>
+                    </div>
+                  </div>
+                )}
+                {f.ts ? (
+                  <p className="text-ui-2xs text-[color:var(--ui-ink-subtle)]">{f.ts}</p>
+                ) : null}
+              </SurfacePanel>
             </li>
           ))}
         </ul>
       )}
-      <form onSubmit={add} style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
-        <input
-          aria-label="New fact"
-          placeholder="Add a fact…"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          style={{
-            flex: 1,
-            padding: "0.45rem 0.7rem",
-            background: "#15171b",
-            color: "var(--fg)",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
+
+      {pendingDelete ? (
+        <ConfirmationDialog
+          dialog={{
+            title: "Delete this memory?",
+            details: [pendingDelete.text],
+            outcomes: ["The fact is removed from the user's curated profile."],
+            confirmLabel: "Delete",
+          }}
+          onClose={async (accepted) => {
+            const target = pendingDelete;
+            setPendingDelete(null);
+            if (accepted && target) await send("DELETE", { factId: target.id });
           }}
         />
-        <button type="submit" disabled={!draft.trim()}>
-          Add
-        </button>
-      </form>
-      {error ? <p className="error">{error}</p> : null}
-    </section>
+      ) : null}
+    </div>
   );
 }

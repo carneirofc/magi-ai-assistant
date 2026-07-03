@@ -5,14 +5,22 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import type { FormEvent } from "react";
+import {
+  ConfirmationDialog,
+  OutlineButton,
+  StatusMessage,
+  TextInput,
+  TrashIcon,
+} from "@carneirofc/ui";
 
 import { encodeDocId } from "@/lib/encode";
-import type { FormEvent } from "react";
 
 export function DocumentActions({ docId, title }: { docId: string; title: string }) {
   const router = useRouter();
   const [value, setValue] = useState(title);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const base = `/api/admin/knowledge/documents/${encodeDocId(docId)}`;
@@ -32,7 +40,6 @@ export function DocumentActions({ docId, title }: { docId: string; title: string
   }
 
   async function remove() {
-    if (!confirm(`Delete "${title}"? This removes all its chunks.`)) return;
     setBusy(true);
     setError(null);
     const res = await fetch(base, { method: "DELETE" });
@@ -45,28 +52,52 @@ export function DocumentActions({ docId, title }: { docId: string; title: string
   }
 
   return (
-    <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
-      <form onSubmit={rename} style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-        <input
-          aria-label="Title"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          style={{
-            padding: "0.4rem 0.6rem",
-            background: "#15171b",
-            color: "var(--fg)",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <form onSubmit={rename} className="flex items-center gap-2">
+          <TextInput
+            aria-label="Title"
+            controlSize="sm"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          />
+          <OutlineButton
+            type="submit"
+            controlSize="sm"
+            disabled={busy || !value.trim() || value === title}
+          >
+            Rename
+          </OutlineButton>
+        </form>
+        <OutlineButton
+          variant="danger"
+          controlSize="sm"
+          onClick={() => setConfirming(true)}
+          disabled={busy}
+        >
+          <TrashIcon /> Delete
+        </OutlineButton>
+      </div>
+      {error ? (
+        <StatusMessage role="alert" tone="error">
+          {error}
+        </StatusMessage>
+      ) : null}
+
+      {confirming ? (
+        <ConfirmationDialog
+          dialog={{
+            title: `Delete "${title}"?`,
+            details: [`Document: ${docId}`],
+            outcomes: ["The document and all of its indexed chunks are removed from the corpus."],
+            confirmLabel: "Delete document",
+          }}
+          onClose={(accepted) => {
+            setConfirming(false);
+            if (accepted) void remove();
           }}
         />
-        <button type="submit" disabled={busy || !value.trim() || value === title}>
-          Rename
-        </button>
-      </form>
-      <button className="ghost" onClick={remove} disabled={busy}>
-        Delete
-      </button>
-      {error ? <span className="error">{error}</span> : null}
+      ) : null}
     </div>
   );
 }
