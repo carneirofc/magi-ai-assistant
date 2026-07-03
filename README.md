@@ -53,6 +53,19 @@ design system with light/dark themes. See [`web/`](web/README.md) to run it.
   <img src="web/docs/screenshots/02-dashboard.png" alt="MAGI admin dashboard" width="900">
 </p>
 
+<table>
+  <tr>
+    <td width="50%"><a href="web/docs/screenshots/04-user-detail.png"><img src="web/docs/screenshots/04-user-detail.png" alt="A user's memory — facts as editable cards"></a><br><sub><b>Memory</b> — a user's facts as editable cards, under tabs</sub></td>
+    <td width="50%"><a href="web/docs/screenshots/05-session.png"><img src="web/docs/screenshots/05-session.png" alt="Session rendered as a chat transcript"></a><br><sub><b>Session</b> — the conversation window as a chat transcript</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><a href="web/docs/screenshots/06-knowledge.png"><img src="web/docs/screenshots/06-knowledge.png" alt="Knowledge corpus"></a><br><sub><b>Knowledge</b> — corpus as table or cards, filtered by subject/tag</sub></td>
+    <td width="50%"><a href="web/docs/screenshots/06-knowledge-dark.png"><img src="web/docs/screenshots/06-knowledge-dark.png" alt="Dark theme"></a><br><sub><b>Dark theme</b> — a click away, on every page</sub></td>
+  </tr>
+</table>
+
+More views in the [admin UI README](web/README.md#screenshots).
+
 ## Documentation
 
 Full docs live in [`docs/`](docs/):
