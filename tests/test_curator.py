@@ -9,6 +9,7 @@ the manager test injects a fake `CurateFn`.
 import pytest
 
 from magi.agent.curator import _format_input, _parse
+from magi.core.config import Config
 from magi.core.memory import CurationInput, CurationResult, FactOp
 from magi.core.memory import manager as manager_mod
 from magi.core.memory.manager import MemoryManager
@@ -106,6 +107,7 @@ def _reset_scope():
 def _manager(tmp_path, curate_fn):
     mgr = MemoryManager(
         store=FileMemoryStore(tmp_path / "mem"),
+        config=Config(),
         short_term_max=5,
         curate_fn=curate_fn,
     )
@@ -223,6 +225,7 @@ async def test_maybe_curate_clamps_runaway_fact(tmp_path):
 
     mgr = MemoryManager(
         store=FileMemoryStore(tmp_path / "mem"),
+        config=Config(),
         short_term_max=5,
         curate_fn=huge,
         long_term_fact_max_chars=500,
@@ -243,6 +246,7 @@ async def test_maybe_curate_trims_facts_over_cap(tmp_path):
 
     mgr = MemoryManager(
         store=FileMemoryStore(tmp_path / "mem"),
+        config=Config(),
         short_term_max=5,
         curate_fn=add_one,
         long_term_facts_max=3,

@@ -7,12 +7,15 @@ see channels/api.py for the endpoint contract. All settings are set in code
 below; only secrets (API_AUTH_TOKEN, ...) come from .env.
 """
 
-from magi.core.config import configure
+from magi.core.config import Config
 
 
-def apply_deployment_config() -> None:
-    """Deployment configuration, in code (secrets stay in .env — see core/config)."""
-    configure(
+def apply_deployment_config() -> Config:
+    """Deployment configuration, in code (secrets stay in .env — see core/config).
+
+    Returns the immutable `Config` the composition root threads through
+    `AgentContext` — no process global."""
+    return Config(
         # Same brain as the Discord bot: llama-server on :8888.
         model_provider="llamacpp",
         llamacpp_base_url="http://127.0.0.1:8888/v1",
@@ -60,14 +63,15 @@ def apply_deployment_config() -> None:
 
 
 def main() -> None:
-    apply_deployment_config()
+    config = apply_deployment_config()
 
     import uvicorn
 
     from magi.channels.api import build_api_app
-    from magi.core.config import config
+    from magi.core.context import AgentContext
 
-    uvicorn.run(build_api_app(), host=config.api_host, port=config.api_port)
+    ctx = AgentContext(config=config)
+    uvicorn.run(build_api_app(ctx), host=config.api_host, port=config.api_port)
 
 
 if __name__ == "__main__":

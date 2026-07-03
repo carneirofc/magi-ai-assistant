@@ -25,7 +25,7 @@ per-run session churn).
 
 from typing import TYPE_CHECKING, Final
 
-from magi.core.config import config
+from magi.core.config import Config
 
 if TYPE_CHECKING:
     from agno.tools.mcp import MCPTools
@@ -46,14 +46,14 @@ SEANIME_MCP_TOOL_NAMES: Final[tuple[str, ...]] = (
 )
 
 
-def _headers() -> dict[str, str]:
+def _headers(config: Config) -> dict[str, str]:
     """Auth header for the MCP endpoint — only when the server has a password."""
     if config.seanime_token:
         return {"X-Seanime-Token": config.seanime_token}
     return {}
 
 
-def build_seanime_mcp_tools() -> "MCPTools":
+def build_seanime_mcp_tools(config: Config) -> "MCPTools":
     """The Seanime MCP toolkit, pointed at `config.seanime_mcp_url`.
 
     Returns an unconnected `MCPTools`; agno connects it on the owning agent's
@@ -70,7 +70,7 @@ def build_seanime_mcp_tools() -> "MCPTools":
             "to use the direct-HTTP Seanime tools instead."
         ) from exc
 
-    params = StreamableHTTPClientParams(url=config.seanime_mcp_url, headers=_headers() or None)
+    params = StreamableHTTPClientParams(url=config.seanime_mcp_url, headers=_headers(config) or None)
     return MCPTools(
         server_params=params,
         transport="streamable-http",

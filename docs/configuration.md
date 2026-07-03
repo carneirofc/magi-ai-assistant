@@ -1,10 +1,10 @@
 # Configuration
 
 magi is **code-first**. All settings are plain Python on the frozen `Config`
-dataclass in [`magi/core/config.py`](../src/magi/core/config.py); each entrypoint
-overrides what its deployment needs via `configure(...)` *before* building
-anything. To learn what a value is, read the entrypoint and that file — there is no
-env-var archaeology.
+dataclass in [`magi/core/config.py`](../src/magi/core/config.py); each deployment
+constructs the one `Config` its entrypoint needs and threads it explicitly through
+the build. To learn what a value is, read the entrypoint and that file — there is
+no env-var archaeology, and there is no process-global config to hunt for.
 
 Only **secrets** come from the environment / `.env`. The effective values (secrets
 masked) are printed at startup by `config.log_settings()` — one banner so you can
@@ -12,20 +12,25 @@ confirm what's live.
 
 ```mermaid
 flowchart LR
-    ENV[.env<br/>secrets only] --> CFG[Config dataclass<br/>defaults]
-    ENT[entrypoint<br/>configure overrides] --> CFG
+    ENV[.env<br/>secrets only] --> CFG[Config value object<br/>constructed per deployment]
+    ENT[entrypoint<br/>apply_deployment_config] --> CFG
+    CFG --> CTX[AgentContext<br/>config + shared services]
     CFG --> BANNER[log_settings<br/>startup banner]
-    CFG --> APP[whole app reads the singleton]
+    CTX --> APP[builders take ctx explicitly]
 ```
 
 ## How it works
 
+`Config` is a **frozen value object**. A deployment builds one directly and returns
+it from its entrypoint; nothing is mutated in place, and there is no shared
+singleton.
+
 ```python
 # in main.py / main_api.py
-from magi.core.config import configure
+from magi.core.config import Config
 
-def apply_deployment_config() -> None:
-    configure(
+def apply_deployment_config() -> Config:
+    return Config(
         model_provider="llamacpp",
         llamacpp_base_url="http://127.0.0.1:8888/v1",
         session_summary=True,
@@ -34,11 +39,32 @@ def apply_deployment_config() -> None:
     )
 ```
 
-- `configure(**overrides)` mutates the shared singleton in place (the dataclass is
-  frozen so only this deliberate path can write). An unknown field raises with the
-  valid list — typos fail loud.
-- Call it **once, at the entrypoint, before** building any channel/team. Values are
-  read at build/run time.
+- Because `Config` is frozen, you never edit one in place. To vary an existing
+  config immutably, use `dataclasses.replace` — this is exactly how the container
+  entrypoints overlay their deltas:
+
+  ```python
+  import dataclasses
+  cfg = dataclasses.replace(apply_deployment_config(), api_host="0.0.0.0")
+  ```
+
+- The config is threaded explicitly via an [`AgentContext`](../src/magi/core/context.py)
+  — a dataclass holding the `config` plus lazily-built shared services (currently
+  the `db`). Construct one with `AgentContext(config=cfg)`; the composition roots
+  (`build_conversation_service(ctx, …)`, `build_team(ctx, …)`, `build_api_app(ctx)`,
+  …) take `ctx` rather than reaching for a global.
+- The simplest way to build the whole stack is the top-level factory, which wraps
+  all of the above:
+
+  ```python
+  from magi import Assistant, Config
+
+  assistant = Assistant.create(Config(model_provider="llamacpp", lead_model_id="qwen3.5-9b"))
+  ```
+
+- **Instance-scoped config, no global.** Because everything hangs off the `Config`
+  carried in its own `AgentContext`, multiple assistants with different configs can
+  coexist in one process — nothing is read from or written to a shared global.
 
 ## Secrets (`.env` only)
 
@@ -157,8 +183,8 @@ and the README. Two backends via `storage_backend`.
 | `s3_presign_expiry` | `3600` | Lifetime (s) of presigned recall URLs |
 
 > The `s3` backend needs the `s3` extra (`uv sync --extra s3`; boto3 is
-> lazy-imported, absent → tools off). The legacy `s3_enabled=True` still works —
-> `configure()` maps it to `storage_enabled` + the `s3` backend.
+> lazy-imported, absent → tools off). Select it with `storage_enabled=True` +
+> `storage_backend="s3"`.
 
 ### Item archive (durable original + index)
 

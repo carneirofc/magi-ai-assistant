@@ -15,7 +15,7 @@ from agno.tools import tool
 from pydantic import BaseModel, Field
 
 from magi.agent.tools.outputs import ToolOutput, fail, ok
-from magi.core.config import config
+from magi.core.config import Config
 
 _TIMEOUT = 10.0
 
@@ -45,32 +45,22 @@ class LiteLLMHealthData(BaseModel):
     unhealthy_endpoints: list[LiteLLMHealthEndpoint]
 
 
-def _headers() -> dict:
+def _headers(config: Config) -> dict:
     key = config.litellm_api_key
     return {"Authorization": f"Bearer {key}"} if key else {}
 
 
-def _get(path: str, timeout: float = _TIMEOUT) -> dict:
+def _get(path: str, config: Config, timeout: float = _TIMEOUT) -> dict:
     r = httpx.get(
-        f"{config.litellm_base_url}{path}", headers=_headers(), timeout=timeout
+        f"{config.litellm_base_url}{path}", headers=_headers(config), timeout=timeout
     )
     r.raise_for_status()
     return r.json()
 
 
-@tool(
-    description="List model names served by the configured LiteLLM proxy.",
-    instructions="Use when asked which LiteLLM models are configured or callable by the app. Takes no arguments.",
-    show_result=True,
-)
-def list_litellm_models() -> ToolOutput[LiteLLMModelsData]:
-    """List the model_names served by the LiteLLM proxy.
-
-    Use when asked what models can be called / are configured in litellm. These
-    are the ids the app uses (e.g. as LEAD_MODEL_ID / MEMBER_MODEL_ID).
-    """
+def _list_litellm_models(config: Config) -> ToolOutput[LiteLLMModelsData]:
     try:
-        data = _get("/v1/models")
+        data = _get("/v1/models", config)
     except Exception as e:
         return fail(f"Failed to reach LiteLLM proxy at {config.litellm_base_url}: {e}")
     ids = [m.get("id") for m in data.get("data", []) if m.get("id")]
@@ -79,27 +69,9 @@ def list_litellm_models() -> ToolOutput[LiteLLMModelsData]:
     return ok("LiteLLM models.", LiteLLMModelsData(models=ids))
 
 
-@tool(
-    description="Show LiteLLM model-name to backend mappings and token limits.",
-    instructions="Use to identify which provider/backend a LiteLLM model routes to. Optional model filters by model_name.",
-    show_result=True,
-)
-def litellm_model_info(
-    model: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Optional LiteLLM model_name to filter for exactly.",
-        ),
-    ] = None,
-) -> ToolOutput[LiteLLMModelInfoData]:
-    """Show LiteLLM model_name -> backend mapping (and per-model token limits).
-
-    Optional `model` filters to one model_name. Use to see which provider/backend
-    a model_name routes to (e.g. ollama/... or databricks/...) and its token caps.
-    """
+def _litellm_model_info(model: str | None, config: Config) -> ToolOutput[LiteLLMModelInfoData]:
     try:
-        data = _get("/model/info")
+        data = _get("/model/info", config)
     except Exception as e:
         return fail(f"Failed to read LiteLLM model info: {e}")
     rows = data.get("data", [])
@@ -116,19 +88,9 @@ def litellm_model_info(
     return ok("LiteLLM model mapping.", LiteLLMModelInfoData(models=models))
 
 
-@tool(
-    description="Check LiteLLM proxy health for configured model endpoints.",
-    instructions="Use to diagnose model-call failures through LiteLLM. This can take a few seconds. Takes no arguments.",
-    show_result=True,
-)
-def litellm_health() -> ToolOutput[LiteLLMHealthData]:
-    """Check LiteLLM proxy health: which model endpoints are healthy/unhealthy.
-
-    Use to diagnose why a model call is failing. The proxy pings each backend, so
-    this can take a few seconds.
-    """
+def _litellm_health(config: Config) -> ToolOutput[LiteLLMHealthData]:
     try:
-        data = _get("/health", timeout=30.0)
+        data = _get("/health", config, timeout=30.0)
     except Exception as e:
         return fail(f"Failed to reach LiteLLM proxy at {config.litellm_base_url}: {e}")
     healthy = data.get("healthy_count", "?")
@@ -145,3 +107,56 @@ def litellm_health() -> ToolOutput[LiteLLMHealthData]:
             unhealthy_endpoints=unhealthy_endpoints,
         ),
     )
+
+
+def build_litellm_tools(config: Config) -> list:
+    """Build the LiteLLM introspection tools, capturing `config` by closure."""
+
+    @tool(
+        description="List model names served by the configured LiteLLM proxy.",
+        instructions="Use when asked which LiteLLM models are configured or callable by the app. Takes no arguments.",
+        show_result=True,
+    )
+    def list_litellm_models() -> ToolOutput[LiteLLMModelsData]:
+        """List the model_names served by the LiteLLM proxy.
+
+        Use when asked what models can be called / are configured in litellm. These
+        are the ids the app uses (e.g. as LEAD_MODEL_ID / MEMBER_MODEL_ID).
+        """
+        return _list_litellm_models(config)
+
+    @tool(
+        description="Show LiteLLM model-name to backend mappings and token limits.",
+        instructions="Use to identify which provider/backend a LiteLLM model routes to. Optional model filters by model_name.",
+        show_result=True,
+    )
+    def litellm_model_info(
+        model: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description="Optional LiteLLM model_name to filter for exactly.",
+            ),
+        ] = None,
+    ) -> ToolOutput[LiteLLMModelInfoData]:
+        """Show LiteLLM model_name -> backend mapping (and per-model token limits).
+
+        Optional `model` filters to one model_name. Use to see which provider/backend
+        a model_name routes to (e.g. ollama/... or databricks/...) and its token caps.
+        """
+        return _litellm_model_info(model, config)
+
+    @tool(
+        description="Check LiteLLM proxy health for configured model endpoints.",
+        instructions="Use to diagnose model-call failures through LiteLLM. This can take a few seconds. Takes no arguments.",
+        show_result=True,
+    )
+    def litellm_health() -> ToolOutput[LiteLLMHealthData]:
+        """Check LiteLLM proxy health: which model endpoints are healthy/unhealthy.
+
+        Use to diagnose why a model call is failing. The proxy pings each backend, so
+        this can take a few seconds.
+        """
+        return _litellm_health(config)
+
+    return [list_litellm_models, litellm_model_info, litellm_health]

@@ -14,6 +14,7 @@ from agno.utils.log import log_info
 from agno.utils.message import get_text_from_message
 
 from magi.agent.model import build_member_model
+from magi.core.config import Config
 from magi.core.memory.manager import SummarizeFn
 
 _SESSION_SYSTEM = (
@@ -24,10 +25,10 @@ _SESSION_SYSTEM = (
 )
 
 
-def _build(name: str, system: str) -> SummarizeFn:
+def _build(config: Config, name: str, system: str) -> SummarizeFn:
     agent = Agent(
         name=name,
-        model=build_member_model(),
+        model=build_member_model(config),
         system_message=system,
         markdown=False,
         telemetry=False,
@@ -41,6 +42,6 @@ def _build(name: str, system: str) -> SummarizeFn:
     return summarize
 
 
-def build_session_summarizer() -> SummarizeFn:
+def build_session_summarizer(config: Config) -> SummarizeFn:
     """An async callable folding `(old summary + raw turns) -> updated summary`."""
-    return _build("SessionSummarizer", _SESSION_SYSTEM)
+    return _build(config, "SessionSummarizer", _SESSION_SYSTEM)

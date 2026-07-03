@@ -11,26 +11,27 @@ def check() -> None:
     """Phase 1 — raw discord.py, no agno. See channels/discord_check.py for event handlers."""
     import asyncio
 
-    from magi.core.config import config
+    from magi.core.config import Config
     from magi.channels import discord_check
 
-    if not config.DISCORD_BOT_TOKEN:
+    token = Config().DISCORD_BOT_TOKEN
+    if not token:
         print("ERROR: DISCORD_BOT_TOKEN not set in environment")
         sys.exit(1)
 
-    asyncio.run(discord_check.run(config.DISCORD_BOT_TOKEN))
+    asyncio.run(discord_check.run(token))
 
 
 def serve() -> None:
     """Phase 2 — full agno integration via DiscordClient."""
     from main import apply_deployment_config
 
-    apply_deployment_config()
-
     from magi.channels.discord import build_discord_client
+    from magi.core.context import AgentContext
 
+    ctx = AgentContext(config=apply_deployment_config())
     print("[serve] Building agno Discord client...")
-    discord_client = build_discord_client()
+    discord_client = build_discord_client(ctx)
     print("[serve] Starting bot. Press Ctrl+C to stop.")
     discord_client.serve()
 

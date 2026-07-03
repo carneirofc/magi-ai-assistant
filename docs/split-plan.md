@@ -31,8 +31,10 @@ The public/private boundary maps onto extension points already in the codebase:
   what to remember*.
 - **Prompts are files** loaded by `load_prompt()` — persona is data, not code.
 - **Members are a registry** (`MEMBER_BUILDERS`) — specialists are pluggable.
-- **Config is code-first** via `configure()` at `main.py` / `main_api.py` —
-  deployment is already a thin, separable layer.
+- **Config is code-first** — each deployment builds an immutable `Config` value
+  object at `main.py` / `main_api.py` and threads it explicitly through an
+  `AgentContext`; deployment is already a thin, separable layer. (The seam used to
+  be a process-global `configure()`; it is now `Config` + `AgentContext`.)
 
 Two spots are hardcoded and block a clean split; fix them before publishing:
 

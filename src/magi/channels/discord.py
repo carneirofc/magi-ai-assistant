@@ -15,7 +15,7 @@ from magi.agent.model import lead_model_def
 from magi.channels.bootstrap import build_conversation_service
 from magi.channels.gateway import run_gateway
 from clients.mydiscord import DiscordClient
-from magi.core.config import config
+from magi.core.context import AgentContext
 from magi.core.prompts import load_prompt
 
 try:
@@ -24,13 +24,15 @@ except (ImportError, ModuleNotFoundError):
     raise ImportError("`discord.py` not installed. Please install using `pip install discord.py`")
 
 
-def build_discord_client(db: BaseDb | None = None) -> DiscordClient:
+def build_discord_client(ctx: AgentContext, db: BaseDb | None = None) -> DiscordClient:
     """Build the Discord bot backed by the multimodal agent team."""
+    config = ctx.config
     if not config.DISCORD_BOT_TOKEN:
         raise RuntimeError("DISCORD_BOT_TOKEN not set in environment")
     log_info(f"building discord client (db={'injected' if db else 'default'})")
 
     conversation = build_conversation_service(
+        ctx,
         # Discord-only output rules, kept out of the base prompt so it stays
         # channel-agnostic (see prompts/channels/discord.md).
         channel_guidance=load_prompt("channels/discord.md"),
@@ -45,11 +47,11 @@ def build_discord_client(db: BaseDb | None = None) -> DiscordClient:
         token=config.DISCORD_BOT_TOKEN,
         # Inbound audio is only wired into runs when the lead can actually hear
         # it (vision-only backends reject `input_audio` parts).
-        supports_audio=lead_model_def().supports_audio,
+        supports_audio=lead_model_def(config).supports_audio,
     )
 
 
-def serve_with_admin(client: DiscordClient) -> None:
+def serve_with_admin(ctx: AgentContext, client: DiscordClient) -> None:
     """Run the Discord gateway connection and the admin HTTP surface together in
     one process (`config.admin_enabled`) — the alongside-admin alternative to
     `client.serve()`.
@@ -64,11 +66,12 @@ def serve_with_admin(client: DiscordClient) -> None:
 
     from magi.channels.admin import build_admin_app
 
+    config = ctx.config
     log_info(
         f"discord: admin surface ALSO served at http://{config.admin_host}:{config.admin_port} "
         "(config.admin_enabled)"
     )
     admin_server = uvicorn.Server(
-        uvicorn.Config(build_admin_app(), host=config.admin_host, port=config.admin_port)
+        uvicorn.Config(build_admin_app(ctx), host=config.admin_host, port=config.admin_port)
     )
     asyncio.run(run_gateway(client.serve_async(), admin_server.serve()))

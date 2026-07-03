@@ -8,6 +8,8 @@ The anime *specialist* that selects this tool surface is a persona member, not a
 engine one — its config-driven direct/MCP swap is tested in alyssa/tests.
 """
 
+import dataclasses
+
 import pytest
 
 pytest.importorskip("mcp", reason="needs the optional `mcp` extra (uv sync --extra mcp)")
@@ -17,44 +19,29 @@ from magi.agent.tools.seanime_mcp import (  # noqa: E402
     build_seanime_mcp_tools,
     is_mcp_toolkit,
 )
-from magi.core.config import config, configure  # noqa: E402
-
-
-def _restore_seanime_config():
-    before = {
-        "seanime_use_mcp": config.seanime_use_mcp,
-        "seanime_mcp_url": config.seanime_mcp_url,
-        "seanime_token": config.seanime_token,
-    }
-    return before
+from magi.core.config import Config  # noqa: E402
 
 
 def test_build_targets_configured_endpoint_over_streamable_http():
-    before = _restore_seanime_config()
-    try:
-        configure(seanime_mcp_url="http://example.test:9/api/v1/mcp", seanime_token=None)
-        tools = build_seanime_mcp_tools()
-        assert tools.transport == "streamable-http"
-        assert tools.server_params.url == "http://example.test:9/api/v1/mcp"
-        # No token configured -> no auth header at all.
-        assert tools.server_params.headers is None
-        # All read-only tools are marked to surface their result, like the
-        # direct tools' show_result=True.
-        assert set(tools.show_result_tools) == set(SEANIME_MCP_TOOL_NAMES)
-    finally:
-        configure(**before)
+    config = dataclasses.replace(
+        Config(), seanime_mcp_url="http://example.test:9/api/v1/mcp", seanime_token=None
+    )
+    tools = build_seanime_mcp_tools(config)
+    assert tools.transport == "streamable-http"
+    assert tools.server_params.url == "http://example.test:9/api/v1/mcp"
+    # No token configured -> no auth header at all.
+    assert tools.server_params.headers is None
+    # All read-only tools are marked to surface their result, like the
+    # direct tools' show_result=True.
+    assert set(tools.show_result_tools) == set(SEANIME_MCP_TOOL_NAMES)
 
 
 def test_auth_header_rides_only_when_token_configured():
-    before = _restore_seanime_config()
-    try:
-        configure(seanime_token="hash123")
-        tools = build_seanime_mcp_tools()
-        assert tools.server_params.headers == {"X-Seanime-Token": "hash123"}
-    finally:
-        configure(**before)
+    config = dataclasses.replace(Config(), seanime_token="hash123")
+    tools = build_seanime_mcp_tools(config)
+    assert tools.server_params.headers == {"X-Seanime-Token": "hash123"}
 
 
 def test_is_mcp_toolkit_duck_types_the_class():
-    assert is_mcp_toolkit(build_seanime_mcp_tools()) is True
+    assert is_mcp_toolkit(build_seanime_mcp_tools(Config())) is True
     assert is_mcp_toolkit(object()) is False

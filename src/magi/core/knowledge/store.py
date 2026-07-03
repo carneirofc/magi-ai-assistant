@@ -29,7 +29,7 @@ from typing import Optional, Protocol, Sequence
 
 from agno.utils.log import log_info, log_warning
 
-from magi.core.config import config
+from magi.core.config import Config
 from magi.core.embeddings import embed_text
 from magi.core.items import ItemArchive, build_item_archive_from_config
 from magi.core.knowledge.chunking import chunk_text
@@ -156,12 +156,14 @@ class KnowledgeStore:
 
     def __init__(
         self,
+        config: Config,
         collection: Optional[str] = None,
         *,
         chunk_chars: Optional[int] = None,
         chunk_overlap: Optional[int] = None,
         archive: Optional[ItemArchive] = None,
     ):
+        self.config = config
         self.collection = collection or config.knowledge_collection
         self.chunk_chars = chunk_chars if chunk_chars is not None else config.knowledge_chunk_chars
         self.chunk_overlap = (
@@ -182,7 +184,7 @@ class KnowledgeStore:
         try:
             from qdrant_client import QdrantClient, models
 
-            client = QdrantClient(url=config.qdrant_url, api_key=config.qdrant_api_key)
+            client = QdrantClient(url=self.config.qdrant_url, api_key=self.config.qdrant_api_key)
             if not client.collection_exists(self.collection):
                 client.create_collection(
                     collection_name=self.collection,
@@ -210,7 +212,7 @@ class KnowledgeStore:
         try:
             from qdrant_client import QdrantClient
 
-            client = QdrantClient(url=config.qdrant_url, api_key=config.qdrant_api_key)
+            client = QdrantClient(url=self.config.qdrant_url, api_key=self.config.qdrant_api_key)
             if not client.collection_exists(self.collection):
                 return None
             self._client = client
@@ -243,7 +245,7 @@ class KnowledgeStore:
         chunks = chunk_text(text, size=self.chunk_chars, overlap=self.chunk_overlap)
         if not chunks:
             return 0
-        vectors = [embed_text(c) for c in chunks]
+        vectors = [embed_text(c, self.config) for c in chunks]
         embedded = [(c, v) for c, v in zip(chunks, vectors) if v is not None]
         if not embedded:
             return 0
@@ -691,7 +693,7 @@ class KnowledgeStore:
         """
         if not query.strip():
             return []
-        vector = embed_text(query)
+        vector = embed_text(query, self.config)
         if vector is None:
             return []
         client = self._ensure_client(len(vector))
@@ -699,13 +701,13 @@ class KnowledgeStore:
             return []
         # Over-fetch a wider candidate pool when we'll re-rank by tags, so the boost
         # can pull a relevant-but-slightly-lower hit up past the top_k cutoff.
-        limit = top_k * max(1, config.knowledge_overfetch) if tags else top_k
+        limit = top_k * max(1, self.config.knowledge_overfetch) if tags else top_k
         hits = self._query(client, vector, limit, subject, scopes)
         if not hits and subject:
             log_info(f"knowledge: no hits for subject {subject!r}; retrying unfiltered")
             hits = self._query(client, vector, limit, None, scopes)
         if tags:
-            hits = blend_by_tags(hits, list(tags), config.knowledge_tag_weight)
+            hits = blend_by_tags(hits, list(tags), self.config.knowledge_tag_weight)
         return hits[:top_k]
 
     def _query(
@@ -752,7 +754,7 @@ class KnowledgeStore:
         )
 
 
-def build_knowledge_from_config() -> Optional[KnowledgeStore]:
+def build_knowledge_from_config(config: Config) -> Optional[KnowledgeStore]:
     """Construct the store when enabled in config, else None (feature off).
 
     Attaches the item archive when `items_archive_enabled` so ingests keep a durable,
@@ -763,4 +765,4 @@ def build_knowledge_from_config() -> Optional[KnowledgeStore]:
         f"knowledge: ENABLED (qdrant={config.qdrant_url}, collection={config.knowledge_collection}, "
         f"embed={config.embedding_model_id}, top_k={config.knowledge_top_k})"
     )
-    return KnowledgeStore(archive=build_item_archive_from_config())
+    return KnowledgeStore(config, archive=build_item_archive_from_config(config))

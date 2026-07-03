@@ -23,7 +23,7 @@ from typing import Optional, Union
 
 from agno.utils.log import log_warning
 
-from magi.core.config import config
+from magi.core.config import Config
 from magi.core.storage.local import LocalStore, build_local_store_from_config
 from magi.core.storage.s3 import (
     ObjectInfo,
@@ -48,6 +48,7 @@ __all__ = [
 
 
 def build_object_store(
+    config: Config,
     backend: Optional[str] = None,
 ) -> Optional[Union[LocalStore, S3Store]]:
     """Build the object store for `backend` (default `config.storage_backend`),
@@ -61,9 +62,9 @@ def build_object_store(
     """
     name = (backend or config.storage_backend or "local").strip().lower()
     if name == "local":
-        return build_local_store_from_config()
+        return build_local_store_from_config(config)
     if name == "s3":
-        return s3_store_from_config()
+        return s3_store_from_config(config)
     log_warning(
         f"storage: unknown storage_backend {name!r} "
         "(expected 'local' or 's3') — storage tools disabled"
@@ -71,7 +72,7 @@ def build_object_store(
     return None
 
 
-def build_object_store_from_config() -> Optional[Union[LocalStore, S3Store]]:
+def build_object_store_from_config(config: Config) -> Optional[Union[LocalStore, S3Store]]:
     """The configured object store, or `None` when storage is off / unbuildable.
 
     Honors the model-file-archive gate (`storage_enabled`), then dispatches on
@@ -80,4 +81,4 @@ def build_object_store_from_config() -> Optional[Union[LocalStore, S3Store]]:
     """
     if not config.storage_enabled:
         return None
-    return build_object_store(config.storage_backend)
+    return build_object_store(config, config.storage_backend)

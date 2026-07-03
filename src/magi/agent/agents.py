@@ -16,10 +16,11 @@ from agno.utils.log import log_info
 
 from magi.agent.model import build_member_model
 from magi.agent.tools import enabled_tools
-from magi.core.config import config
+from magi.core.context import AgentContext
 
 
 def build_agent(
+    ctx: AgentContext,
     *,
     model: Model | None = None,
     system_message: str | None = None,
@@ -30,9 +31,9 @@ def build_agent(
     enable_user_memories: bool = False,
     markdown: bool = True,
 ) -> Agent:
-    resolved_tools = enabled_tools(tools)
-    resolved_model = model or build_member_model()
-    resolved_system = system_message or config.system_prompt
+    resolved_tools = enabled_tools(ctx.config, tools)
+    resolved_model = model or build_member_model(ctx.config)
+    resolved_system = system_message or ctx.config.system_prompt
     tool_names = [
         getattr(t, "name", getattr(t, "__name__", type(t).__name__))
         for t in resolved_tools

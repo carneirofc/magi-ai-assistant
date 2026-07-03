@@ -7,8 +7,10 @@ dressed up as a confirmation); the searcher is asked for `config.knowledge_top_k
 """
 
 from magi.agent.tools.knowledge import build_knowledge_tools
-from magi.core.config import config
+from magi.core.config import Config
 from magi.core.knowledge import GLOBAL_SCOPE, KnowledgeHit
+
+config = Config()
 
 
 class _FakeSearcher:
@@ -37,7 +39,7 @@ class _FakeTagger:
 
 def _tool(hits):
     searcher = _FakeSearcher(hits)
-    (search_knowledge,) = build_knowledge_tools(searcher)
+    (search_knowledge,) = build_knowledge_tools(searcher, config)
     return searcher, search_knowledge
 
 
@@ -108,19 +110,19 @@ def test_snippets_carry_subject_and_tags():
 # --- tag_knowledge (write tool) ---------------------------------------------
 def test_no_tag_tool_without_a_tagger():
     # Read-only deployment: only the search tool is built.
-    tools = build_knowledge_tools(_FakeSearcher([]))
+    tools = build_knowledge_tools(_FakeSearcher([]), config)
     assert [t.name for t in tools] == ["search_knowledge"]
 
 
 def test_tag_tool_present_with_tagger():
     tagger = _FakeTagger(["a"])
-    names = [t.name for t in build_knowledge_tools(_FakeSearcher([]), tagger)]
+    names = [t.name for t in build_knowledge_tools(_FakeSearcher([]), config, tagger)]
     assert names == ["search_knowledge", "tag_knowledge"]
 
 
 def _tag_tool(result):
     tagger = _FakeTagger(result)
-    _, tag_knowledge = build_knowledge_tools(_FakeSearcher([]), tagger)
+    _, tag_knowledge = build_knowledge_tools(_FakeSearcher([]), config, tagger)
     return tagger, tag_knowledge
 
 

@@ -30,6 +30,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
+from magi.core.context import AgentContext
 from magi.core.items import ItemArchive
 from magi.core.knowledge import (
     DocumentDetail,
@@ -681,18 +682,18 @@ def _file_version(path) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def build_admin_app() -> FastAPI:
-    """Composition root: the real stores from config, served over HTTP.
+def build_admin_app(ctx: "AgentContext") -> FastAPI:
+    """Composition root: the real stores from `ctx`, served over HTTP.
 
     Both stores are built unconditionally (admin manages memory + the corpus
     regardless of whether the chat-time tools are enabled — the same reasoning as
     `scripts/ingest_knowledge.py`)."""
     from pathlib import Path
 
-    from magi.core.config import config
     from magi.core.items import build_item_archive_from_config
     from magi.core.memory.semantic import build_semantic_index
 
+    config = ctx.config
     log_info("building admin app")
     if config.admin_auth_token is None:
         log_info("admin: auth DISABLED (ADMIN_AUTH_TOKEN not set) — keep the port unpublished")
@@ -701,12 +702,12 @@ def build_admin_app() -> FastAPI:
     # archive (None unless enabled) is shared by the knowledge store and the fact
     # endpoints, so knowledge deletes cascade to the stored original and fact edits
     # keep the durable snapshot current.
-    archive = build_item_archive_from_config()
+    archive = build_item_archive_from_config(config)
     return create_admin_app(
-        KnowledgeStore(archive=archive),
+        KnowledgeStore(config, archive=archive),
         FileMemoryStore(Path(config.memory_dir)),
         SubjectRegistry(config.knowledge_subjects_path),
-        retriever=build_semantic_index(),
+        retriever=build_semantic_index(config),
         auth_token=config.admin_auth_token,
         archive=archive,
     )

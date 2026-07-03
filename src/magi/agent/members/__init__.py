@@ -16,10 +16,16 @@ from agno.models.base import Model
 from magi.agent.members.assistant import build_assistant
 from magi.agent.members.researcher import build_researcher
 from magi.agent.tools.discord import DISCORD_TOOLS
+from magi.core.context import AgentContext
 from magi.core.prompts import load_prompt
 
+# A member builder takes the runtime context (for config-bound tools) and the
+# shared member model, and returns a specialist Agent. A persona's private
+# specialists satisfy this same shape.
+MemberBuilder = Callable[[AgentContext, Model], Agent]
 
-def build_discord_agent(model: Model) -> Agent:
+
+def build_discord_agent(ctx: AgentContext, model: Model) -> Agent:
     """Discord specialist for actions inside the current live conversation only."""
 
     return Agent(
@@ -30,7 +36,7 @@ def build_discord_agent(model: Model) -> Agent:
     )
 
 
-def build_docker(model: Model) -> Agent:
+def build_docker(ctx: AgentContext, model: Model) -> Agent:
     from agno.tools.docker import DockerTools
 
     return Agent(
@@ -47,14 +53,14 @@ def build_docker(model: Model) -> Agent:
 # Ordered set of members the team is built from. These are the engine's neutral
 # demo specialists; a persona appends its own via `register_member`. `build_docker`
 # is intentionally omitted — opt-in only (see its docstring).
-MEMBER_BUILDERS: list[Callable[[Model], Agent]] = [
+MEMBER_BUILDERS: list[MemberBuilder] = [
     build_assistant,
     build_researcher,
     build_discord_agent,
 ]
 
 
-def register_member(builder: Callable[[Model], Agent]) -> Callable[[Model], Agent]:
+def register_member(builder: MemberBuilder) -> MemberBuilder:
     """Append a specialist builder to the team roster; return it (usable as a
     decorator).
 

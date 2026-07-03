@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Optional
 
 from agno.utils.log import log_info, log_warning
 
-from magi.core.config import config
+from magi.core.config import Config
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from mypy_boto3_s3 import S3Client
@@ -210,7 +210,7 @@ def _header_safe(value: str) -> str:
     return value.encode("ascii", "replace").decode("ascii").replace("\n", " ").strip()[:512]
 
 
-def build_s3_store_from_config() -> Optional[S3Store]:
+def build_s3_store_from_config(config: Config) -> Optional[S3Store]:
     """Build the store from `config`, or `None` when storage is off / unbuildable.
 
     Returns `None` (with a warning) rather than raising, so a deployment that
@@ -219,10 +219,10 @@ def build_s3_store_from_config() -> Optional[S3Store]:
     """
     if not config.storage_enabled:
         return None
-    return s3_store_from_config()
+    return s3_store_from_config(config)
 
 
-def s3_store_from_config() -> Optional[S3Store]:
+def s3_store_from_config(config: Config) -> Optional[S3Store]:
     """Build the S3 store from `config`, *ungated* by `storage_enabled`.
 
     The `build_*` variant above honors the model-file-archive gate; this one builds

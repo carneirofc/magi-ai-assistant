@@ -10,47 +10,44 @@ endpoint so a deployment can serve chat locally and embeddings remotely.
 import dataclasses
 
 import magi.core.embeddings as emb
+from magi.core.config import Config
 
 
 def _with(**overrides):
-    return dataclasses.replace(emb.config, **overrides)
+    return dataclasses.replace(Config(), **overrides)
 
 
-def test_route_litellm_is_default(monkeypatch):
-    monkeypatch.setattr(emb, "config", _with(embeddings_provider="litellm"))
-    model, base, key = emb._route("nomic-embed-text")
+def test_route_litellm_is_default():
+    cfg = _with(embeddings_provider="litellm")
+    model, base, key = emb._route("nomic-embed-text", cfg)
     assert model == "litellm_proxy/nomic-embed-text"
-    assert base == emb.config.litellm_base_url
-    assert key == emb.config.litellm_api_key
+    assert base == cfg.litellm_base_url
+    assert key == cfg.litellm_api_key
 
 
-def test_route_litellm_prefix_not_doubled(monkeypatch):
-    monkeypatch.setattr(emb, "config", _with(embeddings_provider="litellm"))
-    model, _base, _key = emb._route("litellm_proxy/nomic-embed-text")
+def test_route_litellm_prefix_not_doubled():
+    cfg = _with(embeddings_provider="litellm")
+    model, _base, _key = emb._route("litellm_proxy/nomic-embed-text", cfg)
     assert model == "litellm_proxy/nomic-embed-text"
 
 
-def test_route_openai_targets_remote(monkeypatch):
-    monkeypatch.setattr(
-        emb,
-        "config",
-        _with(
-            embeddings_provider="openai",
-            openai_base_url="https://api.example.com/v1",
-            openai_api_key="sk-remote",
-        ),
+def test_route_openai_targets_remote():
+    cfg = _with(
+        embeddings_provider="openai",
+        openai_base_url="https://api.example.com/v1",
+        openai_api_key="sk-remote",
     )
-    model, base, key = emb._route("text-embedding-3-small")
+    model, base, key = emb._route("text-embedding-3-small", cfg)
     assert model == "openai/text-embedding-3-small"
     assert base == "https://api.example.com/v1"
     assert key == "sk-remote"
 
 
-def test_route_openai_prefix_not_doubled(monkeypatch):
-    monkeypatch.setattr(emb, "config", _with(embeddings_provider="openai"))
-    model, _base, _key = emb._route("openai/text-embedding-3-small")
+def test_route_openai_prefix_not_doubled():
+    cfg = _with(embeddings_provider="openai")
+    model, _base, _key = emb._route("openai/text-embedding-3-small", cfg)
     assert model == "openai/text-embedding-3-small"
 
 
 def test_embed_empty_text_is_none():
-    assert emb.embed_text("   ") is None
+    assert emb.embed_text("   ", Config()) is None

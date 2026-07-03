@@ -14,6 +14,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from magi.channels.admin import create_admin_app
+from magi.core.config import Config
 from magi.core.knowledge import (
     DocumentChunk,
     DocumentDetail,
@@ -55,7 +56,7 @@ class _FakeClient:
 
 
 def _store_with_client(client):
-    store = KnowledgeStore(collection="t")
+    store = KnowledgeStore(Config(), collection="t")
     store._connect_existing = lambda: client  # type: ignore[method-assign]
     return store
 
@@ -111,7 +112,7 @@ def test_list_documents_skips_points_without_doc_id():
 
 def test_list_documents_no_collection_returns_empty():
     # _connect_existing returns None when the collection is absent / backend down.
-    store = KnowledgeStore(collection="t")
+    store = KnowledgeStore(Config(), collection="t")
     store._connect_existing = lambda: None  # type: ignore[method-assign]
     assert store.list_documents() == []
 

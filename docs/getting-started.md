@@ -104,13 +104,14 @@ server-side session.
 
 ## Object storage
 
-Turn on the model's durable file/image archive in the entrypoint:
+Turn on the model's durable file/image archive in the entrypoint's `Config`:
 
 ```python
-configure(
+Config(
     storage_enabled=True,
     storage_backend="local",          # bytes under data/artifacts — zero setup
     storage_local_dir="data/artifacts",
+    # … the rest of the deployment's settings
 )
 ```
 

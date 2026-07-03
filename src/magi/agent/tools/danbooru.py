@@ -26,7 +26,7 @@ from pydantic import Field
 
 from magi.agent.tools.danbooru_local import LocalDanbooru
 from magi.agent.tools.outputs import FlexiblePayload, ToolOutput, fail, ok
-from magi.core.config import config
+from magi.core.config import Config
 
 _TIMEOUT = 15.0
 _HEADERS = {"User-Agent": "AlyssaBot/1.0 (tag lookup; +https://discord.com)"}
@@ -65,11 +65,11 @@ class _Throttle:
 _danbooru_throttle = _Throttle(_DANBOORU_GAP_S)
 _civitai_throttle = _Throttle(_CIVITAI_GAP_S)
 
-# Local CSV stores, cached per configured path pair (configure() can repoint).
+# Local CSV stores, cached per configured path pair (a repointed Config repoints).
 _stores: dict[tuple[str, str], LocalDanbooru] = {}
 
 
-def _local() -> LocalDanbooru:
+def _local(config: Config) -> LocalDanbooru:
     key = (config.danbooru_tags_csv, config.danbooru_wiki_csv)
     store = _stores.get(key)
     if store is None:
@@ -122,33 +122,11 @@ def _text_fail(message: str, **data: object) -> ToolOutput[FlexiblePayload]:
     return fail(message, FlexiblePayload(**data) if data else None)
 
 
-@tool(
-    description="Fetch a Danbooru wiki page by exact title for tag definitions or curated tag lists.",
-    instructions=(
-        "Use for pages such as list_of_* or tag_group:* and for single-tag definitions. "
-        "Titles are normalized to lowercase underscores; returned [[links]] can be fetched next."
-    ),
-    show_result=True,
-)
-async def danbooru_wiki(
-    title: Annotated[
-        str,
-        Field(
-            min_length=1,
-            description="Danbooru wiki page title, normalized to lowercase underscores.",
-        ),
-    ],
-) -> DanbooruOutput:
-    """Fetch a Danbooru wiki page by title, e.g. 'list_of_uniforms' or 'collarbone'.
-
-    Use to read curated tag lists (pages named list_of_* or tag_group:*) or the
-    definition of a single tag. Returns the wiki body text; [[double brackets]]
-    inside it are links to other tags/wiki pages you can fetch next.
-    """
+async def _danbooru_wiki(title: str, config: Config) -> DanbooruOutput:
     slug = (title or "").strip().lower().replace(" ", "_")
     if not slug:
         return _text_fail("No wiki title given.")
-    local = _local()
+    local = _local(config)
     body = await asyncio.to_thread(local.wiki, slug)
     if body is not None:
         log_info(f"danbooru_wiki '{slug}': local hit ({len(body)} chars)")
@@ -194,31 +172,11 @@ async def danbooru_wiki(
     )
 
 
-@tool(
-    description="Search Danbooru wiki page titles by fuzzy phrase or wildcard pattern.",
-    instructions="Use when the exact wiki title is unknown. Fetch interesting returned titles with danbooru_wiki.",
-    show_result=True,
-)
-async def danbooru_wiki_search(
-    query: Annotated[
-        str,
-        Field(
-            min_length=1,
-            description="Phrase or wildcard pattern to match against Danbooru wiki page titles.",
-        ),
-    ],
-) -> DanbooruOutput:
-    """Find Danbooru wiki page titles loosely matching a phrase or pattern.
-
-    Use when you don't know the exact wiki page name: 'uniform', 'school girl
-    outfits', or a glob like 'list_of_*' all work — matching is fuzzy, best
-    hits first. Returns up to 30 titles — fetch the interesting ones with
-    `danbooru_wiki` next.
-    """
+async def _danbooru_wiki_search(query: str, config: Config) -> DanbooruOutput:
     q = (query or "").strip().lower().replace(" ", "_")
     if not q:
         return _text_fail("No query given.")
-    titles = await asyncio.to_thread(_local().search_wiki_titles, q)
+    titles = await asyncio.to_thread(_local(config).search_wiki_titles, q)
     if titles:
         log_info(f"danbooru_wiki_search '{q}': {len(titles)} local titles (top: {titles[0]})")
         text = f"Wiki pages matching '{q}' (local):\n" + "\n".join(f"- {t}" for t in titles)
@@ -240,36 +198,11 @@ async def danbooru_wiki_search(
     return _text_ok(f"Found {len(titles)} wiki title(s).", text, query=q, source="live", titles=titles)
 
 
-@tool(
-    description="Search Danbooru non-artist tags and verify whether a tag exists.",
-    instructions=(
-        "Use for general, character, copyright, and meta tags. Do not use for artists; "
-        "call danbooru_search_artists for artist/style tags."
-    ),
-    show_result=True,
-)
-async def danbooru_search_tags(
-    query: Annotated[
-        str,
-        Field(
-            min_length=1,
-            description="General, character, copyright, or meta tag phrase to verify.",
-        ),
-    ],
-) -> DanbooruOutput:
-    """Search Danbooru general/character/copyright tags; use to verify a tag exists.
-
-    Matching is loose: a natural phrase ('school girl uniform', 'maids') finds
-    the closest real tags — no need for exact names; explicit * wildcards also
-    work. Returns up to 20 tags with category and post count, best match
-    first. A tag that doesn't appear here is NOT a valid Danbooru tag.
-    NOT for artists — the local dump has no artist tags, so artist names come
-    back as wrong look-alike matches; use `danbooru_search_artists` instead.
-    """
+async def _danbooru_search_tags(query: str, config: Config) -> DanbooruOutput:
     q = (query or "").strip().lower().replace(" ", "_")
     if not q:
         return _text_fail("No query given.")
-    hits = await asyncio.to_thread(_local().search_tags, q)
+    hits = await asyncio.to_thread(_local(config).search_tags, q)
     if hits:
         log_info(f"danbooru_search_tags '{q}': {len(hits)} local hits (top: {hits[0][0]})")
         lines = [
@@ -308,32 +241,7 @@ async def danbooru_search_tags(
     )
 
 
-@tool(
-    description="Search Danbooru artist tags by name.",
-    instructions=(
-        "Use for artist or style lookups. Query with romanized names or shorter fragments; "
-        "this is the only Danbooru tool intended to verify artist tags."
-    ),
-    show_result=True,
-)
-async def danbooru_search_artists(
-    query: Annotated[
-        str,
-        Field(
-            min_length=1,
-            description="Artist name, romanized name, fragment, or wildcard pattern.",
-        ),
-    ],
-) -> DanbooruOutput:
-    """Search Danbooru ARTIST tags by name; the only tool that finds artists.
-
-    Always use this for artist/style lookups ('art by wlop', 'style of …') —
-    artist tags are absent from the local dump and `danbooru_search_tags`
-    cannot verify them. Query with the artist's romanized name (substring is
-    fine; * wildcards work). Always live API. Returns up to 20 artist tags
-    with post counts, most-used first; an artist not listed here has no
-    Danbooru tag.
-    """
+async def _danbooru_search_artists(query: str) -> DanbooruOutput:
     q = (query or "").strip().lower().replace(" ", "_")
     if not q:
         return _text_fail("No query given.")
@@ -362,26 +270,7 @@ async def danbooru_search_artists(
     )
 
 
-@tool(
-    description="List tags that commonly co-occur with one valid Danbooru tag.",
-    instructions="Use to expand a prompt theme from a known valid tag. Pass one tag using underscores, not a free-form phrase.",
-    show_result=True,
-)
-async def danbooru_related_tags(
-    tag: Annotated[
-        str,
-        Field(
-            min_length=1,
-            pattern=r"^[^\s]+$",
-            description="One valid Danbooru tag using underscores instead of spaces.",
-        ),
-    ],
-) -> DanbooruOutput:
-    """List the tags that most often co-occur with `tag` on Danbooru posts.
-
-    Use to expand a theme: given 'collarbone' it returns what real posts pair
-    with it. `tag` must be one valid tag (underscores, not spaces).
-    """
+async def _danbooru_related_tags(tag: str) -> DanbooruOutput:
     t = (tag or "").strip().lower().replace(" ", "_")
     if not t:
         return _text_fail("No tag given.")
@@ -413,28 +302,7 @@ async def danbooru_related_tags(
     )
 
 
-@tool(
-    description="Show full tag lists from recent Danbooru posts matching a tag query.",
-    instructions=(
-        "Use to see how real posts combine tags around a theme. Anonymous Danbooru search allows at most two tags."
-    ),
-    show_result=True,
-)
-async def danbooru_post_tags(
-    tags: Annotated[
-        str,
-        Field(
-            min_length=1,
-            description="Danbooru post search query, normally one or two tags.",
-        ),
-    ],
-) -> DanbooruOutput:
-    """Show the full tag lists of recent Danbooru posts matching a tag search.
-
-    Use to see how real posts combine tags around a theme. `tags` is a Danbooru
-    search query (e.g. 'collarbone 1girl'); anonymous search allows AT MOST two
-    tags. Returns each post's character/copyright/general tags.
-    """
+async def _danbooru_post_tags(tags: str) -> DanbooruOutput:
     q = (tags or "").strip()
     if not q:
         return _text_fail("No tags given.")
@@ -479,26 +347,7 @@ async def danbooru_post_tags(
     )
 
 
-@tool(
-    description="Fetch a Civitai model page by numeric model id.",
-    instructions=(
-        "Use for model-level metadata, tags, author notes, and available version ids. "
-        "Use civitai_model_version for version-specific trigger words and settings."
-    ),
-    show_result=True,
-)
-async def civitai_model(
-    model_id: Annotated[
-        int,
-        Field(gt=0, description="Numeric Civitai model id."),
-    ],
-) -> DanbooruOutput:
-    """Fetch a Civitai model page by numeric id (e.g. 994401 for MatureRitual).
-
-    Returns the model's name, type, tags, the author's usage notes (recommended
-    prompts, sampler, CFG), and its versions with ids — pass a version id to
-    `civitai_model_version` for version-specific notes.
-    """
+async def _civitai_model(model_id: int) -> DanbooruOutput:
     try:
         data = await _get_json(_civitai_throttle, f"{_CIVITAI}/models/{int(model_id)}")
     except Exception as e:
@@ -530,22 +379,7 @@ async def civitai_model(
     )
 
 
-@tool(
-    description="Fetch one Civitai model version by numeric version id.",
-    instructions="Use for version-specific base model, trigger words, author notes, sampler, steps, CFG, or prompt templates.",
-    show_result=True,
-)
-async def civitai_model_version(
-    version_id: Annotated[
-        int,
-        Field(gt=0, description="Numeric Civitai model version id."),
-    ],
-) -> DanbooruOutput:
-    """Fetch one Civitai model version by id (e.g. 2730987) for its usage notes.
-
-    Returns base model, trained/trigger words, and the version description —
-    where authors put recommended sampler, steps, CFG, and prompt templates.
-    """
+async def _civitai_model_version(version_id: int) -> DanbooruOutput:
     try:
         data = await _get_json(
             _civitai_throttle, f"{_CIVITAI}/model-versions/{int(version_id)}"
@@ -573,13 +407,206 @@ async def civitai_model_version(
     )
 
 
-DANBOORU_TOOLS = [
-    danbooru_wiki,
-    danbooru_wiki_search,
-    danbooru_search_tags,
-    danbooru_search_artists,
-    danbooru_related_tags,
-    danbooru_post_tags,
-    civitai_model,
-    civitai_model_version,
-]
+def build_danbooru_tools(config: Config) -> list:
+    """Danbooru + Civitai tools, with `config` (CSV dump paths) captured by closure."""
+
+    @tool(
+        description="Fetch a Danbooru wiki page by exact title for tag definitions or curated tag lists.",
+        instructions=(
+            "Use for pages such as list_of_* or tag_group:* and for single-tag definitions. "
+            "Titles are normalized to lowercase underscores; returned [[links]] can be fetched next."
+        ),
+        show_result=True,
+    )
+    async def danbooru_wiki(
+        title: Annotated[
+            str,
+            Field(
+                min_length=1,
+                description="Danbooru wiki page title, normalized to lowercase underscores.",
+            ),
+        ],
+    ) -> DanbooruOutput:
+        """Fetch a Danbooru wiki page by title, e.g. 'list_of_uniforms' or 'collarbone'.
+
+        Use to read curated tag lists (pages named list_of_* or tag_group:*) or the
+        definition of a single tag. Returns the wiki body text; [[double brackets]]
+        inside it are links to other tags/wiki pages you can fetch next.
+        """
+        return await _danbooru_wiki(title, config)
+
+    @tool(
+        description="Search Danbooru wiki page titles by fuzzy phrase or wildcard pattern.",
+        instructions="Use when the exact wiki title is unknown. Fetch interesting returned titles with danbooru_wiki.",
+        show_result=True,
+    )
+    async def danbooru_wiki_search(
+        query: Annotated[
+            str,
+            Field(
+                min_length=1,
+                description="Phrase or wildcard pattern to match against Danbooru wiki page titles.",
+            ),
+        ],
+    ) -> DanbooruOutput:
+        """Find Danbooru wiki page titles loosely matching a phrase or pattern.
+
+        Use when you don't know the exact wiki page name: 'uniform', 'school girl
+        outfits', or a glob like 'list_of_*' all work — matching is fuzzy, best
+        hits first. Returns up to 30 titles — fetch the interesting ones with
+        `danbooru_wiki` next.
+        """
+        return await _danbooru_wiki_search(query, config)
+
+    @tool(
+        description="Search Danbooru non-artist tags and verify whether a tag exists.",
+        instructions=(
+            "Use for general, character, copyright, and meta tags. Do not use for artists; "
+            "call danbooru_search_artists for artist/style tags."
+        ),
+        show_result=True,
+    )
+    async def danbooru_search_tags(
+        query: Annotated[
+            str,
+            Field(
+                min_length=1,
+                description="General, character, copyright, or meta tag phrase to verify.",
+            ),
+        ],
+    ) -> DanbooruOutput:
+        """Search Danbooru general/character/copyright tags; use to verify a tag exists.
+
+        Matching is loose: a natural phrase ('school girl uniform', 'maids') finds
+        the closest real tags — no need for exact names; explicit * wildcards also
+        work. Returns up to 20 tags with category and post count, best match
+        first. A tag that doesn't appear here is NOT a valid Danbooru tag.
+        NOT for artists — the local dump has no artist tags, so artist names come
+        back as wrong look-alike matches; use `danbooru_search_artists` instead.
+        """
+        return await _danbooru_search_tags(query, config)
+
+    @tool(
+        description="Search Danbooru artist tags by name.",
+        instructions=(
+            "Use for artist or style lookups. Query with romanized names or shorter fragments; "
+            "this is the only Danbooru tool intended to verify artist tags."
+        ),
+        show_result=True,
+    )
+    async def danbooru_search_artists(
+        query: Annotated[
+            str,
+            Field(
+                min_length=1,
+                description="Artist name, romanized name, fragment, or wildcard pattern.",
+            ),
+        ],
+    ) -> DanbooruOutput:
+        """Search Danbooru ARTIST tags by name; the only tool that finds artists.
+
+        Always use this for artist/style lookups ('art by wlop', 'style of …') —
+        artist tags are absent from the local dump and `danbooru_search_tags`
+        cannot verify them. Query with the artist's romanized name (substring is
+        fine; * wildcards work). Always live API. Returns up to 20 artist tags
+        with post counts, most-used first; an artist not listed here has no
+        Danbooru tag.
+        """
+        return await _danbooru_search_artists(query)
+
+    @tool(
+        description="List tags that commonly co-occur with one valid Danbooru tag.",
+        instructions="Use to expand a prompt theme from a known valid tag. Pass one tag using underscores, not a free-form phrase.",
+        show_result=True,
+    )
+    async def danbooru_related_tags(
+        tag: Annotated[
+            str,
+            Field(
+                min_length=1,
+                pattern=r"^[^\s]+$",
+                description="One valid Danbooru tag using underscores instead of spaces.",
+            ),
+        ],
+    ) -> DanbooruOutput:
+        """List the tags that most often co-occur with `tag` on Danbooru posts.
+
+        Use to expand a theme: given 'collarbone' it returns what real posts pair
+        with it. `tag` must be one valid tag (underscores, not spaces).
+        """
+        return await _danbooru_related_tags(tag)
+
+    @tool(
+        description="Show full tag lists from recent Danbooru posts matching a tag query.",
+        instructions=(
+            "Use to see how real posts combine tags around a theme. Anonymous Danbooru search allows at most two tags."
+        ),
+        show_result=True,
+    )
+    async def danbooru_post_tags(
+        tags: Annotated[
+            str,
+            Field(
+                min_length=1,
+                description="Danbooru post search query, normally one or two tags.",
+            ),
+        ],
+    ) -> DanbooruOutput:
+        """Show the full tag lists of recent Danbooru posts matching a tag search.
+
+        Use to see how real posts combine tags around a theme. `tags` is a Danbooru
+        search query (e.g. 'collarbone 1girl'); anonymous search allows AT MOST two
+        tags. Returns each post's character/copyright/general tags.
+        """
+        return await _danbooru_post_tags(tags)
+
+    @tool(
+        description="Fetch a Civitai model page by numeric model id.",
+        instructions=(
+            "Use for model-level metadata, tags, author notes, and available version ids. "
+            "Use civitai_model_version for version-specific trigger words and settings."
+        ),
+        show_result=True,
+    )
+    async def civitai_model(
+        model_id: Annotated[
+            int,
+            Field(gt=0, description="Numeric Civitai model id."),
+        ],
+    ) -> DanbooruOutput:
+        """Fetch a Civitai model page by numeric id (e.g. 994401 for MatureRitual).
+
+        Returns the model's name, type, tags, the author's usage notes (recommended
+        prompts, sampler, CFG), and its versions with ids — pass a version id to
+        `civitai_model_version` for version-specific notes.
+        """
+        return await _civitai_model(model_id)
+
+    @tool(
+        description="Fetch one Civitai model version by numeric version id.",
+        instructions="Use for version-specific base model, trigger words, author notes, sampler, steps, CFG, or prompt templates.",
+        show_result=True,
+    )
+    async def civitai_model_version(
+        version_id: Annotated[
+            int,
+            Field(gt=0, description="Numeric Civitai model version id."),
+        ],
+    ) -> DanbooruOutput:
+        """Fetch one Civitai model version by id (e.g. 2730987) for its usage notes.
+
+        Returns base model, trained/trigger words, and the version description —
+        where authors put recommended sampler, steps, CFG, and prompt templates.
+        """
+        return await _civitai_model_version(version_id)
+
+    return [
+        danbooru_wiki,
+        danbooru_wiki_search,
+        danbooru_search_tags,
+        danbooru_search_artists,
+        danbooru_related_tags,
+        danbooru_post_tags,
+        civitai_model,
+        civitai_model_version,
+    ]

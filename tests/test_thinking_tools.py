@@ -8,6 +8,7 @@ every model in the team (lead + shared member model) is updated together.
 
 from magi.agent.model import ModelDefinition, ModelProviderEnum, build_model
 from magi.agent.tools.thinking import build_thinking_tools
+from magi.core.config import Config
 
 
 def _tool_text(result: dict) -> str:
@@ -21,7 +22,8 @@ def _model(**kwargs):
             model_id="qwen3.5-9b",
             has_tools=True,
             **kwargs,
-        )
+        ),
+        Config(),
     )
 
 

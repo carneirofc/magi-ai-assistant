@@ -22,6 +22,7 @@ from agno.utils.log import log_info
 from agno.utils.message import get_text_from_message
 
 from magi.agent.model import build_member_model
+from magi.core.config import Config
 from magi.core.memory import CurateFn, CurationInput, CurationResult, FactOp
 from magi.core.prompts import load_prompt
 
@@ -93,11 +94,11 @@ def _parse(text: str) -> CurationResult:
     )
 
 
-def build_memory_curator() -> CurateFn:
+def build_memory_curator(config: Config) -> CurateFn:
     """An async `CurateFn`: one finished turn -> the durable-memory changes to apply."""
     agent = Agent(
         name="MemoryCurator",
-        model=build_member_model(),
+        model=build_member_model(config),
         system_message=load_prompt("curation.md"),
         markdown=False,
         telemetry=False,

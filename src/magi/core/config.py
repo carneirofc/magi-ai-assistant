@@ -1,10 +1,15 @@
-"""Application configuration — code-first, set at the entrypoint.
+"""Application configuration — code-first, an immutable value object.
 
-Settings are plain Python: the `Config` dataclass below holds the defaults, and
-each entrypoint (main.py, main_discord.py, main_api.py) overrides what its
-deployment needs via `configure(...)` before building anything. To find out
-what a value is, read the entrypoint and this file — no env-var archaeology.
-The startup banner (`config.log_settings()`, called from magi/channels/bootstrap.py)
+Settings are plain Python: `Config` is a frozen dataclass of defaults. Each
+entrypoint (main.py, main_discord.py, main_api.py) constructs one, overriding
+what its deployment needs — `Config(model_provider="llamacpp", ...)` — and hands
+it to the composition root, which carries it through an `AgentContext`
+(magi/core/context.py). There is no process-global config and no in-place
+mutation: two assistants with different `Config`s can coexist in one process.
+To vary an existing config immutably, use `dataclasses.replace(cfg, ...)` (that
+is how the container entrypoints overlay their host deltas). To find out what a
+value is, read the entrypoint and this file — no env-var archaeology. The
+startup banner (`config.log_settings()`, called from magi/channels/bootstrap.py)
 prints the effective values at runtime.
 
 Only *secrets* come from the environment / `.env` (tokens and API keys never
@@ -37,8 +42,9 @@ def _mask(secret: str | None) -> str:
 
 @dataclass(frozen=True)
 class Config:
-    """All app settings. Override per deployment via `configure(...)` — never
-    mutate directly (frozen catches accidental writes)."""
+    """All app settings. Construct per deployment — `Config(field=value, ...)` —
+    and thread it through `AgentContext`; vary an existing one with
+    `dataclasses.replace(cfg, ...)`. Frozen: never mutate in place."""
 
     # --- LiteLLM proxy: gateway to remote backends (Databricks Claude, …) ---
     litellm_base_url: str = "http://localhost:4000"
@@ -88,7 +94,7 @@ class Config:
     model_extra_body: dict = field(default_factory=dict)
 
     # --- Agent behavior. Edit prompts/system.md to change the default brain;
-    # override `system_prompt` in configure() for per-deploy customization. ---
+    # set `system_prompt` on the deployment's `Config(...)` for customization. ---
     system_prompt: str = field(default_factory=lambda: load_prompt("system.md"))
 
     # --- Persistence (sessions + long-term user memories) ---
@@ -210,7 +216,7 @@ class Config:
     # --- Object storage (see magi/core/storage + magi/agent/tools/storage). A
     # durable file/image archive the model uses as memory: it can stash a file
     # under the current user's scope and recall it later by reference. Off by
-    # default; turn on per deployment via configure(). Two interchangeable
+    # default; turn on per deployment on the `Config`. Two interchangeable
     # backends, picked by `storage_backend`:
     #   "local" — bytes on the filesystem under `storage_local_dir`. No server, no
     #             boto3, no credentials; the zero-setup default once enabled.
@@ -219,8 +225,9 @@ class Config:
     #             default endpoint points at a local RustFS for testing — see
     #             docker-compose.yaml / README. Needs the optional `s3` extra
     #             (`uv sync --extra s3`; boto3 lazy-imported, absent => tools off).
-    # Credentials are secrets (.env); the rest lives here in code. The legacy
-    # `s3_enabled=True` still works (configure() maps it to storage_enabled). ---
+    # Credentials are secrets (.env); the rest lives here in code. (The legacy
+    # `s3_enabled` shim was dropped with `configure()`; set `storage_enabled=True`
+    # + `storage_backend="s3"` directly.) ---
     storage_enabled: bool = False
     storage_backend: str = "local"  # "local" | "s3"
     storage_local_dir: str = "data/artifacts"
@@ -326,33 +333,3 @@ class Config:
                 shown = value
             log_info(f"  {f.name} = {shown}")
         log_info("========================")
-
-
-config = Config()
-
-
-def configure(**overrides) -> Config:
-    """Set deployment configuration in code — call once, at the entrypoint,
-    before building any channel/team (values are read at build/run time).
-
-    Mutates the shared singleton in place so every `from magi.core.config import
-    config` already holding the object sees the new values. The dataclass
-    stays frozen so only this deliberate path can write.
-    """
-    # Back-compat: object storage used to be S3-only and gated by `s3_enabled`.
-    # It's now backend-agnostic (`storage_enabled` + `storage_backend`); honor the
-    # old key so existing entrypoints keep working, and default to the S3 backend
-    # since that's what `s3_enabled` implied.
-    if "s3_enabled" in overrides:
-        legacy = overrides.pop("s3_enabled")
-        log_info("config: 's3_enabled' is deprecated — use storage_enabled + storage_backend")
-        overrides.setdefault("storage_enabled", legacy)
-        if legacy:
-            overrides.setdefault("storage_backend", "s3")
-
-    valid = {f.name for f in fields(config)}
-    for name, value in overrides.items():
-        if name not in valid:
-            raise ValueError(f"unknown config field {name!r}; valid: {sorted(valid)}")
-        object.__setattr__(config, name, value)
-    return config

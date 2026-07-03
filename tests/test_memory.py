@@ -7,6 +7,7 @@ files, scope routes them to the right user/session, short-term stays capped, and
 
 import pytest
 
+from magi.core.config import Config
 from magi.core.memory import manager as manager_mod
 from magi.core.memory.manager import MemoryManager
 from magi.core.memory.store import FileMemoryStore
@@ -24,6 +25,7 @@ def _reset_scope():
 def manager(tmp_path):
     mgr = MemoryManager(
         store=FileMemoryStore(tmp_path / "memory"),
+        config=Config(),
         short_term_max=3,
         persona_seed="You are Alyssa.",
     )
@@ -84,7 +86,7 @@ def test_build_context_omits_empty_sections(manager):
 
 
 def test_scope_required_before_use(tmp_path):
-    mgr = MemoryManager(FileMemoryStore(tmp_path), short_term_max=5)
+    mgr = MemoryManager(FileMemoryStore(tmp_path), Config(), short_term_max=5)
     with pytest.raises(RuntimeError):
         mgr.remember("no scope set")
 
@@ -125,6 +127,7 @@ async def test_session_summary_rolls_up_and_folds_into_episode(tmp_path):
 
     mgr = MemoryManager(
         store=FileMemoryStore(tmp_path / "mem"),
+        config=Config(),
         short_term_max=3,
         summarize_session_fn=fake_summarize,
         summarize_every=2,
@@ -152,6 +155,7 @@ async def test_no_session_summary_below_threshold(tmp_path):
 
     mgr = MemoryManager(
         store=FileMemoryStore(tmp_path / "mem"),
+        config=Config(),
         short_term_max=3,
         summarize_session_fn=fake_summarize,
         summarize_every=5,
@@ -168,6 +172,7 @@ async def test_session_summary_failure_never_breaks_the_chat(tmp_path):
 
     mgr = MemoryManager(
         store=FileMemoryStore(tmp_path / "mem"),
+        config=Config(),
         short_term_max=3,
         summarize_session_fn=boom,
         summarize_every=2,
@@ -187,6 +192,7 @@ async def test_session_summary_failure_never_breaks_the_chat(tmp_path):
 def test_huge_turn_is_clamped(tmp_path):
     mgr = MemoryManager(
         store=FileMemoryStore(tmp_path / "mem"),
+        config=Config(),
         short_term_max=3,
         short_term_turn_max_chars=100,
     )
@@ -204,6 +210,7 @@ async def test_pending_buffer_capped_when_summarizer_keeps_failing(tmp_path):
 
     mgr = MemoryManager(
         store=FileMemoryStore(tmp_path / "mem"),
+        config=Config(),
         short_term_max=2,
         summarize_session_fn=boom,
         summarize_every=2,
@@ -223,6 +230,7 @@ async def test_runaway_session_summary_is_clamped(tmp_path):
 
     mgr = MemoryManager(
         store=FileMemoryStore(tmp_path / "mem"),
+        config=Config(),
         short_term_max=2,
         summarize_session_fn=huge,
         summarize_every=2,
@@ -251,6 +259,7 @@ def test_long_term_profile_and_recent_raw_injected(tmp_path):
     curator) plus only the most-recent raw facts written via remember()."""
     mgr = MemoryManager(
         store=FileMemoryStore(tmp_path / "mem"),
+        config=Config(),
         short_term_max=5,
         long_term_recent_raw=2,
     )
@@ -288,7 +297,7 @@ class _FakeRetriever:
 def test_retriever_indexes_and_overrides_context(tmp_path):
     retriever = _FakeRetriever({"long_term": ["relevant fact"], "episode": ["relevant episode"]})
     mgr = MemoryManager(
-        FileMemoryStore(tmp_path / "mem"), short_term_max=5, retriever=retriever
+        FileMemoryStore(tmp_path / "mem"), Config(), short_term_max=5, retriever=retriever
     )
     mgr.set_scope(user_id="u1", session_id="s1")
     mgr.remember("some stored fact")
@@ -302,7 +311,7 @@ def test_retriever_indexes_and_overrides_context(tmp_path):
 def test_retriever_empty_falls_back_to_whole_file(tmp_path):
     retriever = _FakeRetriever({})  # search returns []
     mgr = MemoryManager(
-        FileMemoryStore(tmp_path / "mem"), short_term_max=5, retriever=retriever
+        FileMemoryStore(tmp_path / "mem"), Config(), short_term_max=5, retriever=retriever
     )
     mgr.set_scope(user_id="u1", session_id="s1")
     mgr.remember("the whole-file fact")

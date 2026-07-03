@@ -19,7 +19,7 @@ from typing import Optional, Protocol
 
 from agno.utils.log import log_info, log_warning
 
-from magi.core.config import config
+from magi.core.config import Config
 from magi.core.embeddings import embed_text
 
 
@@ -36,14 +36,15 @@ class MemoryRetriever(Protocol):
 class SemanticIndex:
     """Qdrant-backed retriever. All public methods are crash-proof by design."""
 
-    def __init__(self, collection: str = "chatbot_memory"):
+    def __init__(self, config: Config, collection: str = "chatbot_memory"):
+        self.config = config
         self.collection = collection
         self._client = None  # lazily built; None means "unavailable, no-op"
         self._dim: Optional[int] = None
 
     # --- embedding ----------------------------------------------------------
     def _embed(self, text: str) -> Optional[list[float]]:
-        return embed_text(text)  # shared proxy embedder; None on any failure
+        return embed_text(text, self.config)  # shared proxy embedder; None on any failure
 
     # --- qdrant client (lazy) ----------------------------------------------
     def _ensure_client(self, dim: int):
@@ -53,7 +54,7 @@ class SemanticIndex:
         try:
             from qdrant_client import QdrantClient, models
 
-            client = QdrantClient(url=config.qdrant_url, api_key=config.qdrant_api_key)
+            client = QdrantClient(url=self.config.qdrant_url, api_key=self.config.qdrant_api_key)
             if not client.collection_exists(self.collection):
                 client.create_collection(
                     collection_name=self.collection,
@@ -113,7 +114,7 @@ class SemanticIndex:
         try:
             from qdrant_client import QdrantClient
 
-            client = QdrantClient(url=config.qdrant_url, api_key=config.qdrant_api_key)
+            client = QdrantClient(url=self.config.qdrant_url, api_key=self.config.qdrant_api_key)
             if not client.collection_exists(self.collection):
                 return None
             self._client = client
@@ -182,7 +183,7 @@ class SemanticIndex:
             return []
 
 
-def build_semantic_index() -> Optional[SemanticIndex]:
+def build_semantic_index(config: Config) -> Optional[SemanticIndex]:
     """Construct the index when enabled in config, else None (feature off)."""
     if not config.semantic_memory:
         return None
@@ -190,4 +191,4 @@ def build_semantic_index() -> Optional[SemanticIndex]:
         f"semantic: ENABLED (qdrant={config.qdrant_url}, embed={config.embedding_model_id}, "
         f"top_k={config.semantic_top_k})"
     )
-    return SemanticIndex()
+    return SemanticIndex(config)

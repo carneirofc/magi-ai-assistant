@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from magi.agent.hooks import tool_call_hook
 from magi.agent.members import MEMBER_BUILDERS
 from magi.agent.model import build_lead_model, build_member_model
-from magi.agent.tools.http import HTTP_TOOLS
+from magi.agent.tools.http import build_http_tools
 from magi.agent.tools.knowledge import build_knowledge_tools
 from magi.agent.tools.media import MEDIA_TOOLS
 from magi.agent.tools.memory import build_memory_tools
@@ -31,8 +31,7 @@ from magi.agent.tools.outputs import ToolOutput, ok
 from magi.agent.tools.storage import build_storage_tools
 from magi.agent.tools.thinking import build_thinking_tools
 from magi.agent.tools.vision import VISION_TOOLS
-from magi.core.config import config
-from magi.core.db import get_db
+from magi.core.context import AgentContext
 from magi.core.items import build_item_archive_from_config
 from magi.core.knowledge import build_knowledge_from_config
 from magi.core.memory import MemoryManager
@@ -105,20 +104,23 @@ def _build_introspection_tool(lead: Model, members):
 
 
 def build_team(
+    ctx: AgentContext,
     memory: MemoryManager,
     db: Optional[BaseDb] = None,
-    member_builders: Optional[Sequence[Callable[[Model], Agent]]] = None,
+    member_builders: Optional[Sequence[Callable[[AgentContext, Model], Agent]]] = None,
 ) -> Team:
     """Assemble the chatbot team: a multimodal lead routing to specialist members.
 
-    `memory` is injected so the lead's memory tools are bound to it (no globals).
-    `member_builders` defaults to the full registry; a channel that can't host a
-    specialist (e.g. the Discord member outside Discord) passes a trimmed list.
+    `ctx` carries the config the model/tool/store builders read (no globals);
+    `memory` is injected so the lead's memory tools are bound to it. `member_builders`
+    defaults to the full registry; a channel that can't host a specialist (e.g. the
+    Discord member outside Discord) passes a trimmed list.
     """
-    lead = build_lead_model()
-    member_model = build_member_model()
+    config = ctx.config
+    lead = build_lead_model(config)
+    member_model = build_member_model(config)
     builders = MEMBER_BUILDERS if member_builders is None else list(member_builders)
-    members = [build(member_model) for build in builders]
+    members = [build(ctx, member_model) for build in builders]
     # agno copies the team's tool_hooks onto the *team-level* tools only —
     # members never inherit them, so their tool calls (wiki lookups, http_get,
     # …) ran invisibly. Attach the same hook to every member: each call is
@@ -133,14 +135,14 @@ def build_team(
     # deployment without it (or with its backend down) still boots cleanly.
     storage_tools: list = []
     if config.storage_enabled:
-        store = build_object_store_from_config()
+        store = build_object_store_from_config(config)
         if store is not None:
             try:
                 store.ensure_bucket()
             except Exception as exc:  # noqa: BLE001 — a down backend must not abort startup.
                 log_info(f"storage: backend check skipped ({type(exc).__name__}: {exc})")
             # The item archive (None unless enabled) adds meaning-based file search.
-            storage_tools = build_storage_tools(store, memory, build_item_archive_from_config())
+            storage_tools = build_storage_tools(store, memory, build_item_archive_from_config(config))
             log_info(
                 f"storage: ENABLED ({len(storage_tools)} tools, backend={config.storage_backend})"
             )
@@ -149,10 +151,10 @@ def build_team(
     # Gated by config; degrades to nothing when off / Qdrant down / embeddings absent,
     # so a deployment without it still boots cleanly.
     knowledge_tools: list = []
-    knowledge = build_knowledge_from_config()
+    knowledge = build_knowledge_from_config(config)
     if knowledge is not None:
         # The store is both searcher and tagger, so it powers read + tag-write tools.
-        knowledge_tools = build_knowledge_tools(knowledge, knowledge)
+        knowledge_tools = build_knowledge_tools(knowledge, config, knowledge)
         log_info(
             f"knowledge: ENABLED ({len(knowledge_tools)} tool(s), "
             f"collection={config.knowledge_collection})"
@@ -179,7 +181,7 @@ def build_team(
         model=lead,  # lead / router brain — must support tools
         members=members,
         instructions=instructions,
-        db=db or get_db(),
+        db=db or ctx.db,
         # Memory is handled deliberately, not by the framework: we inject our own
         # short-term window + long-term + episodic + persona per run (see
         # magi/core/memory) and the lead writes back only via the memory tools. So we
@@ -216,7 +218,7 @@ def build_team(
             *MEDIA_TOOLS,
             # Read a URL (http_get) and perform an explicit user-described request
             # (http_request) without round-tripping through a member.
-            *HTTP_TOOLS,
+            *build_http_tools(config),
             *build_memory_tools(memory),
             # Durable byte archive: keep a file/image for later, recall by
             # reference (empty unless storage is enabled).

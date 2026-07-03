@@ -18,7 +18,7 @@ import pydantic
 from agno.models.base import Model
 from agno.utils.log import log_info
 
-from magi.core.config import config
+from magi.core.config import Config
 
 
 class ModelProviderEnum(enum.StrEnum):
@@ -94,7 +94,7 @@ def _proxy_litellm_cls():
     return ProxyLiteLLM
 
 
-def _build_litellm(model: ModelDefinition) -> Model:
+def _build_litellm(model: ModelDefinition, config: Config) -> Model:
     # agno's LiteLLM uses the litellm *SDK*. The `litellm_proxy/` prefix routes
     # the call through our proxy; without it the SDK tries to guess a provider.
     model_id = model.model_id
@@ -127,7 +127,7 @@ def _build_litellm(model: ModelDefinition) -> Model:
     return llm
 
 
-def _build_llamacpp(model: ModelDefinition) -> Model:
+def _build_llamacpp(model: ModelDefinition, config: Config) -> Model:
     """Direct llama.cpp llama-server via its OpenAI-compatible /v1 endpoint.
 
     The server fixes its context window at launch (--ctx-size), so `num_ctx`
@@ -155,7 +155,7 @@ def _build_llamacpp(model: ModelDefinition) -> Model:
     return llm
 
 
-def _build_openai(model: ModelDefinition) -> Model:
+def _build_openai(model: ModelDefinition, config: Config) -> Model:
     """A generic OpenAI-compatible remote serving endpoint (config.openai_base_url).
 
     For any hosted server that speaks the OpenAI /v1 API — real OpenAI, OpenRouter,
@@ -184,7 +184,7 @@ def _build_openai(model: ModelDefinition) -> Model:
     return llm
 
 
-def _build_ollama(model: ModelDefinition) -> Model:
+def _build_ollama(model: ModelDefinition, config: Config) -> Model:
     """Direct Ollama, bypassing the proxy. Handy for local dev / offline tests."""
     from agno.models.ollama import Ollama
 
@@ -194,7 +194,7 @@ def _build_ollama(model: ModelDefinition) -> Model:
     return Ollama(id=model.model_id, host=config.ollama_host, options=options)
 
 
-_BUILDERS: dict[ModelProviderEnum, Callable[[ModelDefinition], Model]] = {
+_BUILDERS: dict[ModelProviderEnum, Callable[[ModelDefinition, Config], Model]] = {
     ModelProviderEnum.LITELLM: _build_litellm,
     ModelProviderEnum.OLLAMA: _build_ollama,
     ModelProviderEnum.LLAMACPP: _build_llamacpp,
@@ -202,13 +202,13 @@ _BUILDERS: dict[ModelProviderEnum, Callable[[ModelDefinition], Model]] = {
 }
 
 
-def build_model(model: ModelDefinition) -> Model:
+def build_model(model: ModelDefinition, config: Config) -> Model:
     """Turn a `ModelDefinition` into a concrete agno `Model`."""
     log_info(f"building model: {model.model_dump()}")
     builder = _BUILDERS.get(model.provider)
     if builder is None:
         raise ValueError(f"unsupported model provider: {model.provider!r}")
-    return builder(model)
+    return builder(model, config)
 
 
 # --- Role specs -------------------------------------------------------------
@@ -225,7 +225,7 @@ def _provider(raw: str) -> ModelProviderEnum:
         raise ValueError(f"unknown MODEL_PROVIDER {raw!r}; use one of {valid}") from None
 
 
-def lead_model_def() -> ModelDefinition:
+def lead_model_def(config: Config) -> ModelDefinition:
     """The lead/router brain: tools + multimodal + a 128k context window."""
     return ModelDefinition(
         provider=_provider(config.model_provider),
@@ -241,7 +241,7 @@ def lead_model_def() -> ModelDefinition:
     )
 
 
-def member_model_def() -> ModelDefinition:
+def member_model_def(config: Config) -> ModelDefinition:
     """A specialist member: tools + multimodal, smaller context window."""
     return ModelDefinition(
         provider=_provider(config.model_provider),
@@ -257,9 +257,9 @@ def member_model_def() -> ModelDefinition:
     )
 
 
-def build_lead_model() -> Model:
-    return build_model(lead_model_def())
+def build_lead_model(config: Config) -> Model:
+    return build_model(lead_model_def(config), config)
 
 
-def build_member_model() -> Model:
-    return build_model(member_model_def())
+def build_member_model(config: Config) -> Model:
+    return build_model(member_model_def(config), config)

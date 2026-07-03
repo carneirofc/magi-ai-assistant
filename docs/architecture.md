@@ -25,8 +25,8 @@ it is the engine that several bots share:
 | Principle | How it shows up in the code |
 |---|---|
 | **`core/` is model-free** | [`magi/core`](../src/magi/core) never imports a model. Anything needing an LLM (summarizers, the curator) is injected as a callable by the agent layer. |
-| **Dependency injection, no globals** | The team, memory manager, and DB are constructed at composition roots and passed in. Scope flows through a `ContextVar`, never as a tool argument. |
-| **Code-first config** | All settings are plain Python set at the entrypoint via `configure(...)`. Only *secrets* come from `.env`. See [configuration.md](configuration.md). |
+| **Dependency injection, no globals** | The team, memory manager, and DB are constructed at composition roots and passed in. Config and shared services are threaded explicitly through an `AgentContext` (`core/context.py`) — no process-global config. Scope flows through a `ContextVar`, never as a tool argument. |
+| **Code-first config** | All settings are plain Python on the frozen `Config` value object, constructed per deployment (each entrypoint's `apply_deployment_config()` returns one) and carried in an `AgentContext`. Only *secrets* come from `.env`. See [configuration.md](configuration.md). |
 | **Graceful degradation** | Optional features (storage, knowledge, semantic search, MCP) degrade to "tool not attached" when their backend is missing or down. The bot always boots. |
 | **Pluggable extension points** | Members are a registry (`register_member`), prompts are an overlay (`load_prompt`), tools are a list. A persona extends all three from the outside. |
 | **Structural contracts over base classes** | `Runner` (`core/conversation.py`) and `PlatformAdapter` (`channels/gateway.py`, [ADR 0003](adr/0003-gateway-and-platform-adapters.md)) are narrow `Protocol`s a class satisfies by shape, not by inheriting. |
@@ -89,23 +89,28 @@ need a model, and they are handed to `core` as injected callables.
 
 ## Composition: how the stack is built
 
-Every channel calls one shared assembler,
-[`build_conversation_service`](../src/magi/channels/bootstrap.py), in a fixed order:
+A deployment constructs one immutable `Config`, wraps it in an `AgentContext`
+(`ctx`, carrying the config plus shared services like the db), and every channel
+calls one shared assembler,
+[`build_conversation_service(ctx, …)`](../src/magi/channels/bootstrap.py), in a
+fixed order — the top-level [`Assistant.create(config)`](../src/magi/app.py) does
+exactly this:
 
 ```
-summarizers (gated by config) → memory → team(memory, members) →
-ConversationService(team, memory, channel_guidance)
+AgentContext(config) → summarizers (gated by config) → memory →
+build_team(ctx, memory, members) → ConversationService(team, memory, channel_guidance)
 ```
 
 ```mermaid
 flowchart LR
-    CFG[config] --> BOOT[build_conversation_service]
+    CFG[Config] --> CTX[AgentContext]
+    CTX --> BOOT[build_conversation_service ctx]
     BOOT -->|if session_summary| SUM[session summarizer]
     BOOT -->|if memory_curation| CUR[memory curator]
     SUM --> MEM[MemoryManager]
     CUR --> MEM
     BOOT --> MEM
-    MEM --> TEAM[build_team]
+    MEM --> TEAM[build_team ctx]
     TEAM --> CS[ConversationService]
     CS --> CH[channel transport]
 ```

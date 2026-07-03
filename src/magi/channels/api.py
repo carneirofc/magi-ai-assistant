@@ -75,6 +75,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, model_validator
 
 from magi.channels.gateway import scoped_user_id
+from magi.core.context import AgentContext
 from magi.core.conversation import ConversationDelta, ConversationReply, ConversationService
 
 # This channel's namespace for `scoped_user_id` (ADR 0003) — the native
@@ -604,15 +605,16 @@ def _collect_mcp_toolkits(runner: object) -> list[MCPConnection]:
     return toolkits
 
 
-def build_api_app(db: Optional[BaseDb] = None) -> FastAPI:
-    """Composition root: the real stack from config, served over HTTP."""
+def build_api_app(ctx: "AgentContext", db: Optional[BaseDb] = None) -> FastAPI:
+    """Composition root: the real stack from `ctx`, served over HTTP."""
     from magi.channels.bootstrap import build_conversation_service
     from magi.agent.members import MEMBER_BUILDERS, build_discord_agent
-    from magi.core.config import config
     from magi.core.prompts import load_prompt
 
+    config = ctx.config
     log_info(f"building api app (db={'injected' if db else 'default'})")
     conversation = build_conversation_service(
+        ctx,
         channel_guidance=load_prompt("channels/api.md"),
         db=db,
         # The Discord specialist needs a live Discord conversation context; over
@@ -629,7 +631,7 @@ def build_api_app(db: Optional[BaseDb] = None) -> FastAPI:
         from magi.channels.admin import build_admin_app
 
         log_info("api: admin surface ALSO mounted on this app, under /admin/v1/* (config.admin_enabled)")
-        admin_app = build_admin_app()
+        admin_app = build_admin_app(ctx)
 
     return create_app(
         conversation,
@@ -660,9 +662,7 @@ class ApiAdapter:
         await self._server.serve()
 
 
-def build_api_adapter(db: Optional[BaseDb] = None) -> ApiAdapter:
+def build_api_adapter(ctx: "AgentContext", db: Optional[BaseDb] = None) -> ApiAdapter:
     """Composition root for the `PlatformAdapter` form — wraps `build_api_app`,
     it does not reimplement it, so the two stay in lockstep."""
-    from magi.core.config import config
-
-    return ApiAdapter(build_api_app(db), host=config.api_host, port=config.api_port)
+    return ApiAdapter(build_api_app(ctx, db), host=ctx.config.api_host, port=ctx.config.api_port)

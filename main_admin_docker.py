@@ -7,13 +7,16 @@ container (still in code — no new env vars, see core/config). The shared
 deployment config is reused verbatim from main_admin.apply_deployment_config().
 """
 
-from magi.core.config import configure
+import dataclasses
+
+from magi.core.config import Config
 from main_admin import apply_deployment_config
 
 
-def apply_container_overrides() -> None:
+def apply_container_overrides(config: Config) -> Config:
     """The container-only deltas from the host deployment."""
-    configure(
+    return dataclasses.replace(
+        config,
         # Bind every interface so the BFF container can reach this one over the
         # compose network. The port is still NOT published to the host (see the
         # compose service) — only `web` is reachable from outside.
@@ -26,15 +29,15 @@ def apply_container_overrides() -> None:
 
 
 def main() -> None:
-    apply_deployment_config()
-    apply_container_overrides()
+    config = apply_container_overrides(apply_deployment_config())
 
     import uvicorn
 
     from magi.channels.admin import build_admin_app
-    from magi.core.config import config
+    from magi.core.context import AgentContext
 
-    uvicorn.run(build_admin_app(), host=config.admin_host, port=config.admin_port)
+    ctx = AgentContext(config=config)
+    uvicorn.run(build_admin_app(ctx), host=config.admin_host, port=config.admin_port)
 
 
 if __name__ == "__main__":

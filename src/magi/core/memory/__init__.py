@@ -15,7 +15,7 @@ from typing import Optional
 
 from agno.utils.log import log_info
 
-from magi.core.config import config
+from magi.core.config import Config
 from magi.core.items import ItemArchive, build_item_archive_from_config
 from magi.core.memory.curation import CurateFn, CurationInput, CurationResult, FactOp
 from magi.core.memory.manager import MemoryManager, MemoryScope, SummarizeFn
@@ -36,6 +36,7 @@ __all__ = [
 
 def build_memory(
     store: FileMemoryStore,
+    config: Config,
     *,
     short_term_max: int,
     persona_seed: str = "",
@@ -55,6 +56,7 @@ def build_memory(
     """Assemble a `MemoryManager` from already-built dependencies."""
     return MemoryManager(
         store=store,
+        config=config,
         short_term_max=short_term_max,
         persona_seed=persona_seed,
         summarize_session_fn=summarize_session_fn,
@@ -73,6 +75,7 @@ def build_memory(
 
 
 def build_memory_from_config(
+    config: Config,
     *,
     summarize_session_fn: Optional[SummarizeFn] = None,
     curate_fn: Optional[CurateFn] = None,
@@ -86,12 +89,13 @@ def build_memory_from_config(
     )
     return build_memory(
         store=FileMemoryStore(root),
+        config=config,
         short_term_max=config.short_term_max,
         persona_seed=config.persona_seed,
         summarize_session_fn=summarize_session_fn,
         summarize_every=config.summarize_every,
         long_term_recent_raw=config.long_term_recent_raw,
-        retriever=build_semantic_index(),  # None unless SEMANTIC_MEMORY is on
+        retriever=build_semantic_index(config),  # None unless SEMANTIC_MEMORY is on
         semantic_top_k=config.semantic_top_k,
         short_term_turn_max_chars=config.short_term_turn_max_chars,
         session_pending_max=config.session_pending_max,
@@ -99,5 +103,5 @@ def build_memory_from_config(
         curate_fn=curate_fn,
         long_term_fact_max_chars=config.long_term_fact_max_chars,
         long_term_facts_max=config.long_term_facts_max,
-        archive=build_item_archive_from_config(),  # None unless items_archive_enabled
+        archive=build_item_archive_from_config(config),  # None unless items_archive_enabled
     )

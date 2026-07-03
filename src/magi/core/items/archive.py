@@ -38,7 +38,7 @@ from typing import Optional, Sequence, Union
 
 from agno.utils.log import log_info, log_warning
 
-from magi.core.config import config
+from magi.core.config import Config
 from magi.core.embeddings import embed_text
 from magi.core.storage import LocalStore, S3Store, StorageError, build_object_store
 
@@ -68,8 +68,9 @@ class ItemHit:
 class ItemArchive:
     """Object-store bytes + a Qdrant vector for admin-managed items. Crash-proof."""
 
-    def __init__(self, store: ObjectStore, *, collection: Optional[str] = None):
+    def __init__(self, store: ObjectStore, config: Config, *, collection: Optional[str] = None):
         self.store = store
+        self.config = config
         self.collection = collection or config.items_collection
         self._client = None  # lazily built; None means "Qdrant unavailable, no-op"
         self._dim: Optional[int] = None
@@ -91,7 +92,7 @@ class ItemArchive:
         try:
             from qdrant_client import QdrantClient, models
 
-            client = QdrantClient(url=config.qdrant_url, api_key=config.qdrant_api_key)
+            client = QdrantClient(url=self.config.qdrant_url, api_key=self.config.qdrant_api_key)
             if not client.collection_exists(self.collection):
                 client.create_collection(
                     collection_name=self.collection,
@@ -113,7 +114,7 @@ class ItemArchive:
         try:
             from qdrant_client import QdrantClient
 
-            client = QdrantClient(url=config.qdrant_url, api_key=config.qdrant_api_key)
+            client = QdrantClient(url=self.config.qdrant_url, api_key=self.config.qdrant_api_key)
             if not client.collection_exists(self.collection):
                 return None
             self._client = client
@@ -172,7 +173,7 @@ class ItemArchive:
         text: str,
         metadata: Optional[dict[str, str]],
     ) -> None:
-        vector = embed_text(text)
+        vector = embed_text(text, self.config)
         if vector is None:
             return
         client = self._ensure_client(len(vector))
@@ -247,7 +248,7 @@ class ItemArchive:
         query or any failure."""
         if not query.strip():
             return []
-        vector = embed_text(query)
+        vector = embed_text(query, self.config)
         if vector is None:
             return []
         client = self._ensure_client(len(vector))
@@ -288,7 +289,7 @@ class ItemArchive:
         )
 
 
-def build_item_archive_from_config() -> Optional[ItemArchive]:
+def build_item_archive_from_config(config: Config) -> Optional[ItemArchive]:
     """Construct the archive when `items_archive_enabled`, else None (feature off).
 
     Builds its own object store (ungated by `storage_enabled` — the archive has its
@@ -299,7 +300,7 @@ def build_item_archive_from_config() -> Optional[ItemArchive]:
     """
     if not config.items_archive_enabled:
         return None
-    store = build_object_store(config.storage_backend)
+    store = build_object_store(config, config.storage_backend)
     if store is None:
         log_warning(
             "items: archive enabled but the object store could not be built "
@@ -314,4 +315,4 @@ def build_item_archive_from_config() -> Optional[ItemArchive]:
         f"items: archive ENABLED (backend={config.storage_backend}, "
         f"qdrant={config.qdrant_url}, collection={config.items_collection})"
     )
-    return ItemArchive(store)
+    return ItemArchive(store, config)

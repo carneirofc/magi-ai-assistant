@@ -19,7 +19,7 @@ from agno.utils.log import log_info
 from pydantic import BaseModel, Field
 
 from magi.agent.tools.outputs import ToolOutput, fail, ok
-from magi.core.config import config
+from magi.core.config import Config
 from magi.core.knowledge import KnowledgeSearcher, KnowledgeTagger
 
 
@@ -45,13 +45,13 @@ class TagData(BaseModel):
 
 
 def build_knowledge_tools(
-    searcher: KnowledgeSearcher, tagger: Optional[KnowledgeTagger] = None
+    searcher: KnowledgeSearcher, config: Config, tagger: Optional[KnowledgeTagger] = None
 ) -> list:
     """Return the knowledge tool set bound to the injected dependencies.
 
-    `searcher` powers the read tool; when `tagger` is given (the store), the
-    tag-write tool is included too. The store satisfies both, so the composition
-    root passes it as both."""
+    `searcher` powers the read tool; `config` supplies the retrieval top-k; when
+    `tagger` is given (the store), the tag-write tool is included too. The store
+    satisfies both, so the composition root passes it as both."""
 
     @tool(
         description="Search the knowledge base for reference material relevant to a question.",
@@ -93,7 +93,7 @@ def build_knowledge_tools(
         """
         hits = searcher.search(
             query.strip(),
-            config.knowledge_top_k,
+            config.knowledge_top_k,  # the builder's injected config, by closure
             subject=subject.strip() or None,
             tags=[t for t in tags if t.strip()],
         )

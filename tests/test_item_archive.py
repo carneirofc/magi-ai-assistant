@@ -12,18 +12,19 @@ import dataclasses
 from pathlib import Path
 
 import magi.core.items.archive as arch
+from magi.core.config import Config
 from magi.core.items import GLOBAL_SCOPE, ItemArchive, build_item_archive_from_config
 from magi.core.storage import LocalStore, StorageError
 
 
 def _cfg(**overrides):
-    return dataclasses.replace(arch.config, **overrides)
+    return dataclasses.replace(Config(), **overrides)
 
 
 # --- blob side (real LocalStore) --------------------------------------------
 def test_persist_and_read_blob_roundtrip(monkeypatch, tmp_path):
     monkeypatch.setattr(arch, "embed_text", lambda *a, **k: None)  # vector side no-op
-    a = ItemArchive(LocalStore(tmp_path), collection="t")
+    a = ItemArchive(LocalStore(tmp_path), Config(), collection="t")
     assert a.persist("knowledge", "docs/guide.md", data=b"hello", text="Guide") is True
     assert a.read_bytes("knowledge", "docs/guide.md") == b"hello"
     a.remove("knowledge", "docs/guide.md")
@@ -33,7 +34,7 @@ def test_persist_and_read_blob_roundtrip(monkeypatch, tmp_path):
 def test_persist_data_only_skips_embedding(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(arch, "embed_text", lambda *a, **k: calls.append(a) or [0.1])
-    a = ItemArchive(LocalStore(tmp_path), collection="t")
+    a = ItemArchive(LocalStore(tmp_path), Config(), collection="t")
     assert a.persist("memory", "u1", data=b"[]") is True  # no text => no vector
     assert a.read_bytes("memory", "u1") == b"[]"
     assert calls == []  # never embedded
@@ -44,29 +45,29 @@ def test_persist_returns_false_when_blob_write_fails():
         def put_bytes(self, *a, **k):
             raise StorageError("boom")
 
-    a = ItemArchive(_Boom(), collection="t")
+    a = ItemArchive(_Boom(), Config(), collection="t")
     assert a.persist("knowledge", "d", data=b"x") is False
 
 
 def test_read_bytes_absent_is_none(tmp_path):
-    a = ItemArchive(LocalStore(tmp_path), collection="t")
+    a = ItemArchive(LocalStore(tmp_path), Config(), collection="t")
     assert a.read_bytes("knowledge", "nope") is None
 
 
 def test_remove_is_idempotent(tmp_path):
-    a = ItemArchive(LocalStore(tmp_path), collection="t")
+    a = ItemArchive(LocalStore(tmp_path), Config(), collection="t")
     a.remove("knowledge", "never-stored")  # no blob, no client — must not raise
 
 
 # --- vector side degradation ------------------------------------------------
 def test_search_empty_query_returns_empty(tmp_path):
-    a = ItemArchive(LocalStore(tmp_path), collection="t")
+    a = ItemArchive(LocalStore(tmp_path), Config(), collection="t")
     assert a.search("   ", top_k=5) == []
 
 
 def test_search_no_embedding_returns_empty(monkeypatch, tmp_path):
     monkeypatch.setattr(arch, "embed_text", lambda *a, **k: None)
-    a = ItemArchive(LocalStore(tmp_path), collection="t")
+    a = ItemArchive(LocalStore(tmp_path), Config(), collection="t")
     assert a.search("a real query", top_k=5) == []
 
 
@@ -74,19 +75,19 @@ def test_persist_text_without_qdrant_still_stores_blob(monkeypatch, tmp_path):
     # Embedding succeeds but qdrant-client is absent -> _ensure_client returns None
     # -> the vector is skipped, yet the blob (source of truth) is still written.
     monkeypatch.setattr(arch, "embed_text", lambda *a, **k: [0.1, 0.2, 0.3])
-    a = ItemArchive(LocalStore(tmp_path), collection="t")
+    a = ItemArchive(LocalStore(tmp_path), Config(), collection="t")
     assert a.persist("knowledge", "d", data=b"body", text="title") is True
     assert a.read_bytes("knowledge", "d") == b"body"
 
 
 # --- keys / ids -------------------------------------------------------------
 def test_key_format():
-    a = ItemArchive(LocalStore("x"), collection="t")
+    a = ItemArchive(LocalStore("x"), Config(), collection="t")
     assert a._key("knowledge", "docs/guide.md", "global") == "items/knowledge/global/docs/guide.md"
 
 
 def test_point_id_is_deterministic_and_scoped():
-    a = ItemArchive(LocalStore("x"), collection="t")
+    a = ItemArchive(LocalStore("x"), Config(), collection="t")
     assert a._point_id("k", "i", "s") == a._point_id("k", "i", "s")
     assert a._point_id("k", "i", "s") != a._point_id("k", "i", "s2")
     assert a._point_id("k", "i", "s") != a._point_id("k", "j", "s")
@@ -110,23 +111,22 @@ def test_to_hit_maps_payload():
 
 
 # --- factory gating ---------------------------------------------------------
-def test_build_archive_off_returns_none(monkeypatch):
-    monkeypatch.setattr(arch, "config", _cfg(items_archive_enabled=False))
-    assert build_item_archive_from_config() is None
+def test_build_archive_off_returns_none():
+    assert build_item_archive_from_config(_cfg(items_archive_enabled=False)) is None
 
 
 def test_build_archive_on_returns_archive(monkeypatch, tmp_path):
-    monkeypatch.setattr(arch, "config", _cfg(items_archive_enabled=True, storage_backend="local"))
+    cfg = _cfg(items_archive_enabled=True, storage_backend="local")
     store = LocalStore(tmp_path)
-    monkeypatch.setattr(arch, "build_object_store", lambda backend: store)
-    a = build_item_archive_from_config()
+    monkeypatch.setattr(arch, "build_object_store", lambda config, backend: store)
+    a = build_item_archive_from_config(cfg)
     assert isinstance(a, ItemArchive) and a.store is store
 
 
 def test_build_archive_unbuildable_store_returns_none(monkeypatch):
-    monkeypatch.setattr(arch, "config", _cfg(items_archive_enabled=True, storage_backend="s3"))
-    monkeypatch.setattr(arch, "build_object_store", lambda backend: None)  # e.g. boto3 absent
-    assert build_item_archive_from_config() is None
+    cfg = _cfg(items_archive_enabled=True, storage_backend="s3")
+    monkeypatch.setattr(arch, "build_object_store", lambda config, backend: None)  # e.g. boto3 absent
+    assert build_item_archive_from_config(cfg) is None
 
 
 # --- a recording fake the kind-wiring tests share ---------------------------
@@ -159,7 +159,7 @@ class FakeArchive:
 def _kstore(**kw):
     from magi.core.knowledge import KnowledgeStore
 
-    return KnowledgeStore(collection="t", **kw)
+    return KnowledgeStore(Config(), collection="t", **kw)
 
 
 def test_knowledge_archive_original_persists_source_and_doc_vector():
@@ -221,7 +221,7 @@ def _manager(tmp_path, archive):
     from magi.core.memory import MemoryManager
     from magi.core.memory.store import FileMemoryStore
 
-    return MemoryManager(FileMemoryStore(Path(tmp_path)), short_term_max=10, archive=archive)
+    return MemoryManager(FileMemoryStore(Path(tmp_path)), Config(), short_term_max=10, archive=archive)
 
 
 def test_memory_snapshot_persists_fact_sheet(tmp_path):

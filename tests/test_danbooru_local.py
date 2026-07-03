@@ -7,16 +7,23 @@ misses when the files don't exist. The tool-level tests then prove a local hit
 never constructs an HTTP client, and a local miss falls back to the API.
 """
 
+import dataclasses
+
 import pytest
 
 import magi.agent.tools.danbooru as danbooru
 from magi.agent.tools.danbooru_local import LocalDanbooru
-from magi.core.config import config, configure
+from magi.core.config import Config
 
 
 def _tool_text(result: dict) -> str:
     data = result.get("data") or {}
     return " ".join(str(part) for part in (result.get("message", ""), data.get("text", ""), data) if part)
+
+
+def _tools(config: Config) -> dict:
+    """Build the danbooru tools with `config` and index them by name."""
+    return {t.name: t for t in danbooru.build_danbooru_tools(config)}
 
 
 TAGS_CSV = """tag,category,count,alias
@@ -126,16 +133,15 @@ def local_config(tmp_path, monkeypatch):
     tags.write_text(TAGS_CSV, encoding="utf-8")
     wiki.write_text(WIKI_CSV, encoding="utf-8")
     monkeypatch.setattr(danbooru, "_stores", {})
-    before = (config.danbooru_tags_csv, config.danbooru_wiki_csv)
-    configure(danbooru_tags_csv=str(tags), danbooru_wiki_csv=str(wiki))
-    yield
-    configure(danbooru_tags_csv=before[0], danbooru_wiki_csv=before[1])
+    return dataclasses.replace(
+        Config(), danbooru_tags_csv=str(tags), danbooru_wiki_csv=str(wiki)
+    )
 
 
 async def test_search_tags_tool_serves_local_hit(local_config, monkeypatch):
     monkeypatch.setattr(danbooru.httpx, "AsyncClient", _NoNetwork)
 
-    result = await danbooru.danbooru_search_tags.entrypoint(query="maid")
+    result = await _tools(local_config)["danbooru_search_tags"].entrypoint(query="maid")
 
     assert "(local)" in _tool_text(result)
     assert "- maid (general, 123456 posts)" in _tool_text(result)
@@ -144,7 +150,7 @@ async def test_search_tags_tool_serves_local_hit(local_config, monkeypatch):
 async def test_wiki_tool_serves_local_hit(local_config, monkeypatch):
     monkeypatch.setattr(danbooru.httpx, "AsyncClient", _NoNetwork)
 
-    result = await danbooru.danbooru_wiki.entrypoint(title="list of uniforms")
+    result = await _tools(local_config)["danbooru_wiki"].entrypoint(title="list of uniforms")
 
     assert "(local)" in _tool_text(result) and "[[school_uniform]]" in _tool_text(result)
 
@@ -152,7 +158,7 @@ async def test_wiki_tool_serves_local_hit(local_config, monkeypatch):
 async def test_wiki_search_tool_serves_local_hit(local_config, monkeypatch):
     monkeypatch.setattr(danbooru.httpx, "AsyncClient", _NoNetwork)
 
-    result = await danbooru.danbooru_wiki_search.entrypoint(query="list_of_*")
+    result = await _tools(local_config)["danbooru_wiki_search"].entrypoint(query="list_of_*")
 
     assert "(local)" in _tool_text(result) and "- list_of_uniforms" in _tool_text(result)
 
@@ -160,7 +166,7 @@ async def test_wiki_search_tool_serves_local_hit(local_config, monkeypatch):
 async def test_wiki_tool_suggests_close_titles_on_miss(local_config, monkeypatch):
     monkeypatch.setattr(danbooru.httpx, "AsyncClient", _NoNetwork)
 
-    result = await danbooru.danbooru_wiki.entrypoint(title="uniforms")
+    result = await _tools(local_config)["danbooru_wiki"].entrypoint(title="uniforms")
 
     assert "No wiki page titled 'uniforms'" in _tool_text(result)
     assert "- list_of_uniforms" in _tool_text(result)
@@ -190,7 +196,7 @@ async def test_local_miss_falls_back_to_api(local_config, monkeypatch):
     monkeypatch.setattr(danbooru.httpx, "AsyncClient", lambda **_: _FakeClient())
     monkeypatch.setattr(danbooru._danbooru_throttle, "gap_s", 0.0)
 
-    result = await danbooru.danbooru_search_tags.entrypoint(query="obscure_tag")
+    result = await _tools(local_config)["danbooru_search_tags"].entrypoint(query="obscure_tag")
 
     assert "(local)" not in _tool_text(result)
     assert "- obscure_tag (general, 3 posts)" in _tool_text(result)

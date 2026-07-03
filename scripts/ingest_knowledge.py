@@ -20,6 +20,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from magi.core.config import Config
 from magi.core.items import build_item_archive_from_config
 from magi.core.knowledge import GLOBAL_SCOPE, KnowledgeStore
 
@@ -67,9 +68,13 @@ def main(argv: list[str] | None = None) -> int:
         print("Nothing to ingest.", file=sys.stderr)
         return 1
 
+    # Engine defaults (backends from Config defaults; secrets from env). This
+    # tool runs out-of-band, not from a channel entrypoint, so it doesn't take a
+    # deployment override.
+    config = Config()
     # Attach the item archive (no-op unless enabled) so an ingest also keeps the
     # verbatim original as a durable, re-indexable blob.
-    store = KnowledgeStore(archive=build_item_archive_from_config())
+    store = KnowledgeStore(config, archive=build_item_archive_from_config(config))
     total_chunks = 0
     indexed = 0
     for path in files:

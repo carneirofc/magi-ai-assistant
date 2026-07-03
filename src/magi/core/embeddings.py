@@ -23,7 +23,7 @@ from typing import Optional
 
 from agno.utils.log import log_warning
 
-from magi.core.config import config
+from magi.core.config import Config
 
 # LiteLLM SDK prefix that routes an embedding call through our proxy. Without it
 # the SDK tries to infer a provider from the bare model id and fails.
@@ -38,7 +38,7 @@ def _routed(model_id: str) -> str:
     return f"{_PROXY_PREFIX}{model_id.removeprefix(_PROXY_PREFIX)}"
 
 
-def _route(model_id: str) -> tuple[str, str | None, str | None]:
+def _route(model_id: str, config: Config) -> tuple[str, str | None, str | None]:
     """(routed_model, api_base, api_key) for the configured embeddings provider.
 
     Returns the litellm-prefixed model id plus the endpoint + key it should hit, so
@@ -50,7 +50,7 @@ def _route(model_id: str) -> tuple[str, str | None, str | None]:
     return _routed(model_id), config.litellm_base_url, config.litellm_api_key
 
 
-def embed_text(text: str, *, model_id: Optional[str] = None) -> Optional[list[float]]:
+def embed_text(text: str, config: Config, *, model_id: Optional[str] = None) -> Optional[list[float]]:
     """Embed one string, or `None` on empty input / any failure.
 
     `model_id` defaults to `config.embedding_model_id`. The endpoint and key are
@@ -61,7 +61,7 @@ def embed_text(text: str, *, model_id: Optional[str] = None) -> Optional[list[fl
     try:
         import litellm
 
-        routed, api_base, api_key = _route(model_id or config.embedding_model_id)
+        routed, api_base, api_key = _route(model_id or config.embedding_model_id, config)
         resp = litellm.embedding(
             model=routed,
             input=[text],

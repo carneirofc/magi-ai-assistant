@@ -1,15 +1,17 @@
 """Entrypoint — run the Discord bot backed by the multimodal agent team."""
 
-from magi.core.config import configure
+from magi.core.config import Config
 
 
-def apply_deployment_config() -> None:
+def apply_deployment_config() -> Config:
     """Deployment configuration, in code (secrets stay in .env — see core/config).
 
     This is THE place to see/change what the bot runs with; defaults for
-    everything not listed live in `core.config.Config`.
+    everything not listed live in `core.config.Config`. Returns the immutable
+    `Config` value the composition root threads through `AgentContext` — no
+    process global.
     """
-    configure(
+    return Config(
         # llama.cpp llama-server on :8888 serves chat for lead + members.
         model_provider="llamacpp",
         llamacpp_base_url="http://127.0.0.1:8888/v1",
@@ -48,14 +50,15 @@ def apply_deployment_config() -> None:
 
 
 def main() -> None:
-    apply_deployment_config()
+    config = apply_deployment_config()
 
     from magi.channels.discord import build_discord_client, serve_with_admin
-    from magi.core.config import config
+    from magi.core.context import AgentContext
 
-    discord_client = build_discord_client()
+    ctx = AgentContext(config=config)
+    discord_client = build_discord_client(ctx)
     if config.admin_enabled:
-        serve_with_admin(discord_client)
+        serve_with_admin(ctx, discord_client)
     else:
         discord_client.serve()
 

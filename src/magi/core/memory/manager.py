@@ -29,7 +29,7 @@ from typing import Optional
 
 from agno.utils.log import log_info, log_warning
 
-from magi.core.config import config
+from magi.core.config import Config
 from magi.core.items import ItemArchive
 from magi.core.memory.adapters import slug
 from magi.core.memory.curation import CurateFn, CurationInput
@@ -68,6 +68,7 @@ class MemoryManager:
     def __init__(
         self,
         store: FileMemoryStore,
+        config: Config,
         short_term_max: int,
         persona_seed: str = "",
         summarize_session_fn: Optional[SummarizeFn] = None,
@@ -84,6 +85,7 @@ class MemoryManager:
         archive: Optional[ItemArchive] = None,
     ):
         self.store = store
+        self.config = config
         # The item archive (None = off). When set, the durable fact sheet is
         # snapshotted to the object store after each fact write, so a user's curated
         # profile has an off-disk source-of-truth copy alongside the JSON on disk and
@@ -316,16 +318,16 @@ class MemoryManager:
     def _log_context_size(self, context: str, parts: dict[str, str]) -> None:
         """Log the assembled size and warn when it nears the lead's window."""
         tokens = _est_tokens(context)
-        budget = config.lead_num_ctx
+        budget = self.config.lead_num_ctx
         ratio = tokens / budget if budget else 0.0
         breakdown = ", ".join(f"{k}~{_est_tokens(v)}t" for k, v in parts.items())
         log_info(
             f"memory: context ~{tokens} tok ({ratio:.0%} of {budget}) [{breakdown}]"
         )
-        if ratio >= config.ctx_warn_ratio:
+        if ratio >= self.config.ctx_warn_ratio:
             log_warning(
                 f"memory: context ~{tokens} tok is {ratio:.0%} of the {budget}-tok window "
-                f"(warn at {config.ctx_warn_ratio:.0%}) — consider !flush or trimming long-term"
+                f"(warn at {self.config.ctx_warn_ratio:.0%}) — consider !flush or trimming long-term"
             )
 
     def context_stats(self) -> dict:
@@ -333,7 +335,7 @@ class MemoryManager:
         parts = self._read_sections()
         context = self.build_context()
         tokens = _est_tokens(context)
-        budget = config.lead_num_ctx
+        budget = self.config.lead_num_ctx
         return {
             "total_chars": len(context),
             "est_tokens": tokens,

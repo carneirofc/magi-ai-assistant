@@ -87,8 +87,9 @@ The container reaches the host's `llama-server` and any host-published service
 via `host.docker.internal` (compose wires `host-gateway`), mirroring how the
 host-run app uses `localhost`. Config stays code-first: the container entrypoints
 (`main_api_docker.py` / `main_discord_docker.py`) reuse each deployment's
-`apply_deployment_config()` and overlay only the container deltas — bind
-`0.0.0.0`, point the backend URL at the host. `./data` is volume-mounted so the
+`apply_deployment_config()` and overlay only the container deltas via
+`dataclasses.replace(...)` — bind `0.0.0.0`, point the backend URL at the host.
+`./data` is volume-mounted so the
 sqlite db, memory files, and local byte archive survive rebuilds. Optional extras
 bake in at build time via the `EXTRAS` build arg (e.g. `EXTRAS="--extra s3"`).
 

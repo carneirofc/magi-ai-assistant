@@ -22,18 +22,24 @@ from agno.models.base import Model
 from agno.utils.log import log_info
 
 from magi.agent.team import build_team
-from magi.core.config import config
+from magi.core.context import AgentContext
 from magi.core.conversation import ConversationService
 from magi.core.memory import build_memory_from_config
 
 
 def build_conversation_service(
+    ctx: AgentContext,
     *,
     channel_guidance: str,
     db: Optional[BaseDb] = None,
-    member_builders: Optional[Sequence[Callable[[Model], Agent]]] = None,
+    member_builders: Optional[Sequence[Callable[[AgentContext, Model], Agent]]] = None,
 ) -> ConversationService:
-    """Assemble the full conversation stack behind one channel-neutral service."""
+    """Assemble the full conversation stack behind one channel-neutral service.
+
+    `ctx` carries the immutable config and the shared services the whole build
+    graph reads — nothing here reaches for a process global.
+    """
+    config = ctx.config
     config.log_settings()
 
     # The session summarizer needs a model, so the agent layer builds it; magi/core/memory
@@ -42,7 +48,7 @@ def build_conversation_service(
     if config.session_summary:
         from magi.agent.summarizer import build_session_summarizer
 
-        session_fn = build_session_summarizer()
+        session_fn = build_session_summarizer(config)
         log_info(f"memory: session summary ENABLED (every {config.summarize_every} turns)")
     else:
         log_info("memory: session summary DISABLED")
@@ -54,16 +60,17 @@ def build_conversation_service(
     if config.memory_curation:
         from magi.agent.curator import build_memory_curator
 
-        curate_fn = build_memory_curator()
+        curate_fn = build_memory_curator(config)
         log_info("memory: curation ENABLED (post-turn durable-memory pass)")
     else:
         log_info("memory: curation DISABLED")
 
     memory = build_memory_from_config(
+        config,
         summarize_session_fn=session_fn,
         curate_fn=curate_fn,
     )
-    team = build_team(memory, db, member_builders)
+    team = build_team(ctx, memory, db, member_builders)
     return ConversationService(
         runner=team,
         memory=memory,

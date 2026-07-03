@@ -98,7 +98,8 @@ service) via `host.docker.internal`, exactly as the host-run app reaches
 `localhost`. Config stays code-first: the container entrypoints
 (`main_api_docker.py` / `main_discord_docker.py`) reuse each deployment's
 `apply_deployment_config()` and overlay only the bits that differ in a container
-(bind `0.0.0.0`, point the backend URL at the host). To enable an optional extra
+via `dataclasses.replace(...)` (bind `0.0.0.0`, point the backend URL at the
+host). To enable an optional extra
 in the image, pass it at build time: `EXTRAS="--extra s3" docker compose -f
 docker-compose.app.yaml up --build`.
 
@@ -195,12 +196,16 @@ conversation maps to its own server-side session automatically.
 
 ## Configuration
 
-Code-first: each entrypoint sets its deployment in `apply_deployment_config()`
-(see `main.py` / `main_api.py`); defaults live in `magi/core/config.py`. Only
-secrets come from `.env` (`DISCORD_BOT_TOKEN`, `LITELLM_MASTER_KEY`,
-`LLAMACPP_API_KEY`, `QDRANT_API_KEY`, `API_AUTH_TOKEN` — the last gates `/v1`
-with `Authorization: Bearer <token>`). The effective values are printed at
-startup by `config.log_settings()`.
+Code-first: each entrypoint builds its deployment's immutable `Config` in
+`apply_deployment_config()` (see `main.py` / `main_api.py`); defaults live in
+`magi/core/config.py`. `Config` is a frozen value object threaded explicitly
+through an `AgentContext` — no process-global config — and
+`magi.Assistant.create(config)` assembles the whole stack from one. Only secrets
+come from `.env` (`DISCORD_BOT_TOKEN`, `LITELLM_MASTER_KEY`, `LLAMACPP_API_KEY`,
+`QDRANT_API_KEY`, `API_AUTH_TOKEN` — the last gates `/v1` with
+`Authorization: Bearer <token>`). The effective values are printed at startup by
+`config.log_settings()`. See [configuration.md](docs/configuration.md) for the
+full model and every field.
 
 ## Object storage (durable file archive)
 
@@ -221,14 +226,15 @@ Off by default. Two interchangeable backends, picked by `storage_backend`:
 
 ### Local backend (zero setup)
 
-Nothing to install or run — just turn it on in the entrypoint (`main.py` /
-`main_api.py`):
+Nothing to install or run — just turn it on in the entrypoint's `Config`
+(`main.py` / `main_api.py`):
 
 ```python
-configure(
+Config(
     storage_enabled=True,
     storage_backend="local",
     storage_local_dir="data/artifacts",  # where the bytes land
+    # … the rest of the deployment's settings
 )
 ```
 
@@ -239,28 +245,28 @@ uv sync --extra s3        # installs boto3 (lazy-imported; absent => tools off)
 ```
 
 Set the credentials in `.env` (these are the only S3 *secrets*; bucket / region /
-endpoint live in code via `configure(...)`):
+endpoint live in code on the `Config`):
 
 ```dotenv
 S3_ACCESS_KEY_ID=rustfsadmin
 S3_SECRET_ACCESS_KEY=rustfsadmin
 ```
 
-Then turn it on in the entrypoint (`main.py` / `main_api.py`):
+Then turn it on in the entrypoint's `Config` (`main.py` / `main_api.py`):
 
 ```python
-configure(
+Config(
     storage_enabled=True,
     storage_backend="s3",
     s3_endpoint_url="http://localhost:9000",  # RustFS/MinIO; None => real AWS S3
     s3_bucket="chatbot-memory",
+    # … the rest of the deployment's settings
 )
 ```
 
 The store degrades gracefully: with the S3 backend selected, if boto3 is missing
 or the backend is unreachable at startup, the tools are simply not attached and
-the bot boots normally. (The legacy `s3_enabled=True` still works — `configure()`
-maps it to `storage_enabled` with the `s3` backend.)
+the bot boots normally.
 
 ### Launch RustFS for simple testing
 

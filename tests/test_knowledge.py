@@ -10,6 +10,7 @@ tests; the tool-facing contract lives in test_knowledge_tools.py.
 import dataclasses
 
 import magi.core.knowledge.store as store_mod
+from magi.core.config import Config
 from magi.core.knowledge import KnowledgeStore, build_knowledge_from_config, chunk_text
 from magi.core.knowledge.store import KnowledgeHit, blend_by_tags
 
@@ -67,7 +68,7 @@ def test_chunk_overlap_clamped_below_size_guarantees_progress():
 def test_index_document_empty_text_indexes_nothing(monkeypatch):
     calls = []
     monkeypatch.setattr(store_mod, "embed_text", lambda *a, **k: calls.append(a) or [0.1])
-    store = KnowledgeStore(collection="t", chunk_chars=100, chunk_overlap=10)
+    store = KnowledgeStore(Config(), collection="t", chunk_chars=100, chunk_overlap=10)
 
     assert store.index_document("d1", "   ", source="s") == 0
     assert calls == []  # never even embedded
@@ -76,21 +77,21 @@ def test_index_document_empty_text_indexes_nothing(monkeypatch):
 def test_index_document_no_embedding_degrades_to_zero(monkeypatch):
     # Embedding unavailable (proxy down) => no chunks indexed, no crash.
     monkeypatch.setattr(store_mod, "embed_text", lambda *a, **k: None)
-    store = KnowledgeStore(collection="t", chunk_chars=100, chunk_overlap=10)
+    store = KnowledgeStore(Config(), collection="t", chunk_chars=100, chunk_overlap=10)
 
     assert store.index_document("d1", "real content here", source="s") == 0
 
 
 def test_search_empty_query_returns_empty(monkeypatch):
     monkeypatch.setattr(store_mod, "embed_text", lambda *a, **k: [0.1, 0.2])
-    store = KnowledgeStore(collection="t")
+    store = KnowledgeStore(Config(), collection="t")
 
     assert store.search("   ", top_k=5) == []
 
 
 def test_search_no_embedding_returns_empty(monkeypatch):
     monkeypatch.setattr(store_mod, "embed_text", lambda *a, **k: None)
-    store = KnowledgeStore(collection="t")
+    store = KnowledgeStore(Config(), collection="t")
 
     assert store.search("a real query", top_k=5) == []
 
@@ -147,12 +148,12 @@ def test_blend_is_case_insensitive():
 
 
 # --- config gating ----------------------------------------------------------
-def test_build_from_config_off_returns_none(monkeypatch):
-    monkeypatch.setattr(store_mod, "config", dataclasses.replace(store_mod.config, knowledge_enabled=False))
-    assert build_knowledge_from_config() is None
+def test_build_from_config_off_returns_none():
+    config = dataclasses.replace(Config(), knowledge_enabled=False)
+    assert build_knowledge_from_config(config) is None
 
 
-def test_build_from_config_on_returns_store(monkeypatch):
-    monkeypatch.setattr(store_mod, "config", dataclasses.replace(store_mod.config, knowledge_enabled=True))
-    store = build_knowledge_from_config()
+def test_build_from_config_on_returns_store():
+    config = dataclasses.replace(Config(), knowledge_enabled=True)
+    store = build_knowledge_from_config(config)
     assert isinstance(store, KnowledgeStore)

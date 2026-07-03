@@ -10,6 +10,7 @@ multiple endpoint calls in code and label whether data came from the user's
 library or the global AniList catalog.
 """
 
+import dataclasses
 import httpx
 import json
 import pytest
@@ -17,7 +18,18 @@ from urllib.parse import quote
 from pydantic import ValidationError
 
 import magi.agent.tools.seanime as seanime
-from magi.core.config import config, configure
+from magi.core.config import Config
+
+# Engine-default config threaded into the direct-HTTP tool builder. Tests that
+# need a variant (e.g. a configured token) build their own via
+# dataclasses.replace and call build_seanime_tools again.
+CONFIG = Config()
+TOOLS = {t.name: t for t in seanime.build_seanime_tools(CONFIG)}
+
+
+def _tool(name: str):
+    """The default-config tool by name (agno names it after the function)."""
+    return TOOLS[name]
 
 
 def _tool_text(result: dict) -> str:
@@ -80,7 +92,7 @@ def _patch_client(monkeypatch, responses):
 
 
 def _proxy(url: str) -> str:
-    return f"{config.seanime_base_url}/api/v1/image-proxy?url={quote(url, safe='')}"
+    return f"{CONFIG.seanime_base_url}/api/v1/image-proxy?url={quote(url, safe='')}"
 
 
 async def test_status_unwraps_and_compacts(monkeypatch):
@@ -100,7 +112,7 @@ async def test_status_unwraps_and_compacts(monkeypatch):
         },
     }
     _patch_client(monkeypatch, [_FakeResponse(json_data={"data": status})])
-    result = await seanime.seanime_status.entrypoint()
+    result = await _tool("seanime_status").entrypoint()
     assert "2.0.0" in _tool_text(result) and "carneirofc" in _tool_text(result)
     assert "Adult content: enabled" in _tool_text(result)
     assert "noise" not in _tool_text(result) and len(_tool_text(result)) < 500  # trimmed, not dumped
@@ -111,31 +123,33 @@ async def test_server_error_becomes_readable_string(monkeypatch):
         monkeypatch,
         [_FakeResponse(json_data={"error": "UNAUTHENTICATED"}, status_code=401)],
     )
-    result = await seanime.seanime_status.entrypoint()
+    result = await _tool("seanime_status").entrypoint()
     assert "Seanime error" in _tool_text(result) and "UNAUTHENTICATED" in _tool_text(result)
 
 
 async def test_unreachable_server_never_raises(monkeypatch):
     _patch_client(monkeypatch, [httpx.ConnectError("connection refused")])
-    result = await seanime.seanime_status.entrypoint()
+    result = await _tool("seanime_status").entrypoint()
     assert "unreachable" in _tool_text(result)
-    assert config.seanime_base_url in _tool_text(result)
+    assert CONFIG.seanime_base_url in _tool_text(result)
 
 
 async def test_token_header_only_when_configured(monkeypatch):
-    before = config.seanime_token
-    try:
-        configure(seanime_token=None)
-        client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": {}})])
-        await seanime.seanime_status.entrypoint()
-        assert "X-Seanime-Token" not in client.headers
+    # No token configured -> no auth header.
+    no_token = {t.name: t for t in seanime.build_seanime_tools(
+        dataclasses.replace(CONFIG, seanime_token=None)
+    )}
+    client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": {}})])
+    await no_token["seanime_status"].entrypoint()
+    assert "X-Seanime-Token" not in client.headers
 
-        configure(seanime_token="hash123")
-        client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": {}})])
-        await seanime.seanime_status.entrypoint()
-        assert client.headers["X-Seanime-Token"] == "hash123"
-    finally:
-        configure(seanime_token=before)
+    # Token configured -> it rides as X-Seanime-Token.
+    with_token = {t.name: t for t in seanime.build_seanime_tools(
+        dataclasses.replace(CONFIG, seanime_token="hash123")
+    )}
+    client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": {}})])
+    await with_token["seanime_status"].entrypoint()
+    assert client.headers["X-Seanime-Token"] == "hash123"
 
 
 # --- seanime_library -------------------------------------------------------------
@@ -166,7 +180,7 @@ async def test_library_compacts_entries(monkeypatch):
         ],
     }
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": collection})])
-    result = await seanime.seanime_library.entrypoint()
+    result = await _tool("seanime_library").entrypoint()
     payload = _tool_payload(result)
     assert payload["type"] == "library"
     assert payload["stats"] == {"entries": 2, "files": 24, "size": "12 GB"}
@@ -201,7 +215,7 @@ async def test_library_manga_kind_compacts_with_chapters(monkeypatch):
         ]
     }
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": collection})])
-    result = await seanime.seanime_library.entrypoint(kind="manga")
+    result = await _tool("seanime_library").entrypoint(kind="manga")
     entry = _tool_payload(result)["lists"][0]["entries"][0]
     assert entry["title"] == "Berserk"
     assert entry["progress"] == 120
@@ -231,7 +245,7 @@ async def test_library_tolerates_null_defaulted_args_from_tool_call(monkeypatch)
         ]
     }
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": collection})])
-    result = await seanime.seanime_library.entrypoint(kind=None, group_by=None)
+    result = await _tool("seanime_library").entrypoint(kind=None, group_by=None)
     payload = _tool_payload(result)
     assert payload["type"] == "library"
     assert payload["lists"][0]["entries"][0]["title"] == "One Piece"
@@ -240,8 +254,8 @@ async def test_library_tolerates_null_defaulted_args_from_tool_call(monkeypatch)
 
 
 def test_library_tool_schema_uses_enum_annotations():
-    assert seanime.seanime_library.show_result is True
-    params = seanime.seanime_library.parameters["properties"]
+    assert _tool("seanime_library").show_result is True
+    params = _tool("seanime_library").parameters["properties"]
     assert params["kind"] == {"type": "string", "enum": ["anime", "manga"]}
     assert params["group_by"] == {
         "type": "string",
@@ -274,7 +288,7 @@ async def test_library_groups_by_genre(monkeypatch):
         ]
     }
     _patch_client(monkeypatch, [_FakeResponse(json_data={"data": collection})])
-    result = await seanime.seanime_library.entrypoint(group_by="genre")
+    result = await _tool("seanime_library").entrypoint(group_by="genre")
     payload = _tool_payload(result)
     assert payload["type"] == "library_overview"
     assert payload["summary"] == {
@@ -302,7 +316,7 @@ async def test_library_score_grouping_orders_numerically(monkeypatch):
         "lists": [{"type": "COMPLETED", "entries": [entry(1, 9), entry(2, 10), entry(3, 0)]}]
     }
     _patch_client(monkeypatch, [_FakeResponse(json_data={"data": collection})])
-    result = await seanime.seanime_library.entrypoint(group_by="score")
+    result = await _tool("seanime_library").entrypoint(group_by="score")
     # 10 before 9 (numeric, not lexical); unscored last.
     keys = [group["key"] for group in _tool_payload(result)["groups"]]
     assert keys == ["score 10", "score 9", "unscored"]
@@ -311,9 +325,9 @@ async def test_library_score_grouping_orders_numerically(monkeypatch):
 async def test_library_rejects_unknown_args(monkeypatch):
     _patch_client(monkeypatch, [])
     with pytest.raises(ValidationError, match="group_by"):
-        await seanime.seanime_library.entrypoint(group_by="studio")
+        await _tool("seanime_library").entrypoint(group_by="studio")
     with pytest.raises(ValidationError, match="kind"):
-        await seanime.seanime_library.entrypoint(kind="movies")
+        await _tool("seanime_library").entrypoint(kind="movies")
 
 
 async def test_library_flags_adult_titles(monkeypatch):
@@ -336,7 +350,7 @@ async def test_library_flags_adult_titles(monkeypatch):
         ]
     }
     _patch_client(monkeypatch, [_FakeResponse(json_data={"data": collection})])
-    result = await seanime.seanime_library.entrypoint()
+    result = await _tool("seanime_library").entrypoint()
     entry = _tool_payload(result)["lists"][0]["entries"][0]
     assert entry["title"] == "Lewd Show"
     assert entry["adult"] is True
@@ -360,7 +374,7 @@ async def test_browse_anime_compacts_page(monkeypatch):
         }
     }
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    result = await seanime.seanime_browse.entrypoint(kind="anime",search="titan")
+    result = await _tool("seanime_browse").entrypoint(kind="anime",search="titan")
     assert "16498" in _tool_text(result) and "Attack on Titan" in _tool_text(result)
     method, url, body = client.calls[0]
     assert method == "POST" and url.endswith("/api/v1/anilist/list-anime")
@@ -378,7 +392,7 @@ async def test_browse_anime_adult_include_omits_filter_and_flags_results(monkeyp
         }
     }
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    result = await seanime.seanime_browse.entrypoint(kind="anime",search="title", adult="include")
+    result = await _tool("seanime_browse").entrypoint(kind="anime",search="title", adult="include")
     _, _, body = client.calls[0]
     # Key omitted entirely: AniList then returns both adult and non-adult
     # (isAdult=true would mean adult-ONLY and is coerced by a server setting).
@@ -390,7 +404,7 @@ async def test_browse_anime_adult_include_omits_filter_and_flags_results(monkeyp
 async def test_browse_anime_adult_only_sends_true(monkeypatch):
     page = {"Page": {"media": [{"id": 99, "title": {"romaji": "X"}, "isAdult": True}]}}
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    await seanime.seanime_browse.entrypoint(kind="anime",search="x", adult="only")
+    await _tool("seanime_browse").entrypoint(kind="anime",search="x", adult="only")
     _, _, body = client.calls[0]
     assert body["isAdult"] is True
 
@@ -400,7 +414,7 @@ async def test_browse_anime_filters_ride_in_the_body(monkeypatch):
     AniList casing, status/sort as arrays, empty search omitted)."""
     page = {"Page": {"media": []}}
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    await seanime.seanime_browse.entrypoint(kind="anime",
+    await _tool("seanime_browse").entrypoint(kind="anime",
         search="",
         genres=["Romance", "Sci-Fi"],
         season="WINTER",
@@ -422,15 +436,15 @@ async def test_browse_anime_filters_ride_in_the_body(monkeypatch):
 async def test_browse_anime_rejects_unknown_filter_values(monkeypatch):
     _patch_client(monkeypatch, [])
     with pytest.raises(ValidationError, match="genres"):
-        await seanime.seanime_browse.entrypoint(kind="anime",search="x", genres=["isekai"])
+        await _tool("seanime_browse").entrypoint(kind="anime",search="x", genres=["isekai"])
     with pytest.raises(ValidationError, match="season"):
-        await seanime.seanime_browse.entrypoint(kind="anime",search="x", season="autumn")
+        await _tool("seanime_browse").entrypoint(kind="anime",search="x", season="autumn")
     with pytest.raises(ValidationError, match="sort"):
-        await seanime.seanime_browse.entrypoint(kind="anime",search="x", sort="BEST_FIRST")
+        await _tool("seanime_browse").entrypoint(kind="anime",search="x", sort="BEST_FIRST")
     with pytest.raises(ValidationError, match="adult"):
-        await seanime.seanime_browse.entrypoint(kind="anime",search="x", adult="maybe")
+        await _tool("seanime_browse").entrypoint(kind="anime",search="x", adult="maybe")
     # Hentai while excluding adult contradicts itself — the tool says how to fix it.
-    result = await seanime.seanime_browse.entrypoint(kind="anime",search="", genres=["Hentai"])
+    result = await _tool("seanime_browse").entrypoint(kind="anime",search="", genres=["Hentai"])
     assert 'adult="only"' in _tool_text(result)
 
 
@@ -449,7 +463,7 @@ async def test_browse_results_carry_genres_year_and_cover(monkeypatch):
         }
     }
     _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    result = await seanime.seanime_browse.entrypoint(kind="manga",search="t")
+    result = await _tool("seanime_browse").entrypoint(kind="manga",search="t")
     assert f'"cover":"{_proxy("https://img/cover.jpg")}"' in _tool_text(result)
     assert '"cover_original":"https://img/cover.jpg"' in _tool_text(result)
     assert '"year":2019' in _tool_text(result)
@@ -458,7 +472,7 @@ async def test_browse_results_carry_genres_year_and_cover(monkeypatch):
 
 async def test_browse_empty_page_suggests_widening(monkeypatch):
     _patch_client(monkeypatch, [_FakeResponse(json_data={"data": {"Page": {"media": []}}})])
-    result = await seanime.seanime_browse.entrypoint(kind="anime",search="zzz")
+    result = await _tool("seanime_browse").entrypoint(kind="anime",search="zzz")
     assert "no results" in _tool_text(result)
 
 
@@ -478,7 +492,7 @@ async def test_browse_manga_defaults_filter_adult_and_compact_chapters(monkeypat
         }
     }
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    result = await seanime.seanime_browse.entrypoint(kind="manga",search="berserk")
+    result = await _tool("seanime_browse").entrypoint(kind="manga",search="berserk")
     method, url, body = client.calls[0]
     assert method == "POST" and url.endswith("/api/v1/manga/anilist/list")
     assert body == {"search": "berserk", "page": 1, "perPage": 10, "isAdult": False}
@@ -540,7 +554,7 @@ async def test_find_lists_multiple_library_matches_with_ids(monkeypatch):
             _FakeResponse(json_data={"data": _frieren_manga_collection()}),
         ],
     )
-    result = await seanime.seanime_find.entrypoint(title="frieren")
+    result = await _tool("seanime_find").entrypoint(title="frieren")
     assert "2 matches in the user's library" in _tool_text(result)
     assert (
         "- [anime] Sousou no Frieren (id 154587, CURRENT): 10/28, score 9, "
@@ -576,7 +590,7 @@ async def test_find_single_library_match_returns_full_picture(monkeypatch):
             _FakeResponse(json_data={"data": details}),
         ],
     )
-    result = await seanime.seanime_find.entrypoint(title="frieren")
+    result = await _tool("seanime_find").entrypoint(title="frieren")
     assert "Found title in the user's library." in str(result)
     assert "Found in the user's library (anime):" in _tool_text(result)
     assert "CURRENT, progress 10/28, score 9" in _tool_text(result)
@@ -603,7 +617,7 @@ async def test_find_falls_back_to_anilist_labeled_not_in_library(monkeypatch):
             _FakeResponse(json_data={"data": {"Page": {"media": []}}}),
         ],
     )
-    result = await seanime.seanime_find.entrypoint(title="frieren")
+    result = await _tool("seanime_find").entrypoint(title="frieren")
     assert "NOT in the user's library" in _tool_text(result)
     assert "## anime" in _tool_text(result) and "154587" in _tool_text(result)
     method, url, body = client.calls[2]
@@ -633,7 +647,7 @@ async def test_find_kind_anime_searches_one_collection(monkeypatch):
         ]
     }
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": collection})])
-    result = await seanime.seanime_find.entrypoint(title="frieren", kind="anime")
+    result = await _tool("seanime_find").entrypoint(title="frieren", kind="anime")
     assert "2 matches in the user's library" in _tool_text(result)
     assert len(client.calls) == 1
     assert client.calls[0][1].endswith("/api/v1/library/collection")
@@ -668,7 +682,7 @@ async def test_find_matches_words_in_any_order_and_synonyms(monkeypatch):
         ]
     }
     _patch_client(monkeypatch, [_FakeResponse(json_data={"data": collection})])
-    result = await seanime.seanime_find.entrypoint(title="titan attack", kind="anime")
+    result = await _tool("seanime_find").entrypoint(title="titan attack", kind="anime")
     assert "Shingeki no Kyojin (id 1, COMPLETED)" in _tool_text(result)
 
 
@@ -682,16 +696,16 @@ async def test_find_nothing_anywhere_says_so(monkeypatch):
             _FakeResponse(json_data={"data": {"Page": {"media": []}}}),
         ],
     )
-    result = await seanime.seanime_find.entrypoint(title="zzzz")
+    result = await _tool("seanime_find").entrypoint(title="zzzz")
     assert "No match" in _tool_text(result) and "spelling" in _tool_text(result)
 
 
 async def test_find_rejects_bad_args(monkeypatch):
     _patch_client(monkeypatch, [])
-    result = await seanime.seanime_find.entrypoint(title="  ")
+    result = await _tool("seanime_find").entrypoint(title="  ")
     assert "non-empty" in _tool_text(result)
     with pytest.raises(ValidationError, match="kind"):
-        await seanime.seanime_find.entrypoint(title="x", kind="movies")
+        await _tool("seanime_find").entrypoint(title="x", kind="movies")
 
 
 async def test_find_unreachable_server_returns_error(monkeypatch):
@@ -699,7 +713,7 @@ async def test_find_unreachable_server_returns_error(monkeypatch):
         monkeypatch,
         [httpx.ConnectError("refused"), httpx.ConnectError("refused")],
     )
-    result = await seanime.seanime_find.entrypoint(title="frieren")
+    result = await _tool("seanime_find").entrypoint(title="frieren")
     assert "unreachable" in _tool_text(result)
 
 
@@ -768,7 +782,7 @@ async def test_media_info_anime_joins_entry_and_details(monkeypatch):
             _FakeResponse(json_data={"data": details}),
         ],
     )
-    result = await seanime.seanime_media_info.entrypoint(media_id=21)
+    result = await _tool("seanime_media_info").entrypoint(media_id=21)
     # Library state (the entry half).
     assert "One Piece (id 21, TV, 1999, RELEASING)" in _tool_text(result)
     assert "CURRENT, progress 1090/1100, score 9" in _tool_text(result)
@@ -813,7 +827,7 @@ async def test_media_info_manga_joins_reading_state_and_details(monkeypatch):
             _FakeResponse(json_data={"data": details}),
         ],
     )
-    result = await seanime.seanime_media_info.entrypoint(media_id=30002, kind="manga")
+    result = await _tool("seanime_media_info").entrypoint(media_id=30002, kind="manga")
     assert "Berserk" in _tool_text(result) and "120/380 chapters" in _tool_text(result)
     assert "380 chapters, 42 volumes" in _tool_text(result)
     assert "Dark fantasy." in _tool_text(result)
@@ -837,7 +851,7 @@ async def test_media_info_shows_cover_url(monkeypatch):
             _FakeResponse(json_data={"data": {}}),
         ],
     )
-    result = await seanime.seanime_media_info.entrypoint(media_id=21)
+    result = await _tool("seanime_media_info").entrypoint(media_id=21)
     assert f"Cover: {_proxy('https://img/op.jpg')}" in _tool_text(result)
     assert "Original cover fallback: https://img/op.jpg" in _tool_text(result)
 
@@ -845,13 +859,13 @@ async def test_media_info_shows_cover_url(monkeypatch):
 async def test_media_info_rejects_unknown_kind(monkeypatch):
     _patch_client(monkeypatch, [])
     with pytest.raises(ValidationError, match="kind"):
-        await seanime.seanime_media_info.entrypoint(media_id=1, kind="movie")
+        await _tool("seanime_media_info").entrypoint(media_id=1, kind="movie")
 
 
 # --- progress mutations ----------------------------------------------------------
 async def test_update_progress_posts_and_confirms(monkeypatch):
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": True})])
-    result = await seanime.seanime_update_progress.entrypoint(
+    result = await _tool("seanime_update_progress").entrypoint(
         media_id=21, episode_number=1091, total_episodes=1100
     )
     assert "1091" in _tool_text(result) and "21" in _tool_text(result)
@@ -862,7 +876,7 @@ async def test_update_progress_posts_and_confirms(monkeypatch):
 
 async def test_manga_update_progress_posts_and_confirms(monkeypatch):
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": True})])
-    result = await seanime.seanime_manga_update_progress.entrypoint(
+    result = await _tool("seanime_manga_update_progress").entrypoint(
         media_id=30002, chapter_number=121, total_chapters=380
     )
     assert "121" in _tool_text(result) and "30002" in _tool_text(result)
@@ -891,7 +905,7 @@ async def test_episode_collection_lists_airdate_filler_downloaded(monkeypatch):
         ],
     }
     _patch_client(monkeypatch, [_FakeResponse(json_data={"data": episodes})])
-    result = await seanime.seanime_episode_collection.entrypoint(media_id=5)
+    result = await _tool("seanime_episode_collection").entrypoint(media_id=5)
     assert "2 main episode(s):" in _tool_text(result)
     # Sorted by episode number despite response order.
     assert _tool_text(result).index("Ep 1") < _tool_text(result).index("Ep 2")
@@ -923,7 +937,7 @@ async def test_missing_episodes_groups_per_anime(monkeypatch):
         "silencedEpisodes": [{"episodeNumber": 1}],
     }
     _patch_client(monkeypatch, [_FakeResponse(json_data={"data": payload})])
-    result = await seanime.seanime_missing_episodes.entrypoint()
+    result = await _tool("seanime_missing_episodes").entrypoint()
     assert "2 missing episode(s):" in _tool_text(result)
     assert "- El Hazard 2 (id 118): Ep 4 (aired 1997-10-25), Ep 5 (aired 1997-11-25)" in _tool_text(result)
     assert "1 silenced episode(s)" in _tool_text(result)
@@ -942,7 +956,7 @@ async def test_schedule_lists_upcoming_and_counts_past(monkeypatch):
         },
     ]
     _patch_client(monkeypatch, [_FakeResponse(json_data={"data": payload})])
-    result = await seanime.seanime_upcoming_schedule.entrypoint()
+    result = await _tool("seanime_upcoming_schedule").entrypoint()
     assert "1 upcoming episode(s) (1 past not listed):" in _tool_text(result)
     assert "Soon — Ep 10 (id 2) [season finale]" in _tool_text(result)
     assert "Old" not in _tool_text(result)
@@ -959,11 +973,11 @@ async def test_continuity_history_compacts_map(monkeypatch):
         }
     }
     _patch_client(monkeypatch, [_FakeResponse(json_data={"data": payload})])
-    result = await seanime.seanime_continuity_history.entrypoint()
+    result = await _tool("seanime_continuity_history").entrypoint()
     assert "media 21: episode 1090, stopped at 42%" in _tool_text(result)
 
 
 async def test_continuity_history_empty(monkeypatch):
     _patch_client(monkeypatch, [_FakeResponse(json_data={"data": {}})])
-    result = await seanime.seanime_continuity_history.entrypoint()
+    result = await _tool("seanime_continuity_history").entrypoint()
     assert "no watch history" in _tool_text(result)

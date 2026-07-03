@@ -29,7 +29,7 @@ from pathlib import Path
 
 from agno.utils.log import log_info
 
-from magi.core.config import config
+from magi.core.config import Config
 from magi.core.storage.s3 import ObjectInfo, StorageError, StoredObject
 
 # Sidecar suffix for a key's content-type + metadata. Kept distinct so listings
@@ -190,7 +190,7 @@ class LocalStore:
         return ctype, metadata
 
 
-def build_local_store_from_config() -> LocalStore:
+def build_local_store_from_config(config: Config) -> LocalStore:
     """Build the local store from `config` and ensure its root exists."""
     store = LocalStore(config.storage_local_dir, presign_expiry=config.s3_presign_expiry)
     store.ensure_bucket()

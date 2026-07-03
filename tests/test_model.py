@@ -22,7 +22,10 @@ from magi.agent.model import (
     lead_model_def,
     member_model_def,
 )
-from magi.core.config import config
+from magi.core.config import Config
+
+# The engine's default settings, as a fresh value object — no global to mutate.
+config = Config()
 
 
 def test_provider_resolves_known_names():
@@ -40,8 +43,8 @@ def test_provider_rejects_unknown_name():
 def test_role_specs_share_the_configured_provider():
     """Both roles read the one configured provider (default: litellm proxy)."""
     want = _provider(config.model_provider)
-    assert lead_model_def().provider == want
-    assert member_model_def().provider == want
+    assert lead_model_def(config).provider == want
+    assert member_model_def(config).provider == want
 
 
 def _litellm(model_id: str, **kwargs):
@@ -51,7 +54,8 @@ def _litellm(model_id: str, **kwargs):
             provider=ModelProviderEnum.LITELLM,
             model_id=model_id,
             **kwargs,
-        )
+        ),
+        config,
     )
 
 
@@ -124,7 +128,8 @@ def test_unsupported_provider_raises():
         build_model(
             ModelDefinition.model_construct(
                 provider="made-up", model_id="x", has_tools=False
-            )
+            ),
+            config,
         )
 
 
@@ -155,7 +160,8 @@ def _llamacpp(model_id: str = "qwen3.5-9b", **kwargs):
             provider=ModelProviderEnum.LLAMACPP,
             model_id=model_id,
             **kwargs,
-        )
+        ),
+        config,
     )
 
 
@@ -201,7 +207,8 @@ def _openai(model_id: str = "gpt-4o-mini", **kwargs):
             provider=ModelProviderEnum.OPENAI,
             model_id=model_id,
             **kwargs,
-        )
+        ),
+        config,
     )
 
 
@@ -225,7 +232,7 @@ def test_openai_defers_to_server_without_overrides():
 
 def test_lead_spec_is_multimodal_router_brain():
     """The lead is the multimodal router brain; its window is configured."""
-    spec = lead_model_def()
+    spec = lead_model_def(config)
     assert spec.provider == ModelProviderEnum.LITELLM  # default provider (proxy)
     assert spec.model_id == config.lead_model_id
     assert spec.has_tools
@@ -236,7 +243,7 @@ def test_lead_spec_is_multimodal_router_brain():
 
 def test_member_window_no_larger_than_lead():
     """Members get a window no larger than the lead's (kept equal for GPU fit)."""
-    spec = member_model_def()
+    spec = member_model_def(config)
     assert spec.has_tools
     assert spec.num_ctx == config.member_num_ctx
-    assert spec.num_ctx <= lead_model_def().num_ctx
+    assert spec.num_ctx <= lead_model_def(config).num_ctx

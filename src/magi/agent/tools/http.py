@@ -28,7 +28,7 @@ pixels into context; these return text only.
 import asyncio
 import ipaddress
 import socket
-from typing import Annotated, Any, Final, Literal
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 import httpx
@@ -37,7 +37,7 @@ from agno.utils.log import log_info, log_warning
 from pydantic import BaseModel, Field
 
 from magi.agent.tools.outputs import ToolOutput, fail, ok
-from magi.core.config import config
+from magi.core.config import Config
 
 # Don't pull a huge payload into context. 2 MB covers any reasonable API/page
 # response; bigger is almost certainly not something the model should read inline.
@@ -83,7 +83,7 @@ def _scheme_ok(url: str) -> bool:
     return url.lower().startswith(("http://", "https://"))
 
 
-def _is_seanime_image_proxy_get(url: str, method: str) -> bool:
+def _is_seanime_image_proxy_get(url: str, method: str, config: Config) -> bool:
     if method.upper() != "GET":
         return False
     target = urlsplit(url)
@@ -95,7 +95,7 @@ def _is_seanime_image_proxy_get(url: str, method: str) -> bool:
     )
 
 
-async def _host_allowed(url: str, method: str = "GET") -> tuple[bool, str]:
+async def _host_allowed(url: str, config: Config, method: str = "GET") -> tuple[bool, str]:
     """SSRF guard: resolve the URL's host and reject private/loopback targets.
 
     Returns (allowed, reason). Skipped entirely when the deployment opts into
@@ -103,7 +103,7 @@ async def _host_allowed(url: str, method: str = "GET") -> tuple[bool, str]:
     service on purpose), or for GET requests to the configured Seanime image
     proxy endpoint.
     """
-    if config.http_allow_private_hosts or _is_seanime_image_proxy_get(url, method):
+    if config.http_allow_private_hosts or _is_seanime_image_proxy_get(url, method, config):
         return True, ""
     host = urlsplit(url).hostname
     if not host:
@@ -130,39 +130,13 @@ async def _host_allowed(url: str, method: str = "GET") -> tuple[bool, str]:
     return True, ""
 
 
-@tool(
-    description="Fetch the text body of an HTTP(S) URL with a plain GET request.",
-    instructions=(
-        "Use for raw HTML, JSON, or text resources that need no auth, headers, "
-        "method, or body. For custom methods/headers/body use http_request; for image pixels use view_image_from_url."
-    ),
-    show_result=True,
-)
-async def http_get(
-    url: Annotated[
-        str,
-        Field(
-            min_length=8,
-            description="Full HTTP(S) URL to fetch with a plain GET request.",
-        ),
-    ],
-) -> ToolOutput[HttpGetData]:
-    """Fetch the text body of an HTTP(S) URL via a GET request.
-
-    Use this to read an API response (JSON), a web page's raw HTML, or any
-    text resource the user links or asks you to look up. Returns the response
-    body as text.
-
-    This does a plain GET only — no auth, headers, or body. For a request that
-    needs a method, headers, or a payload, use `http_request`. For image links
-    use `view_image_from_url`. Returns an error string if the URL isn't
-    reachable, isn't http(s), or the body is too large.
-    """
+async def _http_get(url: str, config: Config) -> ToolOutput[HttpGetData]:
+    """Implementation of the `http_get` tool (config injected by the builder)."""
     url = (url or "").strip()
     if not _scheme_ok(url):
         return fail(f"Refusing to fetch non-http(s) URL: {url!r}", HttpGetData(url=url))
 
-    allowed, reason = await _host_allowed(url, method="GET")
+    allowed, reason = await _host_allowed(url, config, method="GET")
     if not allowed:
         log_warning(f"http_get: blocked {url} ({reason})")
         return fail(f"Refusing to fetch {url}: {reason}.", HttpGetData(url=url, reason=reason))
@@ -231,59 +205,14 @@ def _format_response(method: str, url: str, resp: httpx.Response) -> str:
     return "\n".join(lines)
 
 
-@tool(
-    description="Perform one explicit HTTP request and return status, key headers, and body text.",
-    instructions=(
-        "Use only when the user supplied or clearly requested the URL and request details. "
-        "Do not invent auth headers or payloads. Mutating methods require clear user intent."
-    ),
-    show_result=True,
-)
-async def http_request(
-    url: Annotated[
-        str,
-        Field(min_length=8, description="Full HTTP(S) URL to call."),
-    ],
-    method: Annotated[
-        Literal["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        Field(default="GET", description="HTTP method to use for the request."),
-    ] = "GET",
-    headers: Annotated[
-        dict[str, str] | None,
-        Field(
-            default=None,
-            description="Optional flat request headers, e.g. Authorization or Content-Type.",
-        ),
-    ] = None,
-    body: Annotated[
-        str | None,
-        Field(
-            default=None,
-            description="Optional raw request body. For JSON, pass serialized JSON text.",
-        ),
-    ] = None,
+async def _http_request(
+    url: str,
+    config: Config,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    body: str | None = None,
 ) -> ToolOutput[HttpRequestData]:
-    """Perform one HTTP request the user described, returning its status and body.
-
-    Use this when a plain `http_get` is not enough: a different method (POST,
-    PUT, PATCH, DELETE), custom request headers (auth tokens, content-type), or a
-    request body/payload. Collect every part from the user — never invent a URL,
-    header, or payload.
-
-    Arguments (all but `url` optional):
-      - url: the full http(s) URL to call.
-      - method: HTTP method, e.g. "GET", "POST", "PUT", "PATCH", "DELETE".
-      - headers: request headers as a flat object, e.g.
-        {"Authorization": "Bearer ...", "Content-Type": "application/json"}.
-      - body: the raw request body/payload as a string. For JSON, pass the
-        serialized JSON text and set a "Content-Type: application/json" header.
-
-    Methods other than GET/HEAD/OPTIONS can change external state — only call
-    those after the user has clearly asked for that action. Returns the status
-    line, key response headers, and the response body as text, or an error
-    string if the request can't be made (bad scheme, blocked host, network
-    failure, oversized body).
-    """
+    """Implementation of the `http_request` tool (config injected by the builder)."""
     url = (url or "").strip()
     method = (method or "GET").strip().upper()
 
@@ -295,7 +224,7 @@ async def http_request(
             HttpRequestData(method=method, allowed=sorted(_ALLOWED_METHODS)),
         )
 
-    allowed, reason = await _host_allowed(url, method=method)
+    allowed, reason = await _host_allowed(url, config, method=method)
     if not allowed:
         log_warning(f"http_request: blocked {method} {url} ({reason})")
         return fail(f"Refusing to call {url}: {reason}.", HttpRequestData(url=url, method=method, reason=reason))
@@ -335,5 +264,97 @@ async def http_request(
     )
 
 
-# Read-only fetch + the controllable arbitrary-request escape hatch.
-HTTP_TOOLS: Final[list[Any]] = [http_get, http_request]
+def build_http_tools(config: Config) -> list:
+    """The HTTP tools bound to `config` (the SSRF guard reads it).
+
+    Read-only fetch (`http_get`) + the controllable arbitrary-request escape hatch
+    (`http_request`). Both are thin `@tool` wrappers whose model-facing signatures
+    stay clean — `config` is captured by closure, never exposed to the model.
+    """
+
+    @tool(
+        description="Fetch the text body of an HTTP(S) URL with a plain GET request.",
+        instructions=(
+            "Use for raw HTML, JSON, or text resources that need no auth, headers, "
+            "method, or body. For custom methods/headers/body use http_request; for image pixels use view_image_from_url."
+        ),
+        show_result=True,
+    )
+    async def http_get(
+        url: Annotated[
+            str,
+            Field(
+                min_length=8,
+                description="Full HTTP(S) URL to fetch with a plain GET request.",
+            ),
+        ],
+    ) -> ToolOutput[HttpGetData]:
+        """Fetch the text body of an HTTP(S) URL via a GET request.
+
+        Use this to read an API response (JSON), a web page's raw HTML, or any
+        text resource the user links or asks you to look up. Returns the response
+        body as text.
+
+        This does a plain GET only — no auth, headers, or body. For a request that
+        needs a method, headers, or a payload, use `http_request`. For image links
+        use `view_image_from_url`. Returns an error string if the URL isn't
+        reachable, isn't http(s), or the body is too large.
+        """
+        return await _http_get(url, config)
+
+    @tool(
+        description="Perform one explicit HTTP request and return status, key headers, and body text.",
+        instructions=(
+            "Use only when the user supplied or clearly requested the URL and request details. "
+            "Do not invent auth headers or payloads. Mutating methods require clear user intent."
+        ),
+        show_result=True,
+    )
+    async def http_request(
+        url: Annotated[
+            str,
+            Field(min_length=8, description="Full HTTP(S) URL to call."),
+        ],
+        method: Annotated[
+            Literal["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            Field(default="GET", description="HTTP method to use for the request."),
+        ] = "GET",
+        headers: Annotated[
+            dict[str, str] | None,
+            Field(
+                default=None,
+                description="Optional flat request headers, e.g. Authorization or Content-Type.",
+            ),
+        ] = None,
+        body: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description="Optional raw request body. For JSON, pass serialized JSON text.",
+            ),
+        ] = None,
+    ) -> ToolOutput[HttpRequestData]:
+        """Perform one HTTP request the user described, returning its status and body.
+
+        Use this when a plain `http_get` is not enough: a different method (POST,
+        PUT, PATCH, DELETE), custom request headers (auth tokens, content-type), or a
+        request body/payload. Collect every part from the user — never invent a URL,
+        header, or payload.
+
+        Arguments (all but `url` optional):
+          - url: the full http(s) URL to call.
+          - method: HTTP method, e.g. "GET", "POST", "PUT", "PATCH", "DELETE".
+          - headers: request headers as a flat object, e.g.
+            {"Authorization": "Bearer ...", "Content-Type": "application/json"}.
+          - body: the raw request body/payload as a string. For JSON, pass the
+            serialized JSON text and set a "Content-Type: application/json" header.
+
+        Methods other than GET/HEAD/OPTIONS can change external state — only call
+        those after the user has clearly asked for that action. Returns the status
+        line, key response headers, and the response body as text, or an error
+        string if the request can't be made (bad scheme, blocked host, network
+        failure, oversized body).
+        """
+        return await _http_request(url, config, method=method, headers=headers, body=body)
+
+    return [http_get, http_request]

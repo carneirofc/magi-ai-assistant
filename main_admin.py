@@ -8,12 +8,15 @@ settings are set in code below; only secrets (ADMIN_AUTH_TOKEN, QDRANT_API_KEY,
 ...) come from .env.
 """
 
-from magi.core.config import configure
+from magi.core.config import Config
 
 
-def apply_deployment_config() -> None:
-    """Deployment configuration, in code (secrets stay in .env — see core/config)."""
-    configure(
+def apply_deployment_config() -> Config:
+    """Deployment configuration, in code (secrets stay in .env — see core/config).
+
+    Returns the immutable `Config` the composition root threads through
+    `AgentContext` — no process global."""
+    return Config(
         # Same brain's backends — the admin service reuses the chat stack's Qdrant
         # + embedding proxy to read/manage the corpus; it never runs the model.
         model_provider="llamacpp",
@@ -26,14 +29,15 @@ def apply_deployment_config() -> None:
 
 
 def main() -> None:
-    apply_deployment_config()
+    config = apply_deployment_config()
 
     import uvicorn
 
     from magi.channels.admin import build_admin_app
-    from magi.core.config import config
+    from magi.core.context import AgentContext
 
-    uvicorn.run(build_admin_app(), host=config.admin_host, port=config.admin_port)
+    ctx = AgentContext(config=config)
+    uvicorn.run(build_admin_app(ctx), host=config.admin_host, port=config.admin_port)
 
 
 if __name__ == "__main__":
