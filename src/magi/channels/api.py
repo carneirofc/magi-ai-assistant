@@ -74,6 +74,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, model_validator
 
+from magi.agent.introspect import TeamSnapshot, build_snapshot
 from magi.channels.gateway import scoped_user_id
 from magi.core.conversation import ConversationDelta, ConversationReply, ConversationService
 
@@ -490,6 +491,18 @@ def create_app(
     def get_context(session_id: str, user_id: str = Query(min_length=1)) -> dict:
         return conversation.context_stats(_scoped(user_id), session_id)
 
+    @app.get(
+        "/v1/introspection",
+        response_model=TeamSnapshot,
+        dependencies=[Depends(require_auth)],
+    )
+    def get_introspection() -> TeamSnapshot:
+        """A read-only snapshot of the live roster: lead model, members (role/model/
+        tools), team-level tools, and MCP servers with their connection status. For
+        an operator UI to see exactly what this process runs — it reads the assembled
+        runner, never the model."""
+        return build_snapshot(getattr(conversation, "runner", None))
+
     # --- OpenAI-compatible shim -------------------------------------------
     @app.get("/v1/models", dependencies=[Depends(require_auth)])
     def list_models() -> dict:
@@ -644,7 +657,7 @@ def build_api_app(db: Optional[BaseDb] = None) -> FastAPI:
 class ApiAdapter:
     """This channel as a `gateway.PlatformAdapter` (ADR 0003) — lets the HTTP
     API be run through `gateway.run_gateway` alongside another adapter in one
-    process, the same role `DiscordClient` already plays. Additive: `main_api.py`
+    process, the same role `DiscordClient` already plays. Additive: `main.py api`
     keeps calling `uvicorn.run(build_api_app(), ...)` directly; nothing requires
     switching to this.
     """
