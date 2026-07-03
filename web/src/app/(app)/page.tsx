@@ -6,6 +6,7 @@ import {
   EmptyState,
   InfoChip,
   PageHeader,
+  StatusBadge,
   StatusMessage,
   SurfacePanel,
   Table,
@@ -18,7 +19,7 @@ import {
 
 import { StatCard } from "@/components/StatCard";
 import { encodeDocId } from "@/lib/encode";
-import { listKnowledgeDocuments, listSubjects, listUsers } from "@/lib/admin-api";
+import { getHealth, listKnowledgeDocuments, listSubjects, listUsers } from "@/lib/admin-api";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,7 @@ export default async function DashboardPage() {
   let documents: Awaited<ReturnType<typeof listKnowledgeDocuments>>["documents"] = [];
   let subjects: string[] = [];
   let error: string | null = null;
+  const health = await getHealth();
   try {
     const [u, d, s] = await Promise.all([
       listUsers().then((r) => r.users),
@@ -56,6 +58,15 @@ export default async function DashboardPage() {
         subtitle="magi // admin"
         title="Dashboard"
         description="Memory and knowledge at a glance — durable facts the model keeps and the shared document corpus it searches."
+        pills={
+          <StatusBadge tone={health ? "success" : "error"}>
+            <span
+              className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full"
+              style={{ background: "currentColor" }}
+            />
+            {health ? "Backend online" : "Backend offline"}
+          </StatusBadge>
+        }
       />
 
       {error ? (

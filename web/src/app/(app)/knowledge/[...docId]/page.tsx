@@ -12,6 +12,7 @@ import {
   SurfacePanel,
 } from "@carneirofc/ui";
 
+import { CopyId } from "@/components/CopyId";
 import { DocumentActions } from "@/components/DocumentActions";
 import { DocumentMeta } from "@/components/DocumentMeta";
 import { getKnowledgeDocument, listSubjects, listTags } from "@/lib/admin-api";
@@ -51,8 +52,9 @@ export default async function DocumentPage({
       <PageHeader
         subtitle={`magi // knowledge // ${doc.scope}`}
         title={doc.title}
-        description={doc.doc_id}
+        description="A single document in the corpus — its metadata and indexed chunks."
       />
+      <CopyId value={doc.doc_id} className="self-start" />
 
       <SurfacePanel tone="soft" padding="lg" className="flex flex-col gap-5">
         <DocumentActions docId={doc.doc_id} title={doc.title} />

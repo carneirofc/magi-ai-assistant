@@ -1,10 +1,12 @@
 // One session's machine-managed state: the live turn window, the rolling summary,
-// and the pending buffer. Editable as raw files (validate-on-save).
+// and the pending buffer. Window/pending render as a chat transcript (Rendered)
+// or raw JSON (Raw); the summary renders as prose or raw markdown.
 
 import Link from "next/link";
 import { PageHeader, StatusMessage, SurfacePanel } from "@carneirofc/ui";
 
-import { RawFileEditor } from "@/components/RawFileEditor";
+import { CopyId } from "@/components/CopyId";
+import { SessionFile } from "@/components/SessionFile";
 import { getRawFile } from "@/lib/admin-api";
 
 export const dynamic = "force-dynamic";
@@ -22,17 +24,20 @@ export default async function SessionPage({
     {
       kind: "session_window",
       label: "Live window",
-      description: "JSON list of the most recent turns.",
+      description: "The most recent turns kept verbatim.",
+      render: "turns" as const,
     },
     {
       kind: "session_summary",
       label: "Rolling summary",
-      description: "Markdown summary of turns that rolled out of the window.",
+      description: "Summary of turns that rolled out of the window.",
+      render: "text" as const,
     },
     {
       kind: "session_pending",
       label: "Pending buffer",
-      description: "JSON list of turns awaiting the next fold.",
+      description: "Turns awaiting the next fold.",
+      render: "turns" as const,
     },
   ];
 
@@ -54,8 +59,9 @@ export default async function SessionPage({
       <PageHeader
         subtitle={`magi // memory // ${userId}`}
         title="Session"
-        description={sessionId}
+        description="Machine-managed conversation state — the live window, rolling summary, and pending buffer."
       />
+      <CopyId value={sessionId} className="self-start" />
 
       {error ? (
         <StatusMessage role="alert" tone="error">
@@ -65,10 +71,11 @@ export default async function SessionPage({
         <div className="flex flex-col gap-4">
           {files?.map((file, i) => (
             <SurfacePanel key={kinds[i].kind} tone="soft" padding="lg">
-              <RawFileEditor
+              <SessionFile
                 kind={kinds[i].kind}
                 label={kinds[i].label}
                 description={kinds[i].description}
+                render={kinds[i].render}
                 userId={userId}
                 sessionId={sessionId}
                 initialContent={file.content}

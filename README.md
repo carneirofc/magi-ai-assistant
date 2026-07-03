@@ -41,6 +41,18 @@ flowchart LR
     TEAM --> OBJ[(byte archive · knowledge)]
 ```
 
+## Admin dashboard
+
+A web dashboard to **inspect and edit everything the assistant remembers** — the
+counterpart to deliberate memory. Browse users and their curated facts, read
+sessions as a chat transcript, manage the knowledge corpus, and edit the global
+persona. Built on the [`@carneirofc/ui`](https://github.com/carneirofc/deedlit.dev)
+design system with light/dark themes. See [`web/`](web/README.md) to run it.
+
+<p align="center">
+  <img src="web/docs/screenshots/02-dashboard.png" alt="MAGI admin dashboard" width="900">
+</p>
+
 ## Documentation
 
 Full docs live in [`docs/`](docs/):
@@ -51,6 +63,7 @@ Full docs live in [`docs/`](docs/):
 | Design, request lifecycle, diagrams | [architecture.md](docs/architecture.md) |
 | Deliberate memory (the centerpiece) | [memory.md](docs/memory.md) |
 | Discord / HTTP / OpenAI shim contracts | [channels.md](docs/channels.md) |
+| Desktop app client (embed or HTTP SDK) | [desktop.md](docs/desktop.md) |
 | Every configuration field | [configuration.md](docs/configuration.md) |
 | Team, members, tool catalog | [agent-and-tools.md](docs/agent-and-tools.md) |
 | Docker services, ports, ingestion | [infrastructure.md](docs/infrastructure.md) |
@@ -101,6 +114,31 @@ service) via `host.docker.internal`, exactly as the host-run app reaches
 (bind `0.0.0.0`, point the backend URL at the host). To enable an optional extra
 in the image, pass it at build time: `EXTRAS="--extra s3" docker compose -f
 docker-compose.app.yaml up --build`.
+
+## Desktop apps (GUI)
+
+[`magi.client`](src/magi/client/__init__.py) is the front door for a desktop GUI:
+one surface, two interchangeable backends. Embed the whole brain in a Python GUI
+(`embed(...)`) with no server, or talk to a running `main_api.py` over HTTP
+(`connect(...)`) — same call sites either way, same durable memory for the same
+`user_id`. `SyncClient` wraps either one in blocking methods for toolkits that
+own the main thread (Tkinter, PyQt/PySide, wx).
+
+```python
+from magi.client import SyncClient, embed, connect
+
+ui = SyncClient(embed(user_id="local"))                 # in-process, no server
+# ui = SyncClient(connect("http://127.0.0.1:8000", user_id="local"))  # over HTTP
+print(ui.send("hello").text)
+for chunk in ui.stream("tell me more"):                 # streamed deltas
+    ...
+ui.close()
+```
+
+Full walkthrough and a runnable Tkinter example
+([`examples/desktop_chat.py`](examples/desktop_chat.py)) in
+[docs/desktop.md](docs/desktop.md). The HTTP contract those clients speak is
+below.
 
 ## HTTP API
 
