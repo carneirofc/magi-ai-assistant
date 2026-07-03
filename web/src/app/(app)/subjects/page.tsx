@@ -1,6 +1,7 @@
 // Subjects management — the controlled vocabulary behind knowledge grouping.
 
-import { Nav } from "@/components/Nav";
+import { PageHeader, StatusMessage } from "@carneirofc/ui";
+
 import { SubjectManager } from "@/components/SubjectManager";
 import { listSubjects } from "@/lib/admin-api";
 
@@ -16,9 +17,19 @@ export default async function SubjectsPage() {
   }
 
   return (
-    <main>
-      <Nav title="Subjects" />
-      {error ? <p className="error">{error}</p> : <SubjectManager subjects={subjects} />}
-    </main>
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        subtitle="magi // knowledge"
+        title="Subjects"
+        description="The controlled vocabulary documents are grouped by. A hard filter on the model's knowledge search."
+      />
+      {error ? (
+        <StatusMessage role="alert" tone="error">
+          {error}
+        </StatusMessage>
+      ) : (
+        <SubjectManager subjects={subjects} />
+      )}
+    </div>
   );
 }

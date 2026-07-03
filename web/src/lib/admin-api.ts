@@ -71,6 +71,18 @@ export function deleteDocument(docId: string): Promise<Response> {
   });
 }
 
+/** Liveness probe. Returns the admin-api's healthz body, or null when unreachable
+ * — callers surface a backend-status indicator without failing the whole page. */
+export async function getHealth(): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await adminRequest("/healthz");
+    if (!res.ok) return null;
+    return (await res.json()) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 export async function listUsers(): Promise<Body<"/admin/v1/memory/users">> {
   return adminGet("/admin/v1/memory/users");
 }
