@@ -70,7 +70,7 @@ from agno.media import File, Image
 from agno.utils.log import log_info, log_warning
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, model_validator
 
@@ -146,11 +146,35 @@ class MediaItem(BaseModel):
     data_base64: Optional[str] = None
 
 
+class Usage(BaseModel):
+    """Token accounting for a handled turn (best-effort; see ConversationUsage)."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cached_tokens: int = 0
+    reasoning_tokens: int = 0
+    context_window: Optional[int] = None
+
+
 class MessageReply(BaseModel):
     text: str
     reasoning: Optional[str] = None
     is_error: bool = False
     media: list[MediaItem] = Field(default_factory=list)
+    usage: Optional[Usage] = None
+
+
+class IdentityOut(BaseModel):
+    """The bot's presented identity, read-only for the UI (the picture is served
+    separately at `/v1/identity/avatar`). `version` moves whenever the operator
+    edits it, so a client can bust its avatar cache."""
+
+    display_name: str = ""
+    description: str = ""
+    has_avatar: bool = False
+    avatar_mime: Optional[str] = None
+    version: str = ""
 
 
 def _media_items(reply: ConversationReply) -> list[MediaItem]:
@@ -183,12 +207,28 @@ def _media_items(reply: ConversationReply) -> list[MediaItem]:
     return items
 
 
+def _usage_wire(reply: ConversationReply) -> Optional[Usage]:
+    """Serialize the reply's token accounting onto the wire, when present."""
+    u = reply.usage
+    if u is None:
+        return None
+    return Usage(
+        input_tokens=u.input_tokens,
+        output_tokens=u.output_tokens,
+        total_tokens=u.total_tokens,
+        cached_tokens=u.cached_tokens,
+        reasoning_tokens=u.reasoning_tokens,
+        context_window=u.context_window,
+    )
+
+
 def _to_wire(reply: ConversationReply) -> MessageReply:
     return MessageReply(
         text=reply.text,
         reasoning=reply.reasoning,
         is_error=reply.is_error,
         media=_media_items(reply),
+        usage=_usage_wire(reply),
     )
 
 
@@ -586,6 +626,37 @@ def create_app(
         runner, never the model."""
         return build_snapshot(getattr(conversation, "runner", None))
 
+    # --- bot identity (read-only; managed via the admin surface) ----------
+    @app.get(
+        "/v1/identity",
+        response_model=IdentityOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def get_identity() -> IdentityOut:
+        """The bot's presented identity (name, description, whether a picture is
+        set). The chat UI renders this as the assistant's face + name; edits go
+        through the admin surface, not here."""
+        store = conversation.memory.store.identity
+        ident = store.read()
+        return IdentityOut(
+            display_name=ident.display_name,
+            description=ident.description,
+            has_avatar=ident.has_avatar,
+            avatar_mime=ident.avatar_mime,
+            version=store.version(),
+        )
+
+    @app.get("/v1/identity/avatar", dependencies=[Depends(require_auth)])
+    def get_identity_avatar() -> Response:
+        """The bot's profile-picture bytes (404 when none is set)."""
+        avatar = conversation.memory.store.identity.avatar_bytes()
+        if avatar is None:
+            raise HTTPException(status_code=404, detail="no avatar set")
+        data, mime = avatar
+        # Content changes in place on edit, so don't let a cache pin the old one;
+        # the UI busts by version query anyway.
+        return Response(content=data, media_type=mime, headers={"Cache-Control": "no-cache"})
+
     # --- OpenAI-compatible shim -------------------------------------------
     @app.get("/v1/models", dependencies=[Depends(require_auth)])
     def list_models() -> dict:
@@ -725,7 +796,10 @@ def build_api_app(db: Optional[BaseDb] = None) -> FastAPI:
         from magi.channels.admin import build_admin_app
 
         log_info("api: admin surface ALSO mounted on this app, under /admin/v1/* (config.admin_enabled)")
-        admin_app = build_admin_app()
+        # Hand the admin app the same memory orchestrator this app's chat path uses,
+        # so its operator triggers (summarize / curate / flush) run the real
+        # model-backed passes instead of 503-ing.
+        admin_app = build_admin_app(memory_manager=conversation.memory)
 
     return create_app(
         conversation,

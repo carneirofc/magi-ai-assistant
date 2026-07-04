@@ -114,6 +114,69 @@ export async function getPersona(): Promise<Body<"/admin/v1/memory/persona">> {
   return adminGet("/admin/v1/memory/persona");
 }
 
+// --- bot identity -----------------------------------------------------------
+// Hand-typed (like introspection-types) rather than derived from the generated
+// OpenAPI `paths`, so these helpers don't require regenerating api-types.ts.
+export interface AdminIdentity {
+  display_name: string;
+  description: string;
+  has_avatar: boolean;
+  avatar_mime: string | null;
+  avatar_filename: string | null;
+  version: string;
+}
+
+export async function getIdentity(): Promise<AdminIdentity> {
+  return adminGet<AdminIdentity>("/admin/v1/identity");
+}
+
+/** Set the bot's name + description (proxied by the BFF). Relays 409 on a stale
+ * version. Returns the admin-api Response. */
+export function updateIdentity(body: {
+  display_name: string;
+  description: string;
+  expectedVersion?: string;
+}): Promise<Response> {
+  return adminRequest("/admin/v1/identity", {
+    method: "PUT",
+    body: JSON.stringify({
+      display_name: body.display_name,
+      description: body.description,
+      expected_version: body.expectedVersion,
+    }),
+  });
+}
+
+/** Upload a new profile picture (base64 bytes + mime). Returns the admin-api Response. */
+export function putIdentityAvatar(body: {
+  dataBase64: string;
+  mimeType: string;
+  filename?: string;
+  expectedVersion?: string;
+}): Promise<Response> {
+  return adminRequest("/admin/v1/identity/avatar", {
+    method: "PUT",
+    body: JSON.stringify({
+      data_base64: body.dataBase64,
+      mime_type: body.mimeType,
+      filename: body.filename,
+      expected_version: body.expectedVersion,
+    }),
+  });
+}
+
+/** Clear the profile picture. Returns the admin-api Response. */
+export function deleteIdentityAvatar(expectedVersion?: string): Promise<Response> {
+  const q = expectedVersion ? `?expected_version=${encodeURIComponent(expectedVersion)}` : "";
+  return adminRequest(`/admin/v1/identity/avatar${q}`, { method: "DELETE" });
+}
+
+/** Open the current profile-picture bytes from the admin-api (404 when none) — so
+ * the settings page can preview without depending on the chat-api being up. */
+export function fetchIdentityAvatar(): Promise<Response> {
+  return adminRequest("/admin/v1/identity/avatar");
+}
+
 // --- ingest -----------------------------------------------------------------
 export function ingestDocument(doc: {
   title: string;
@@ -238,5 +301,32 @@ export function putRawFile(
   return adminRequest(
     `/admin/v1/memory/files/${encodeURIComponent(kind)}${rawFileQuery(opts.userId, opts.sessionId)}`,
     { method: "PUT", body: JSON.stringify({ content, expected_version: opts.expectedVersion }) },
+  );
+}
+
+// --- operator-triggered memory passes ---------------------------------------
+// Hand-typed (like the identity helpers) rather than derived from the generated
+// OpenAPI `paths`, so adding these doesn't require regenerating api-types.ts.
+export type MemoryTriggerAction = "summarize" | "curate" | "flush";
+
+export interface MemoryTriggerResult {
+  action: string;
+  changed: boolean;
+  detail: string;
+}
+
+/** Run an operator-triggered memory pass on one session (proxied by the BFF).
+ * Relays the admin-api status verbatim — notably 503 when the deployment has no
+ * model wired for the model-backed passes (summarize / curate). */
+export function triggerSessionMemory(
+  userId: string,
+  sessionId: string,
+  action: MemoryTriggerAction,
+): Promise<Response> {
+  return adminRequest(
+    `/admin/v1/memory/users/${encodeURIComponent(userId)}/sessions/${encodeURIComponent(
+      sessionId,
+    )}/${action}`,
+    { method: "POST" },
   );
 }

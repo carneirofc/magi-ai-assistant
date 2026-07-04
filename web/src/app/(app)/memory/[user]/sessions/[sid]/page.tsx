@@ -7,6 +7,7 @@ import { PageHeader, StatusMessage, SurfacePanel } from "@carneirofc/ui";
 
 import { CopyId } from "@/components/CopyId";
 import { SessionFile } from "@/components/SessionFile";
+import { SessionMemoryActions } from "@/components/SessionMemoryActions";
 import { getRawFile } from "@/lib/admin-api";
 
 export const dynamic = "force-dynamic";
@@ -69,6 +70,9 @@ export default async function SessionPage({
         </StatusMessage>
       ) : (
         <div className="flex flex-col gap-4">
+          <SurfacePanel tone="soft" padding="lg">
+            <SessionMemoryActions userId={userId} sessionId={sessionId} />
+          </SurfacePanel>
           {files?.map((file, i) => (
             <SurfacePanel key={kinds[i].kind} tone="soft" padding="lg">
               <SessionFile

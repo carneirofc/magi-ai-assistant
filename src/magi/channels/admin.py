@@ -23,10 +23,12 @@ Two factories, mirroring `channels/api.py`:
   - `build_admin_app()` — composition root wiring the real stores from config
 """
 
+import base64
 from typing import Optional
 
 from agno.utils.log import log_info
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
@@ -38,6 +40,7 @@ from magi.core.knowledge import (
     Subject,
     SubjectRegistry,
 )
+from magi.core.memory import MemoryManager
 from magi.core.memory.adapters import slug as _mem_slug
 from magi.core.memory.semantic import MemoryRetriever
 from magi.core.memory.store import FileMemoryStore, ScopedMemory
@@ -247,6 +250,39 @@ class Persona(BaseModel):
     text: str
 
 
+# --- bot identity wire format ------------------------------------------------
+class IdentityOut(BaseModel):
+    """The bot's presented identity. `version` is the optimistic-concurrency token
+    (over fields + picture bytes) — echo it on a write or risk a 409. The picture
+    itself is served/uploaded separately, never inlined here."""
+
+    display_name: str = ""
+    description: str = ""
+    has_avatar: bool = False
+    avatar_mime: Optional[str] = None
+    avatar_filename: Optional[str] = None
+    version: str = ""
+
+
+class UpdateIdentity(BaseModel):
+    """Set the bot's name + description (the picture is managed on its own route)."""
+
+    display_name: str = Field(default="", description="The bot's display name ('' to clear).")
+    description: str = Field(default="", description="Free-form identity notes ('' to clear).")
+    expected_version: Optional[str] = Field(
+        default=None, description="The version from the last read; rejected with 409 if stale."
+    )
+
+
+class SetAvatar(BaseModel):
+    """Upload a new profile picture — base64 bytes (a `data:` URI is accepted too)."""
+
+    data_base64: str = Field(min_length=1, description="The image bytes, base64-encoded.")
+    mime_type: str = Field(min_length=1, description="The image mime type (e.g. image/png).")
+    filename: Optional[str] = Field(default=None, description="Original filename, for display.")
+    expected_version: Optional[str] = Field(default=None)
+
+
 class RawFile(BaseModel):
     """One memory file's raw content + its version token (optimistic concurrency)."""
 
@@ -262,6 +298,14 @@ class PutRawFile(BaseModel):
     )
 
 
+class MemoryTriggerResult(BaseModel):
+    """The outcome of an operator-triggered memory pass (summarize / curate / flush)."""
+
+    action: str = Field(description="Which pass ran: 'summarize', 'curate', or 'flush'.")
+    changed: bool = Field(description="Whether the pass actually changed anything.")
+    detail: str = Field(description="A human-readable one-line summary of what happened.")
+
+
 def create_admin_app(
     knowledge: KnowledgeStore,
     memory: FileMemoryStore,
@@ -269,6 +313,7 @@ def create_admin_app(
     retriever: Optional[MemoryRetriever] = None,
     auth_token: Optional[str] = None,
     archive: Optional[ItemArchive] = None,
+    memory_manager: Optional[MemoryManager] = None,
 ) -> FastAPI:
     """The FastAPI admin app over already-built stores (pure factory).
 
@@ -277,6 +322,12 @@ def create_admin_app(
     write so recall reflects the edit. `archive` (the item archive, or None) keeps
     the durable fact-sheet snapshot current on admin fact edits, matching the chat
     path. No CORS: the only caller is the server-side BFF, never a browser directly.
+
+    `memory_manager` is the same orchestrator the chat path uses, wired here so an
+    operator can trigger a session-summary fold, a curation pass, or a session
+    flush from the UI. When it's None, or when it lacks a model-backed summarizer/
+    curator (e.g. standalone `python main.py admin`), those trigger endpoints 503
+    instead of pretending to run.
     """
     app = FastAPI(title="magi-admin", version="1")
 
@@ -572,6 +623,90 @@ def create_admin_app(
             pending=[Turn(**_turn(t)) for t in mem.pending.read()],
         )
 
+    # --- operator-triggered memory passes ---------------------------------
+    # These run the same session-summary fold / curation / flush the chat path
+    # runs automatically, but on demand for a chosen session. The two model-backed
+    # passes (summarize, curate) 503 when no brain is wired (standalone admin); the
+    # flush is model-free and always available once a manager is present.
+    def _require_manager() -> MemoryManager:
+        if memory_manager is None:
+            raise HTTPException(
+                status_code=503,
+                detail="memory triggers unavailable: no memory manager wired into this admin app",
+            )
+        return memory_manager
+
+    @app.post(
+        "/admin/v1/memory/users/{user_id}/sessions/{session_id}/summarize",
+        response_model=MemoryTriggerResult,
+        dependencies=[Depends(require_auth)],
+    )
+    async def summarize_session(user_id: str, session_id: str) -> MemoryTriggerResult:
+        mgr = _require_manager()
+        if not mgr.session_summary_enabled:
+            raise HTTPException(
+                status_code=503,
+                detail="session summarization unavailable in this deployment (no model wired)",
+            )
+        mgr.set_scope(user_id, session_id)
+        summary = await mgr.summarize_session_now()
+        return MemoryTriggerResult(
+            action="summarize",
+            changed=summary is not None,
+            detail=(
+                "Folded the pending buffer into the rolling session summary."
+                if summary is not None
+                else "Nothing pending to summarize."
+            ),
+        )
+
+    @app.post(
+        "/admin/v1/memory/users/{user_id}/sessions/{session_id}/curate",
+        response_model=MemoryTriggerResult,
+        dependencies=[Depends(require_auth)],
+    )
+    async def curate_session(user_id: str, session_id: str) -> MemoryTriggerResult:
+        mgr = _require_manager()
+        if not mgr.curation_enabled:
+            raise HTTPException(
+                status_code=503,
+                detail="memory curation unavailable in this deployment (no model wired)",
+            )
+        mgr.set_scope(user_id, session_id)
+        applied = await mgr.curate_session_summary()
+        # A curator profile change lands on the user-level fact sheet; keep the
+        # admin's semantic slice + archive snapshot consistent, as fact edits do.
+        if applied and "profile" in applied:
+            _reindex_facts(memory.scoped(user_id, _USER_SCOPE_SID))
+        return MemoryTriggerResult(
+            action="curate",
+            changed=bool(applied),
+            detail=(
+                f"Curated durable memory: {', '.join(applied)}."
+                if applied
+                else "No durable changes (empty session summary or nothing to keep)."
+            ),
+        )
+
+    @app.post(
+        "/admin/v1/memory/users/{user_id}/sessions/{session_id}/flush",
+        response_model=MemoryTriggerResult,
+        dependencies=[Depends(require_auth)],
+    )
+    async def flush_session(user_id: str, session_id: str) -> MemoryTriggerResult:
+        mgr = _require_manager()
+        mgr.set_scope(user_id, session_id)
+        dropped = mgr.flush_session()
+        return MemoryTriggerResult(
+            action="flush",
+            changed=dropped > 0,
+            detail=(
+                f"Flushed {dropped} live turn(s); the rolling summary was carried into an episode."
+                if dropped
+                else "Nothing to flush (no live turns)."
+            ),
+        )
+
     @app.get(
         "/admin/v1/memory/persona",
         response_model=Persona,
@@ -579,6 +714,85 @@ def create_admin_app(
     )
     def get_persona() -> Persona:
         return Persona(text=memory.persona.read())
+
+    # --- bot identity (name / description / profile picture) ---------------
+    def _identity_out() -> IdentityOut:
+        store = memory.identity
+        ident = store.read()
+        return IdentityOut(
+            display_name=ident.display_name,
+            description=ident.description,
+            has_avatar=ident.has_avatar,
+            avatar_mime=ident.avatar_mime,
+            avatar_filename=ident.avatar_filename,
+            version=store.version(),
+        )
+
+    def _check_identity_version(expected: Optional[str]) -> None:
+        if expected is not None and expected != memory.identity.version():
+            raise HTTPException(status_code=409, detail="stale version; refetch the identity")
+
+    @app.get(
+        "/admin/v1/identity",
+        response_model=IdentityOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def get_identity() -> IdentityOut:
+        return _identity_out()
+
+    @app.put(
+        "/admin/v1/identity",
+        response_model=IdentityOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def put_identity(body: UpdateIdentity) -> IdentityOut:
+        _check_identity_version(body.expected_version)
+        memory.identity.set_fields(
+            display_name=body.display_name, description=body.description
+        )
+        return _identity_out()
+
+    @app.put(
+        "/admin/v1/identity/avatar",
+        response_model=IdentityOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def put_identity_avatar(body: SetAvatar) -> IdentityOut:
+        _check_identity_version(body.expected_version)
+        payload = body.data_base64
+        if payload.startswith("data:"):  # tolerate a full data: URI
+            payload = payload.partition(",")[2]
+        try:
+            data = base64.b64decode(payload)
+        except ValueError as exc:  # binascii.Error subclasses ValueError
+            raise HTTPException(status_code=422, detail="invalid base64 image data") from exc
+        if not data:
+            raise HTTPException(status_code=422, detail="empty image data")
+        try:
+            memory.identity.set_avatar(data, body.mime_type, body.filename)
+        except ValueError as exc:  # unsupported mime type
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return _identity_out()
+
+    @app.delete(
+        "/admin/v1/identity/avatar",
+        response_model=IdentityOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def delete_identity_avatar(expected_version: Optional[str] = Query(default=None)) -> IdentityOut:
+        _check_identity_version(expected_version)
+        memory.identity.clear_avatar()
+        return _identity_out()
+
+    @app.get("/admin/v1/identity/avatar", dependencies=[Depends(require_auth)])
+    def get_identity_avatar() -> Response:
+        """The current profile-picture bytes (404 when none) — lets the settings
+        page preview without going through the chat surface."""
+        avatar = memory.identity.avatar_bytes()
+        if avatar is None:
+            raise HTTPException(status_code=404, detail="no avatar set")
+        data, mime = avatar
+        return Response(content=data, media_type=mime, headers={"Cache-Control": "no-cache"})
 
     # --- raw-file editor: full-CRUD power on the plumbing kinds ------------
     def _raw_target(kind: str, user_id: Optional[str], session_id: Optional[str]):
@@ -681,21 +895,29 @@ def _file_version(path) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def build_admin_app() -> FastAPI:
+def build_admin_app(memory_manager: Optional[MemoryManager] = None) -> FastAPI:
     """Composition root: the real stores from config, served over HTTP.
 
     Both stores are built unconditionally (admin manages memory + the corpus
     regardless of whether the chat-time tools are enabled — the same reasoning as
-    `scripts/ingest_knowledge.py`)."""
-    from pathlib import Path
+    `scripts/ingest_knowledge.py`).
 
+    `memory_manager` is the chat stack's orchestrator, passed by a channel that
+    mounts this app in-process (the HTTP API, Discord) so the operator triggers run
+    the model-backed summarizer/curator. Standalone (`python main.py admin`) leaves
+    it None: we build a model-free manager instead, so the flush trigger still works
+    and the summarize/curate triggers 503 honestly rather than silently no-op."""
     from magi.core.config import config
     from magi.core.items import build_item_archive_from_config
+    from magi.core.memory import build_memory_from_config
     from magi.core.memory.semantic import build_semantic_index
 
     log_info("building admin app")
     if config.admin_auth_token is None:
         log_info("admin: auth DISABLED (ADMIN_AUTH_TOKEN not set) — keep the port unpublished")
+    # A model-free manager over the same on-disk tree when the caller didn't hand us
+    # the chat stack's own (its summarizer/curator stay None, so those triggers 503).
+    manager = memory_manager or build_memory_from_config()
     # Same semantic index as the chat stack (None when semantic memory is off), so
     # an admin fact edit re-indexes the same slice the lead retrieves from. One item
     # archive (None unless enabled) is shared by the knowledge store and the fact
@@ -704,9 +926,10 @@ def build_admin_app() -> FastAPI:
     archive = build_item_archive_from_config()
     return create_admin_app(
         KnowledgeStore(archive=archive),
-        FileMemoryStore(Path(config.memory_dir)),
+        manager.store,
         SubjectRegistry(config.knowledge_subjects_path),
         retriever=build_semantic_index(),
         auth_token=config.admin_auth_token,
         archive=archive,
+        memory_manager=manager,
     )

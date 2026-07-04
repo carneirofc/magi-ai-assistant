@@ -14,7 +14,7 @@ export default async function ChatPage() {
   const health = await getChatHealth();
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="app-page--fill flex flex-col gap-6">
       <PageHeader
         subtitle="magi // chat"
         title="Chat"

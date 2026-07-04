@@ -48,18 +48,18 @@ export function UserGrid({ users }: { users: User[] }) {
             <Link
               key={u.user_id}
               href={`/memory/${encodeURIComponent(u.user_id)}`}
-              className="no-underline"
+              className="group rounded-xl no-underline outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--ui-ring-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--ui-bg)]"
             >
               <SurfacePanel
                 tone="soft"
                 padding="lg"
-                className="flex h-full flex-col gap-4 transition-colors hover:border-ui-active"
+                className="flex h-full flex-col gap-4 transition-[transform,border-color,box-shadow] duration-150 ease-out group-hover:-translate-y-0.5 group-hover:border-ui-active group-hover:shadow-[0_18px_30px_-22px_color-mix(in_oklab,var(--ui-border-active)_60%,transparent)] group-focus-visible:border-ui-active"
               >
                 <div className="flex items-center gap-3">
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[color:var(--ui-bg-active)] text-ui-md font-semibold text-[color:var(--ui-ink-highlight)]">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[color:var(--ui-bg-active)] text-ui-md font-semibold text-[color:var(--ui-ink-highlight)] transition-transform duration-150 ease-out group-hover:scale-105">
                     {u.user_id.slice(0, 2).toUpperCase()}
                   </span>
-                  <span className="min-w-0 truncate text-ui-sm font-semibold text-[color:var(--ui-ink)]">
+                  <span className="min-w-0 truncate text-ui-sm font-semibold text-[color:var(--ui-ink)] transition-colors group-hover:text-[color:var(--ui-ink-accent)]">
                     {u.user_id}
                   </span>
                 </div>
@@ -79,7 +79,7 @@ export function UserGrid({ users }: { users: User[] }) {
 
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg bg-[color:var(--ui-bg-soft)] px-2 py-2">
+    <div className="rounded-lg bg-[color:var(--ui-bg-soft)] px-2 py-2 transition-colors group-hover:bg-[color:var(--ui-bg-active)]">
       <p className="text-ui-lg font-semibold tabular-nums text-[color:var(--ui-ink)]">{value}</p>
       <p className="text-ui-2xs uppercase tracking-wide text-[color:var(--ui-ink-subtle)]">
         {label}

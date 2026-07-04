@@ -24,6 +24,7 @@ from agno.utils.log import log_info
 from magi.agent.team import build_team
 from magi.core.config import config
 from magi.core.conversation import ConversationService
+from magi.core.knowledge import build_knowledge_from_config
 from magi.core.memory import build_memory_from_config
 
 
@@ -63,9 +64,19 @@ def build_conversation_service(
         summarize_session_fn=session_fn,
         curate_fn=curate_fn,
     )
-    team = build_team(memory, db, member_builders)
+    # The knowledge RAG store (None when the feature is off) is built once here and
+    # injected into both consumers: the team (its search tool) and the conversation
+    # service (context auto-injection). One instance, one connection lifecycle.
+    knowledge = build_knowledge_from_config()
+    team = build_team(memory, db, member_builders, knowledge=knowledge)
     return ConversationService(
         runner=team,
         memory=memory,
         channel_guidance=channel_guidance,
+        # The lead's context window, so replies can report how full it is.
+        context_window=config.lead_num_ctx,
+        # Surface the top-k most relevant corpus chunks for each message up front
+        # (no-op unless knowledge is on and knowledge_context_top_k > 0).
+        knowledge=knowledge,
+        knowledge_top_k=config.knowledge_context_top_k,
     )

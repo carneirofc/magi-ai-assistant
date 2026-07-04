@@ -17,7 +17,7 @@ design system (Tailwind v4 + Radix), with light/dark themes.
 | Area | Capabilities |
 |---|---|
 | **Dashboard** | At-a-glance counts (users, facts, episodes, sessions, documents, chunks, subjects), recent documents, top users, and a live backend-health indicator. |
-| **Chat** | A streaming console for talking to the running brain — probe routing, tools, and what it remembers for any user. Set the `user_id` to chat *as* that user (scoping durable memory); **New chat** rotates the conversation. Built on [assistant-ui](https://github.com/assistant-ui/assistant-ui) over SSE. |
+| **Chat** | A streaming console for talking to the running brain — probe routing, tools, and what it remembers for any user. Set the `user_id` to chat *as* that user (scoping durable memory); **New chat** rotates the conversation. Sender avatars, image/file attachments (click an image to zoom), live *thinking* + tool cards, `mermaid` fenced blocks rendered as diagrams, and a per-turn context-window meter. Built on [assistant-ui](https://github.com/assistant-ui/assistant-ui) over SSE. |
 | **Memory** | Browse/search users; per-user **facts as editable cards** (add / edit / delete with confirmation), episodes, and sessions — organized under tabs. |
 | **Sessions** | Read a session as a **chat transcript** (role-colored bubbles) or edit the raw window / summary / pending buffer. |
 | **Knowledge** | Browse the corpus as a **table or cards**, filter by subject (hard) and tag (soft), add documents by paste or file upload, and rename / retag / delete with chunk inspection. |

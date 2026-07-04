@@ -25,6 +25,35 @@ import type { InboundAttachment } from "@/lib/chat-api";
  * without rebuilding the runtime. */
 export type ChatConfig = { sessionId: string; userId: string };
 
+/** Token accounting for one turn, mirrored off the chat-api `done` frame's
+ * `usage` object (see channels/api.py `Usage`). Best-effort — some backends
+ * under-report — so the console renders it as observability, not a hard budget. */
+export type ChatUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cachedTokens: number;
+  reasoningTokens: number;
+  contextWindow: number | null;
+};
+
+/** Lift the `done` frame's `usage` payload into a `ChatUsage`; null when the run
+ * reported no metrics (the field is absent or not an object). */
+function parseUsage(raw: unknown): ChatUsage | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const u = raw as Record<string, unknown>;
+  const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const window = u.context_window;
+  return {
+    inputTokens: num(u.input_tokens),
+    outputTokens: num(u.output_tokens),
+    totalTokens: num(u.total_tokens),
+    cachedTokens: num(u.cached_tokens),
+    reasoningTokens: num(u.reasoning_tokens),
+    contextWindow: typeof window === "number" && Number.isFinite(window) ? window : null,
+  };
+}
+
 type SseFrame = { event: string; data: Record<string, unknown> };
 
 /** Parse one `event:`/`data:` SSE frame; null when it carries no JSON payload. */
@@ -59,6 +88,30 @@ function userText(message: ThreadMessage | null): string {
     .filter((part): part is { type: "text"; text: string } => part.type === "text")
     .map((part) => part.text)
     .join("");
+}
+
+/** The text the user quoted from a prior reply, if any. assistant-ui's quote
+ * feature stashes the selected span on the outgoing message as
+ * `metadata.custom.quote` (a `QuoteInfo`); we read it directly since the adapter
+ * runs outside React (no `useMessageQuote`). */
+function quotedText(message: ThreadMessage | null): string {
+  const quote = message?.metadata.custom["quote"];
+  if (quote && typeof quote === "object") {
+    const text = (quote as { text?: unknown }).text;
+    if (typeof text === "string") return text;
+  }
+  return "";
+}
+
+/** Fold a quoted span into the outgoing text as a Markdown blockquote, so the
+ * brain sees what the user is citing ahead of their message. */
+function withQuote(text: string, quote: string): string {
+  if (!quote) return text;
+  const block = quote
+    .split("\n")
+    .map((line) => `> ${line}`)
+    .join("\n");
+  return text ? `${block}\n\n${text}` : block;
 }
 
 /** A `data:` URI is inline bytes the backend decodes; an http(s) URL is passed
@@ -230,11 +283,12 @@ function safeJson(value: unknown): string {
 export function createChatModelAdapter(
   getConfig: () => ChatConfig,
   onSend?: (text: string) => void,
+  onUsage?: (usage: ChatUsage) => void,
 ): ChatModelAdapter {
   return {
     async *run({ messages, abortSignal }) {
       const message = latestUserMessage(messages);
-      const text = userText(message);
+      const text = withQuote(userText(message), quotedText(message));
       const { images, files } = outboundAttachments(message);
       const { sessionId, userId } = getConfig();
       onSend?.(text);
@@ -296,6 +350,8 @@ export function createChatModelAdapter(
             if (frame.data.is_error === true && !finalText) {
               asm.setAnswer("The assistant reported an error.");
             }
+            const usage = parseUsage(frame.data.usage);
+            if (usage) onUsage?.(usage);
           } else {
             continue;
           }

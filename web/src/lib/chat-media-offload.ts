@@ -57,6 +57,42 @@ async function offloadParts(parts: unknown): Promise<void> {
   }
 }
 
+/** Wire shape of one reply media item — the chat-api `MediaItem` (see
+ * channels/api.py): inline bytes ride in `data_base64`, by-reference media in `url`. */
+interface WireMediaItem {
+  kind?: string;
+  mime_type?: string;
+  data_base64?: string;
+  url?: string;
+}
+
+/** Offload the inline bytes of a `done` frame's reply media to the blob store,
+ * rewriting each inline item to a cacheable blob-ref URL (/api/chat/blobs/<id>)
+ * and dropping its base64. Items that already carry a `url` (by-reference media)
+ * are left untouched. Mutates `media` in place and returns it. Best-effort: an
+ * item that fails to store stays inline. Runs in the live stream (route.ts) so
+ * the browser fetches reply images from the cacheable blob endpoint instead of
+ * holding a one-shot data: URI. */
+export async function offloadReplyMedia(media: unknown): Promise<unknown> {
+  if (!Array.isArray(media)) return media;
+  const store = getBlobStore();
+  for (const item of media) {
+    if (!item || typeof item !== "object") continue;
+    const m = item as WireMediaItem;
+    if (m.url || typeof m.data_base64 !== "string" || !m.data_base64) continue;
+    const mime =
+      m.mime_type || (m.kind === "image" ? "image/png" : "application/octet-stream");
+    try {
+      const id = await store.put(Buffer.from(m.data_base64, "base64"), mime);
+      m.url = `${BLOB_URL_PREFIX}${id}`;
+      delete m.data_base64;
+    } catch {
+      /* leave this item inline on failure */
+    }
+  }
+  return media;
+}
+
 /** Walk a stored transcript ({ items: [{ message }] }) and offload every inline
  * image/file to the blob store, mutating the object in place. Returns it for
  * convenience. Best-effort: a blob-store failure leaves that part inline. */

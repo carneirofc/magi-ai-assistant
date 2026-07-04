@@ -147,20 +147,27 @@ class LongTerm:
         self.facts_max = facts_max
 
     def render(self, mem: ScopedMemory, query: Optional[str]) -> str:
-        return retrieved_or(
-            self.retriever, mem.user_id, query, self.retriever_key, self.top_k,
-            lambda: self._whole(mem),
-        )
-
-    def _whole(self, mem: ScopedMemory) -> str:
         facts = mem.long_term_facts.texts()
+        core = retrieved_or(
+            self.retriever, mem.user_id, query, self.retriever_key, self.top_k,
+            lambda: self._whole(mem, facts),
+        )
+        # Surface the most-recent raw facts by *recency* alongside the curated sheet,
+        # so freshly-remembered facts appear before the next curation pass folds them
+        # in — even on the semantic path, which ranks by relevance and would otherwise
+        # drop them. Skipped when there's no curated sheet yet: `_whole` then returns
+        # the raw log whole (semantic path ranks the raw facts directly), which already
+        # carries the recent tail, so a second block would just duplicate it.
+        if facts:
+            recent = mem.long_term.recent(self.recent_raw)
+            if recent:
+                core = f"{core}\n\nRecent facts:\n" + "\n".join(f"- {r}" for r in recent)
+        return core
+
+    def _whole(self, mem: ScopedMemory, facts: list[str]) -> str:
         if not facts:
             return mem.long_term.read()  # nothing curated yet; show raw facts
-        parts = ["\n".join(f"- {f}" for f in facts)]
-        recent = mem.long_term.recent(self.recent_raw)
-        if recent:
-            parts.append("Recent facts:\n" + "\n".join(f"- {r}" for r in recent))
-        return "\n\n".join(parts)
+        return "\n".join(f"- {f}" for f in facts)
 
     def render_for_curator(self, mem: ScopedMemory) -> str:
         """The durable facts the curator may revise, each tagged with its id so the
@@ -279,7 +286,12 @@ class Session:
 
     def render(self, mem: ScopedMemory, query: Optional[str] = None) -> str:
         summary = mem.session_summary.read()
-        turns = render_turns(mem.live_turns.read())
+        # Turns evicted from the live window but not yet folded into the summary sit
+        # in the pending buffer (oldest-first). Render them ahead of the live turns so
+        # the most recent turns stay visible in the gap between eviction and the next
+        # fold — otherwise up to `summarize_every` turns vanish from context until a
+        # fold fires. Empty (a plain drop-oldest) when the summarizer is disabled.
+        turns = render_turns(mem.pending.read() + mem.live_turns.read())
         parts = []
         if summary:
             parts.append("Earlier this session:\n" + strip_header(summary))
@@ -309,11 +321,17 @@ class Session:
                 f"(pending={size}/{self.summarize_every}) user={mem.user_id} session={mem.session_id}"
             )
 
-    async def maybe_fold(self, mem: ScopedMemory) -> Optional[str]:
+    async def maybe_fold(self, mem: ScopedMemory, force: bool = False) -> Optional[str]:
+        """Fold the pending buffer into the rolling session summary.
+
+        The per-turn caller leaves `force` False, so a fold only happens once the
+        buffer reaches `summarize_every`. An operator-triggered fold passes
+        `force=True` to fold whatever is pending right now, regardless of the
+        threshold (an empty buffer is still a no-op — nothing to summarize)."""
         if self.summarize_fn is None:
             return None
         payload = None
-        if mem.pending.count() >= self.summarize_every:
+        if force or mem.pending.count() >= self.summarize_every:
             pending = mem.pending.read()
             if pending:
                 prior = mem.session_summary.read()

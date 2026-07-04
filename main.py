@@ -55,6 +55,14 @@ def _configure_brain() -> None:
         # Durable memory is owned by the post-turn curator: it rewrites the
         # long-term profile each turn instead of the lead appending facts inline.
         memory_curation=True,
+        # Knowledge layer — a global, read-only RAG corpus the model retrieves from
+        # (distinct from per-user memory). Off by default; enable with
+        # knowledge_enabled=True once Qdrant + an embedding backend are up and docs
+        # are ingested (scripts/ingest_knowledge.py). This sets how many corpus
+        # chunks auto-inject into each message's context when it's on (0 = tool-only,
+        # search_knowledge only); inert while knowledge stays disabled.
+        knowledge_context_top_k=3,
+        # knowledge_enabled=True,
         # Durable object storage — the model's private file/image archive (it can
         # decide to stash a file and recall it later). Off by default. To enable:
         # run an S3-compatible backend (RustFS via docker-compose, see README),
@@ -99,9 +107,9 @@ def configure_api(docker: bool) -> None:
         # seanime_use_mcp=True,
         # Admin surface (memory + knowledge management, see channels/admin.py)
         # mounted onto THIS SAME app under /admin/v1/* instead of running the admin
-        # channel separately — one process, one port. Uncomment and set an
-        # ADMIN_AUTH_TOKEN in .env if this ever leaves localhost:
-        # admin_enabled=True,
+        # channel separately — one process, one port. Set an ADMIN_AUTH_TOKEN in
+        # .env if this ever leaves localhost:
+        admin_enabled=True,
     )
     if docker:
         _brain_docker_overrides()

@@ -21,6 +21,7 @@ from magi.core.knowledge import (
     KnowledgeStore,
     SubjectRegistry,
 )
+from magi.core.memory import CurationInput, CurationResult, FactOp, build_memory
 from magi.core.memory.store import FileMemoryStore
 
 
@@ -574,6 +575,208 @@ def test_get_session_detail(tmp_path):
 def test_get_persona(tmp_path):
     client = _client(memory=_seed_memory(tmp_path))
     assert "be concise" in client.get("/admin/v1/memory/persona").json()["text"]
+
+
+# --- operator-triggered memory passes (summarize / curate / flush) ----------
+def _client_with_manager(store, *, summarize_fn=None, curate_fn=None, auth_token=None):
+    """An admin client whose trigger endpoints run against a real MemoryManager
+    over `store`, with the summarizer/curator faked (or left None to test 503)."""
+    manager = build_memory(
+        store=store,
+        short_term_max=20,
+        summarize_session_fn=summarize_fn,
+        curate_fn=curate_fn,
+    )
+    app = create_admin_app(
+        _FakeKnowledge([], detail=None),
+        store,
+        SubjectRegistry(Path(tempfile.mkdtemp()) / "subjects.json"),
+        auth_token=auth_token,
+        memory_manager=manager,
+    )
+    return TestClient(app)
+
+
+def test_trigger_503_without_a_manager(tmp_path):
+    # The default admin client wires no manager (standalone-with-no-brain shape).
+    client = _client(memory=_seed_memory(tmp_path))
+    for action in ("summarize", "curate", "flush"):
+        resp = client.post(f"/admin/v1/memory/users/u1/sessions/s1/{action}")
+        assert resp.status_code == 503
+
+
+def test_summarize_trigger_503_when_no_summarizer(tmp_path):
+    # A manager is present but model-free (summarize_fn None) → honest 503.
+    client = _client_with_manager(_seed_memory(tmp_path))
+    resp = client.post("/admin/v1/memory/users/u1/sessions/s1/summarize")
+    assert resp.status_code == 503
+    assert "no model" in resp.json()["detail"]
+
+
+def test_summarize_trigger_folds_pending(tmp_path):
+    async def fake_summarize(payload: str) -> str:
+        return f"SUMMARY[{payload[:12]}]"
+
+    store = _seed_memory(tmp_path)
+    client = _client_with_manager(store, summarize_fn=fake_summarize)
+    resp = client.post("/admin/v1/memory/users/u1/sessions/s1/summarize")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["action"] == "summarize" and body["changed"] is True
+    # The rolling summary was rewritten and the pending buffer drained.
+    detail = client.get("/admin/v1/memory/users/u1/sessions/s1").json()
+    assert "SUMMARY" in detail["summary"]
+    assert detail["pending"] == []
+
+
+def test_summarize_trigger_noop_when_nothing_pending(tmp_path):
+    async def fake_summarize(payload: str) -> str:
+        return "unused"
+
+    store = FileMemoryStore(tmp_path)
+    store.scoped("u1", "s1").live_turns.append("user", "hi", 20)  # a session, no pending
+    client = _client_with_manager(store, summarize_fn=fake_summarize)
+    resp = client.post("/admin/v1/memory/users/u1/sessions/s1/summarize")
+    assert resp.status_code == 200
+    assert resp.json()["changed"] is False
+
+
+def test_curate_trigger_503_when_no_curator(tmp_path):
+    client = _client_with_manager(_seed_memory(tmp_path))
+    resp = client.post("/admin/v1/memory/users/u1/sessions/s1/curate")
+    assert resp.status_code == 503
+
+
+def test_curate_trigger_applies_from_session_summary(tmp_path):
+    seen: dict = {}
+
+    async def fake_curate(inp: CurationInput) -> CurationResult:
+        seen["user_message"] = inp.user_message
+        return CurationResult(
+            operations=(FactOp(op="add", text="prefers dark mode"),),
+            episode="discussed preferences",
+        )
+
+    store = _seed_memory(tmp_path)  # session_summary = "earlier we said hi"
+    client = _client_with_manager(store, curate_fn=fake_curate)
+    resp = client.post("/admin/v1/memory/users/u1/sessions/s1/curate")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["changed"] is True and "profile" in body["detail"] and "episode" in body["detail"]
+    # The curator was fed the session's rolling summary.
+    assert "earlier we said hi" in seen["user_message"]
+    # The added fact lands on the user-level profile the fact editor shows.
+    profile = client.get("/admin/v1/memory/users/u1/profile").json()
+    assert "prefers dark mode" in [f["text"] for f in profile["facts"]]
+
+
+def test_curate_trigger_noop_when_no_summary(tmp_path):
+    async def fake_curate(inp: CurationInput) -> CurationResult:
+        raise AssertionError("curator must not run without a summary")
+
+    store = FileMemoryStore(tmp_path)
+    store.scoped("u1", "s1").live_turns.append("user", "hi", 20)  # session, empty summary
+    client = _client_with_manager(store, curate_fn=fake_curate)
+    resp = client.post("/admin/v1/memory/users/u1/sessions/s1/curate")
+    assert resp.status_code == 200
+    assert resp.json()["changed"] is False
+
+
+def test_flush_trigger_carries_summary_into_episode(tmp_path):
+    # Flush is model-free, so it works with a manager that has no summarizer/curator.
+    store = _seed_memory(tmp_path)  # 2 live turns + a rolling summary
+    client = _client_with_manager(store)
+    resp = client.post("/admin/v1/memory/users/u1/sessions/s1/flush")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["action"] == "flush" and body["changed"] is True and "2 live turn" in body["detail"]
+    # Live window is wiped and the summary is carried into an episode.
+    detail = client.get("/admin/v1/memory/users/u1/sessions/s1").json()
+    assert detail["turns"] == []
+    profile = client.get("/admin/v1/memory/users/u1/profile").json()
+    assert any("earlier we said hi" in e for e in profile["episodes"])
+
+
+# --- bot identity CRUD + optimistic concurrency -----------------------------
+# The base64 of a 1x1 transparent PNG — sent straight as the `data_base64` field.
+_PNG_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+
+
+def test_get_identity_defaults_to_empty(tmp_path):
+    client = _client(memory=FileMemoryStore(tmp_path))
+    body = client.get("/admin/v1/identity").json()
+    assert body["display_name"] == "" and body["description"] == ""
+    assert body["has_avatar"] is False and body["version"]
+
+
+def test_put_identity_sets_fields_and_moves_version(tmp_path):
+    client = _client(memory=FileMemoryStore(tmp_path))
+    before = client.get("/admin/v1/identity").json()
+
+    resp = client.put(
+        "/admin/v1/identity",
+        json={"display_name": "Alyssa", "description": "calm", "expected_version": before["version"]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["display_name"] == "Alyssa" and body["description"] == "calm"
+    assert body["version"] != before["version"]
+
+
+def test_put_identity_stale_version_is_409(tmp_path):
+    client = _client(memory=FileMemoryStore(tmp_path))
+    resp = client.put(
+        "/admin/v1/identity",
+        json={"display_name": "X", "description": "", "expected_version": "stale"},
+    )
+    assert resp.status_code == 409
+
+
+def test_identity_avatar_upload_serve_and_clear(tmp_path):
+    client = _client(memory=FileMemoryStore(tmp_path))
+    version = client.get("/admin/v1/identity").json()["version"]
+
+    up = client.put(
+        "/admin/v1/identity/avatar",
+        json={"data_base64": _PNG_1x1, "mime_type": "image/png", "filename": "me.png",
+              "expected_version": version},
+    )
+    assert up.status_code == 200
+    body = up.json()
+    assert body["has_avatar"] is True and body["avatar_mime"] == "image/png"
+    assert body["avatar_filename"] == "me.png"
+
+    served = client.get("/admin/v1/identity/avatar")
+    assert served.status_code == 200 and served.headers["content-type"].startswith("image/png")
+
+    cleared = client.delete(f"/admin/v1/identity/avatar?expected_version={body['version']}")
+    assert cleared.status_code == 200 and cleared.json()["has_avatar"] is False
+    assert client.get("/admin/v1/identity/avatar").status_code == 404
+
+
+def test_identity_avatar_unsupported_mime_is_422(tmp_path):
+    client = _client(memory=FileMemoryStore(tmp_path))
+    resp = client.put(
+        "/admin/v1/identity/avatar",
+        json={"data_base64": _PNG_1x1, "mime_type": "application/pdf"},
+    )
+    assert resp.status_code == 422
+
+
+def test_identity_avatar_bad_base64_is_422(tmp_path):
+    client = _client(memory=FileMemoryStore(tmp_path))
+    resp = client.put(
+        "/admin/v1/identity/avatar",
+        json={"data_base64": "!!!not-base64!!!", "mime_type": "image/png"},
+    )
+    assert resp.status_code == 422
+
+
+def test_identity_requires_bearer_when_token_set(tmp_path):
+    client = _client(auth_token="secret", memory=FileMemoryStore(tmp_path))
+    assert client.get("/admin/v1/identity").status_code == 401
+    ok = client.get("/admin/v1/identity", headers={"Authorization": "Bearer secret"})
+    assert ok.status_code == 200
 
 
 def test_memory_requires_bearer_when_token_set(tmp_path):

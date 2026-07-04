@@ -74,6 +74,41 @@ export async function openMessageStream(
   );
 }
 
+/** The bot's presented identity (name, description, whether a picture is set),
+ * mirroring the chat-api `IdentityOut`. The chat UI renders this as the assistant's
+ * face + name. `version` moves on every edit so the avatar cache can be busted. */
+export interface BotIdentity {
+  display_name: string;
+  description: string;
+  has_avatar: boolean;
+  avatar_mime: string | null;
+  version: string;
+}
+
+/** Read the bot identity, or null when the chat-api is unreachable — the chat UI
+ * just falls back to the default avatar rather than failing the page. */
+export async function getIdentity(): Promise<BotIdentity | null> {
+  try {
+    const res = await fetch(`${baseUrl()}/v1/identity`, {
+      headers: authHeaders(),
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as BotIdentity;
+  } catch {
+    return null;
+  }
+}
+
+/** Open the bot's profile-picture bytes from the chat-api, returning the raw
+ * upstream Response so the BFF can relay it (404 when no picture is set). */
+export async function fetchIdentityAvatar(): Promise<Response> {
+  return fetch(`${baseUrl()}/v1/identity/avatar`, {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+}
+
 /** Chat-api liveness. Returns its /healthz body, or null when unreachable — the
  * page surfaces an online/offline indicator without failing outright. */
 export async function getChatHealth(): Promise<Record<string, unknown> | null> {

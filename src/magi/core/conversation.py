@@ -11,11 +11,12 @@ injected — nothing is constructed here.
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Optional, Protocol
 
 from agno.utils.log import log_error, log_info, log_warning
 from agno.utils.message import get_text_from_message
 
+from magi.core.config import config
 from magi.core.media import (
     close_allowed_media_urls,
     close_media_outbox,
@@ -24,6 +25,17 @@ from magi.core.media import (
     open_media_outbox,
 )
 from magi.core.memory import MemoryManager
+
+if TYPE_CHECKING:
+    from magi.core.knowledge import KnowledgeSearcher
+
+# Rough provider-agnostic token estimate (~4 chars/token), matching the memory
+# layer's heuristic (magi/core/memory/manager). Observability only — never truncates.
+_CHARS_PER_TOKEN = 4
+
+
+def _est_tokens_from_chars(chars: int) -> int:
+    return (chars + _CHARS_PER_TOKEN - 1) // _CHARS_PER_TOKEN
 
 
 class Runner(Protocol):
@@ -90,6 +102,25 @@ _EMPTY_REPLY = (
 
 
 @dataclass(frozen=True)
+class ConversationUsage:
+    """Token accounting for one handled turn, aggregated over the run.
+
+    Read from the agno run output's `metrics` (a `RunMetrics`), which sums the
+    lead's model calls (and, for a team, its members'). `context_window` is the
+    lead's configured window, so a channel can render "how full is the context".
+    All counts are best-effort — some backends under-report — so treat them as
+    observability, never as a hard budget.
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cached_tokens: int = 0
+    reasoning_tokens: int = 0
+    context_window: Optional[int] = None
+
+
+@dataclass(frozen=True)
 class ConversationReply:
     """The result of handling one message, in channel-neutral terms.
 
@@ -106,6 +137,7 @@ class ConversationReply:
     videos: tuple = ()
     audio: tuple = ()
     files: tuple = ()
+    usage: Optional[ConversationUsage] = None
 
     @property
     def has_media(self) -> bool:
@@ -161,12 +193,75 @@ ConversationStreamEvent = (
 
 
 class ConversationService:
-    def __init__(self, runner: Runner, memory: MemoryManager, channel_guidance: str = ""):
+    def __init__(
+        self,
+        runner: Runner,
+        memory: MemoryManager,
+        channel_guidance: str = "",
+        context_window: Optional[int] = None,
+        knowledge: Optional["KnowledgeSearcher"] = None,
+        knowledge_top_k: int = 0,
+    ):
         self.runner = runner
         self.memory = memory
         # Channel-specific output rules (e.g. Discord markdown). Appended to the
         # run context so the base prompt stays channel-agnostic.
         self.channel_guidance = channel_guidance
+        # The lead's context window (tokens), so replies can report how full it
+        # is. Purely informational; None when the channel doesn't wire it.
+        self.context_window = context_window
+        # The knowledge RAG corpus (magi/core/knowledge) and how many hits to fold
+        # into each run's context. Distinct from memory: a global, read-only
+        # reference the model can also search on demand via its tool. Off (no
+        # auto-injection) when the searcher is None or top_k <= 0.
+        self.knowledge = knowledge
+        self.knowledge_top_k = knowledge_top_k
+
+    def _usage_from(self, run_output: object) -> Optional[ConversationUsage]:
+        """Lift agno's `RunMetrics` off a run output into channel-neutral usage.
+
+        Returns None when the output carries no metrics (some backends omit
+        them). Missing token fields default to 0 so the shape stays stable.
+        """
+        metrics = getattr(run_output, "metrics", None)
+        if metrics is None:
+            return None
+        return ConversationUsage(
+            input_tokens=int(getattr(metrics, "input_tokens", 0) or 0),
+            output_tokens=int(getattr(metrics, "output_tokens", 0) or 0),
+            total_tokens=int(getattr(metrics, "total_tokens", 0) or 0),
+            cached_tokens=int(getattr(metrics, "cache_read_tokens", 0) or 0),
+            reasoning_tokens=int(getattr(metrics, "reasoning_tokens", 0) or 0),
+            context_window=self.context_window,
+        )
+
+    def _knowledge_context(self, query: str) -> str:
+        """Top-k knowledge-corpus hits for this message, as a context block.
+
+        The corpus (magi/core/knowledge) is a global, read-only reference the model
+        can also search on demand via its tool; this surfaces the most relevant
+        chunks up front so it doesn't have to ask. Empty when auto-injection is off
+        (no searcher / top_k <= 0), the query is blank, or nothing matches. Never
+        raises — a retrieval hiccup must not break a turn.
+        """
+        if self.knowledge is None or self.knowledge_top_k <= 0 or not query.strip():
+            return ""
+        try:
+            hits = self.knowledge.search(query, self.knowledge_top_k)
+        except Exception as exc:  # noqa: BLE001 — retrieval must never break a chat.
+            log_warning(f"conversation: knowledge retrieval failed: {type(exc).__name__}: {exc}")
+            return ""
+        if not hits:
+            return ""
+        lines = ["# Knowledge (reference corpus — retrieved for this message)"]
+        for h in hits:
+            label = h.source or h.doc_id or "source"
+            lines.append(f"- ({label}) {h.text}")
+        block = "\n".join(lines)
+        # Surface the knowledge contribution alongside the memory layer's own
+        # context-size log (magi/core/memory), so the per-turn accounting is complete.
+        log_info(f"conversation: knowledge context ~{_est_tokens_from_chars(len(block))} tok ({len(hits)} hit(s))")
+        return block
 
     def _prepare_input(
         self, user_id: str, session_id: str, text: str, extra_context: str
@@ -178,9 +273,16 @@ class ConversationService:
         team reads it mid-run, so one user could see another's memory).
         """
         self.memory.set_scope(user_id, session_id)
-        # Assemble context in order: caller identity/channel info, persisted memory,
-        # then channel output rules. The message is the retrieval query.
-        parts = [extra_context, self.memory.build_context(query=text), self.channel_guidance]
+        # Assemble context in order: who the bot is (its identity), caller/channel
+        # info, persisted memory, retrieved knowledge, then channel output rules.
+        # The message is the retrieval query for both memory and knowledge.
+        parts = [
+            self.memory.store.identity.context_text(),
+            extra_context,
+            self.memory.build_context(query=text),
+            self._knowledge_context(text),
+            self.channel_guidance,
+        ]
         context = "\n\n".join(p for p in parts if p and p.strip())
         self.memory.record_user_turn(text)
         return f"<context>\n{context}\n</context>\n\n{text}" if context else text
@@ -191,6 +293,7 @@ class ConversationService:
         reasoning: Optional[str],
         media: Optional[dict] = None,
         user_text: str = "",
+        usage: Optional[ConversationUsage] = None,
     ) -> ConversationReply:
         """Record the reply + fold/curate memory; the one tail both run modes share."""
         media = media or {}
@@ -206,7 +309,9 @@ class ConversationService:
             # instead of an empty string so the channel never has to invent one.
             log_warning("run completed with no content; returning fallback")
             return ConversationReply(text=_EMPTY_REPLY, is_error=True)
-        return ConversationReply(text=reply, reasoning=reasoning, is_error=False, **media)
+        return ConversationReply(
+            text=reply, reasoning=reasoning, is_error=False, usage=usage, **media
+        )
 
     async def handle(
         self,
@@ -247,6 +352,7 @@ class ConversationService:
             getattr(response, "reasoning_content", None),
             collect_reply_media(response, outbox),
             user_text=text,
+            usage=self._usage_from(response),
         )
 
     async def handle_stream(
@@ -342,7 +448,11 @@ class ConversationService:
         reply = reply or "".join(chunks)
         reasoning = getattr(final, "reasoning_content", None) if final is not None else None
         yield await self._finish_turn(
-            reply, reasoning, collect_reply_media(final, outbox), user_text=text
+            reply,
+            reasoning,
+            collect_reply_media(final, outbox),
+            user_text=text,
+            usage=self._usage_from(final) if final is not None else None,
         )
 
     # --- control commands (channel formats the reply text) ------------------
@@ -353,4 +463,21 @@ class ConversationService:
 
     def context_stats(self, user_id: str | int, session_id: str) -> dict:
         self.memory.set_scope(user_id, session_id)
-        return self.memory.context_stats()
+        stats = self.memory.context_stats()
+        stats["knowledge"] = self._knowledge_stats()
+        return stats
+
+    def _knowledge_stats(self) -> dict:
+        """Knowledge auto-injection accounting for `!ctx`.
+
+        The real per-turn size is query-dependent (retrieved per message; logged
+        then — see `_knowledge_context`), so here we report the knob plus a rough
+        upper bound (top_k full-size chunks) an operator can budget against.
+        """
+        on = self.knowledge is not None and self.knowledge_top_k > 0
+        est_max = (
+            _est_tokens_from_chars(self.knowledge_top_k * config.knowledge_chunk_chars)
+            if on
+            else 0
+        )
+        return {"auto_inject": on, "top_k": self.knowledge_top_k, "est_max_tokens": est_max}

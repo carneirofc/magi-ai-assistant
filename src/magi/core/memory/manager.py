@@ -32,7 +32,7 @@ from agno.utils.log import log_info, log_warning
 from magi.core.config import config
 from magi.core.items import ItemArchive
 from magi.core.memory.adapters import slug
-from magi.core.memory.curation import CurateFn, CurationInput
+from magi.core.memory.curation import CurateFn, CurationInput, CurationResult
 from magi.core.memory.kinds import Episodes, LongTerm, Session, SummarizeFn
 from magi.core.memory.semantic import MemoryRetriever
 from magi.core.memory.store import FileMemoryStore, ScopedMemory
@@ -147,6 +147,18 @@ class MemoryManager:
     def _record_turn(self, role: str, text: str) -> None:
         self.session.record_turn(self.mem, role, text)
 
+    # --- capability flags (the admin surface reads these to 503 gracefully) --
+    @property
+    def session_summary_enabled(self) -> bool:
+        """Whether a session summarizer is wired (needs a model). False in a
+        model-free deployment such as standalone `python main.py admin`."""
+        return self.session.summarize_fn is not None
+
+    @property
+    def curation_enabled(self) -> bool:
+        """Whether the durable-memory curator is wired (needs a model)."""
+        return self._curate_fn is not None
+
     async def maybe_summarize_session(self) -> Optional[str]:
         """Fold buffered evicted turns into the rolling session summary.
 
@@ -154,6 +166,15 @@ class MemoryManager:
         set and the pending buffer has reached its threshold. (Delegates to `Session`.)
         """
         return await self.session.maybe_fold(self.mem)
+
+    async def summarize_session_now(self) -> Optional[str]:
+        """Operator-triggered fold: summarize the current scope's pending buffer
+        into its rolling summary regardless of the per-turn threshold.
+
+        No-op (None) when the summarizer is disabled or nothing is pending. Unlike
+        the per-turn path, the operator decides the moment, so the threshold is
+        bypassed (`force=True`). (Delegates to `Session`.)"""
+        return await self.session.maybe_fold(self.mem, force=True)
 
     async def maybe_curate(self, user_message: str, assistant_reply: str) -> Optional[list[str]]:
         """Post-turn durable-memory pass: let the curator revise the profile, log an
@@ -178,7 +199,45 @@ class MemoryManager:
         except Exception as exc:  # noqa: BLE001 — curation must never break a chat.
             log_warning(f"memory: curation failed: {type(exc).__name__}: {exc}")
             return None
+        return self._apply_curation(mem, result)
 
+    async def curate_session_summary(self) -> Optional[list[str]]:
+        """Operator-triggered curation over the current session's rolling summary.
+
+        The per-turn curator reads a single (user, assistant) exchange; there is no
+        fresh turn here, so this feeds the session's rolling summary as the material
+        to fold into durable memory (profile / episode / persona). No-op (None) when
+        curation is disabled or the session has no summary yet. Like `maybe_curate`,
+        any failure is swallowed. Returns the applied changes, or None.
+
+        Durable facts are per-user (session-independent on disk), so the scope's
+        session id only selects which summary is read — the fact ops still land on
+        the same profile the admin fact editor shows."""
+        if self._curate_fn is None:
+            return None
+        mem = self.mem
+        summary = mem.session_summary.read().strip()
+        if not summary:
+            return None
+        inp = CurationInput(
+            # Framed as the "user turn" the curator reads — it's conversational
+            # material, just condensed. There's no assistant reply to pair with it.
+            user_message=f"(session summary under review)\n{summary}",
+            assistant_reply="",
+            current_facts=self.long_term.render_for_curator(mem),
+            persona=self.store.persona.read(),
+        )
+        try:
+            result = await self._curate_fn(inp)
+        except Exception as exc:  # noqa: BLE001 — curation must never break a chat.
+            log_warning(f"memory: session-summary curation failed: {type(exc).__name__}: {exc}")
+            return None
+        return self._apply_curation(mem, result)
+
+    def _apply_curation(self, mem: ScopedMemory, result: CurationResult) -> Optional[list[str]]:
+        """Apply a curator result deterministically: per-fact ops (with an archive
+        snapshot), an optional episode, an optional persona adjustment. Returns the
+        list of applied changes (subset of profile/episode/persona), or None."""
         applied: list[str] = []
         fact_ops = self.long_term.apply_ops(mem, result.operations)
         if fact_ops:

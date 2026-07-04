@@ -246,6 +246,30 @@ def test_eviction_without_summarizer_just_drops(manager):
     assert manager.recall_episodes() == "(no episodes recorded yet)"
 
 
+def test_build_context_includes_pending_evicted_turns(tmp_path):
+    """Turns evicted from the live window but not yet folded into the session summary
+    sit in the pending buffer — they must still appear in context, or the most recent
+    turns vanish until a fold fires."""
+
+    async def fake_summarize(text: str) -> str:  # pragma: no cover - must not run
+        raise AssertionError("should not fold below threshold")
+
+    mgr = MemoryManager(
+        store=FileMemoryStore(tmp_path / "mem"),
+        short_term_max=2,
+        summarize_session_fn=fake_summarize,
+        summarize_every=5,
+    )
+    mgr.set_scope(user_id="u1", session_id="s1")
+    for i in range(4):  # window of 2 => msg 0,1 evicted to pending; 2,3 stay live
+        mgr.record_user_turn(f"msg {i}")
+    assert mgr.mem.pending.count() == 2  # buffered, not yet summarized
+
+    ctx = mgr.build_context()
+    for i in range(4):
+        assert f"msg {i}" in ctx  # pending AND live turns are both visible
+
+
 def test_long_term_profile_and_recent_raw_injected(tmp_path):
     """build_context renders the curated fact sheet (long_term_facts, owned by the
     curator) plus only the most-recent raw facts written via remember()."""
@@ -308,6 +332,28 @@ def test_retriever_empty_falls_back_to_whole_file(tmp_path):
     mgr.remember("the whole-file fact")
     ctx = mgr.build_context(query="anything")
     assert "the whole-file fact" in ctx
+
+
+def test_recent_raw_facts_appended_on_the_semantic_path(tmp_path):
+    """Semantic retrieval supplies the curated portion by relevance, but the most
+    recent raw facts are still appended by recency alongside the curated sheet — so a
+    freshly-remembered fact surfaces even when it isn't among the top-k hits."""
+    retriever = _FakeRetriever({"long_term": ["a relevant curated fact"]})
+    mgr = MemoryManager(
+        FileMemoryStore(tmp_path / "mem"),
+        short_term_max=5,
+        retriever=retriever,
+        long_term_recent_raw=2,
+    )
+    mgr.set_scope(user_id="u1", session_id="s1")
+    mgr.mem.long_term_facts.add("condensed profile")  # a curated sheet must exist
+    for i in range(3):
+        mgr.remember(f"raw {i}")
+
+    ctx = mgr.build_context(query="anything")
+    assert "a relevant curated fact" in ctx  # semantic hit still leads
+    assert "raw 2" in ctx and "raw 1" in ctx  # recent-raw tail appended by recency
+    assert "raw 0" not in ctx  # older than the recent tail (lives only in the sheet)
 
 
 # --- mirror reconciliation on curator ops (no ghost vectors) ----------------

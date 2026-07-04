@@ -24,6 +24,7 @@ from magi.agent.hooks import tool_call_hook
 from magi.agent.members import MEMBER_BUILDERS
 from magi.agent.model import build_lead_model, build_member_model
 from magi.agent.tools.http import HTTP_TOOLS
+from magi.agent.tools.identity import build_identity_tools
 from magi.agent.tools.knowledge import build_knowledge_tools
 from magi.agent.tools.media import MEDIA_TOOLS
 from magi.agent.tools.memory import build_memory_tools
@@ -34,7 +35,7 @@ from magi.agent.tools.vision import VISION_TOOLS
 from magi.core.config import config
 from magi.core.db import get_db
 from magi.core.items import build_item_archive_from_config
-from magi.core.knowledge import build_knowledge_from_config
+from magi.core.knowledge import KnowledgeStore, build_knowledge_from_config
 from magi.core.memory import MemoryManager
 from magi.core.prompts import load_prompt
 from magi.core.storage import build_object_store_from_config
@@ -108,12 +109,17 @@ def build_team(
     memory: MemoryManager,
     db: Optional[BaseDb] = None,
     member_builders: Optional[Sequence[Callable[[Model], Agent]]] = None,
+    knowledge: Optional[KnowledgeStore] = None,
 ) -> Team:
     """Assemble the chatbot team: a multimodal lead routing to specialist members.
 
     `memory` is injected so the lead's memory tools are bound to it (no globals).
     `member_builders` defaults to the full registry; a channel that can't host a
     specialist (e.g. the Discord member outside Discord) passes a trimmed list.
+    `knowledge` is the RAG store backing the search tool; the composition root
+    injects the same instance it also hands to `ConversationService` for context
+    auto-injection, so one store powers both. When None (e.g. a direct/test call)
+    it's built from config — a no-op when the feature is off.
     """
     lead = build_lead_model()
     member_model = build_member_model()
@@ -149,7 +155,8 @@ def build_team(
     # Gated by config; degrades to nothing when off / Qdrant down / embeddings absent,
     # so a deployment without it still boots cleanly.
     knowledge_tools: list = []
-    knowledge = build_knowledge_from_config()
+    if knowledge is None:
+        knowledge = build_knowledge_from_config()
     if knowledge is not None:
         # The store is both searcher and tagger, so it powers read + tag-write tools.
         knowledge_tools = build_knowledge_tools(knowledge, knowledge)
@@ -214,6 +221,9 @@ def build_team(
             # Deliver a URL's actual bytes to the user as an attachment (image,
             # audio, file) instead of pasting a link (see magi/core/media.py outbox).
             *MEDIA_TOOLS,
+            # The bot's own profile picture: look at it, or send it to the user
+            # (bound to this run's identity; empty-safe when no picture is set).
+            *build_identity_tools(memory),
             # Read a URL (http_get) and perform an explicit user-described request
             # (http_request) without round-tripping through a member.
             *HTTP_TOOLS,

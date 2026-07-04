@@ -36,6 +36,7 @@ export default async function PersonaPage() {
             label="Persona (global)"
             initialContent={file.content}
             initialVersion={file.version}
+            maxRows={48}
           />
         </SurfacePanel>
       ) : null}

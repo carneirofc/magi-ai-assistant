@@ -33,10 +33,20 @@ def test_inbound_media_urls_empty_for_no_media():
 
 
 class _FakeMemory:
-    """Minimal MemoryManager stand-in recording what the service called."""
+    """Minimal MemoryManager stand-in recording what the service called.
 
-    def __init__(self):
+    `store.identity` mirrors the real `IdentityStore` slice the service reads —
+    the bot's context text + avatar bytes — so identity injection can be exercised
+    (pass a fake `identity`) without touching disk. The default is an empty identity
+    (no text, no picture), so unrelated tests see the bare input they expect.
+    """
+
+    def __init__(self, identity=None):
         self.assistant_turns = []
+        self.store = SimpleNamespace(
+            identity=identity
+            or SimpleNamespace(context_text=lambda: "", avatar_bytes=lambda: None)
+        )
 
     def set_scope(self, user_id, session_id):
         pass
@@ -55,6 +65,9 @@ class _FakeMemory:
 
     async def maybe_curate(self, user_message, assistant_reply):
         self.curated = (user_message, assistant_reply)
+
+    def context_stats(self):
+        return {"est_tokens": 0, "sections": {}, "short_term_turns": 0}
 
 
 class _FakeRunner:
@@ -99,6 +112,137 @@ async def test_no_context_means_bare_input():
     await service.handle(user_id=1, session_id="s", text="hi")
 
     assert runner.calls[0]["input"] == "hi"
+
+
+async def test_identity_text_injected_without_feeding_the_avatar():
+    """The identity text leads the context, but the avatar is NEVER force-fed as an
+    inbound image (that reads as user content and derails the model); the model
+    pulls the picture in on demand via its tools instead."""
+    identity = SimpleNamespace(
+        context_text=lambda: "# Your identity\nYour name is Alyssa.",
+        avatar_bytes=lambda: (b"png-bytes", "image/png"),
+    )
+    response = SimpleNamespace(status="COMPLETED", content="ok", reasoning_content=None)
+    runner = _FakeRunner(response)
+    service = ConversationService(runner=runner, memory=_FakeMemory(identity=identity))
+
+    await service.handle(user_id=1, session_id="s", text="hi")
+
+    (call,) = runner.calls
+    assert "Your name is Alyssa." in call["input"]
+    assert "images" not in call  # no avatar fed into the run
+
+
+async def test_inbound_images_pass_through_untouched():
+    """The user's own attachments still reach the run — identity never adds to them."""
+    from agno.media import Image
+
+    identity = SimpleNamespace(
+        context_text=lambda: "",
+        avatar_bytes=lambda: (b"avatar", "image/png"),
+    )
+    response = SimpleNamespace(status="COMPLETED", content="ok", reasoning_content=None)
+    runner = _FakeRunner(response)
+    service = ConversationService(runner=runner, memory=_FakeMemory(identity=identity))
+
+    user_img = Image(url="https://cdn.example/a.png")
+    await service.handle(user_id=1, session_id="s", text="hi", media={"images": [user_img]})
+
+    assert runner.calls[0]["images"] == [user_img]
+
+
+# --- knowledge auto-injection ---------------------------------------------------
+class _FakeKnowledge:
+    """A knowledge searcher stand-in returning fixed hits and recording queries."""
+
+    def __init__(self, hits):
+        self._hits = hits
+        self.queries = []
+
+    def search(self, query, top_k):
+        self.queries.append((query, top_k))
+        return self._hits
+
+
+async def test_knowledge_hits_folded_into_context():
+    """When auto-injection is on, the top-k corpus hits for the message ride the
+    run input up front (query = the user's message)."""
+    hit = SimpleNamespace(source="handbook.md", doc_id="d1", text="the rule is X")
+    response = SimpleNamespace(status="COMPLETED", content="ok", reasoning_content=None)
+    runner = _FakeRunner(response)
+    knowledge = _FakeKnowledge([hit])
+    service = ConversationService(
+        runner=runner, memory=_FakeMemory(), knowledge=knowledge, knowledge_top_k=3
+    )
+
+    await service.handle(user_id=1, session_id="s", text="what is the rule?")
+
+    assert knowledge.queries == [("what is the rule?", 3)]
+    (call,) = runner.calls
+    assert "the rule is X" in call["input"]
+    assert "handbook.md" in call["input"]  # source labels the chunk
+
+
+async def test_knowledge_not_searched_when_auto_injection_off():
+    """top_k <= 0 means tool-only retrieval — the searcher is never touched and the
+    input stays bare."""
+
+    class _BoomKnowledge:
+        def search(self, query, top_k):
+            raise AssertionError("must not search when auto-injection is off")
+
+    response = SimpleNamespace(status="COMPLETED", content="ok", reasoning_content=None)
+    runner = _FakeRunner(response)
+    service = ConversationService(
+        runner=runner, memory=_FakeMemory(), knowledge=_BoomKnowledge(), knowledge_top_k=0
+    )
+
+    await service.handle(user_id=1, session_id="s", text="hi")
+
+    assert runner.calls[0]["input"] == "hi"
+
+
+async def test_knowledge_retrieval_failure_never_breaks_the_turn():
+    """A searcher that raises is swallowed — the turn proceeds with no knowledge block."""
+
+    class _BoomKnowledge:
+        def search(self, query, top_k):
+            raise RuntimeError("qdrant down")
+
+    response = SimpleNamespace(status="COMPLETED", content="ok", reasoning_content=None)
+    runner = _FakeRunner(response)
+    service = ConversationService(
+        runner=runner, memory=_FakeMemory(), knowledge=_BoomKnowledge(), knowledge_top_k=3
+    )
+
+    reply = await service.handle(user_id=1, session_id="s", text="hi")
+
+    assert reply.text == "ok"
+    assert runner.calls[0]["input"] == "hi"  # no knowledge block, turn unbroken
+
+
+def test_context_stats_reports_knowledge_auto_injection():
+    """`!ctx` surfaces the knowledge knob + an upper-bound token budget when
+    auto-injection is on (actual per-turn size is query-dependent, logged at run time)."""
+    service = ConversationService(
+        runner=_FakeRunner(None), memory=_FakeMemory(),
+        knowledge=_FakeKnowledge([]), knowledge_top_k=3,
+    )
+
+    stats = service.context_stats(user_id=1, session_id="s")
+
+    assert stats["knowledge"]["auto_inject"] is True
+    assert stats["knowledge"]["top_k"] == 3
+    assert stats["knowledge"]["est_max_tokens"] > 0
+
+
+def test_context_stats_knowledge_off_without_searcher():
+    service = ConversationService(runner=_FakeRunner(None), memory=_FakeMemory())
+
+    stats = service.context_stats(user_id=1, session_id="s")
+
+    assert stats["knowledge"]["auto_inject"] is False
+    assert stats["knowledge"]["est_max_tokens"] == 0
 
 
 async def test_completed_but_empty_returns_fallback():

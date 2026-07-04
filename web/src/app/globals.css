@@ -10,9 +10,25 @@
  * else the utility classes those components emit get tree-shaken away. */
 @source "../../node_modules/@carneirofc/ui/dist";
 
+/* ── Syntax highlighting (Shiki) ─────────────────────────────────────
+ * The chat's code blocks (react-shiki, see CodeBlock.tsx) emit token colors as
+ * CSS `light-dark(<light>, <dark>)`, which the browser resolves from the nearest
+ * `color-scheme`. The dashboard themes via a `data-theme` attribute rather than the
+ * OS scheme, so map one to the other on the highlighted `<pre>` — scoped there so
+ * we don't flip `color-scheme` for the whole app. */
+[data-theme="light"] .shiki {
+  color-scheme: light;
+}
+[data-theme="dark"] .shiki {
+  color-scheme: dark;
+}
+
 /* ── App shell layout ────────────────────────────────────────────────
- * The dashboard chrome: a fixed left rail + scrolling content column. Kept in
- * CSS (token-driven) so it themes with the rest of the system. */
+ * The dashboard chrome: a fixed left rail + a content column that owns the
+ * scroll (the window itself never scrolls on desktop). Making the column the
+ * scroll container lets a page opt into filling the viewport exactly — see the
+ * `.app-page--fill` modifier the chat console uses to avoid a page scrollbar.
+ * Kept in CSS (token-driven) so it themes with the rest of the system. */
 .app-shell {
   display: grid;
   grid-template-columns: var(--app-rail-width, 240px) minmax(0, 1fr);
@@ -35,6 +51,10 @@
 
 .app-content {
   min-width: 0;
+  height: 100dvh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   padding: 1.75rem clamp(1rem, 2vw, 2.5rem) 4rem;
 }
 
@@ -42,6 +62,19 @@
   margin: 0 auto;
   max-width: 1160px;
   width: 100%;
+  /* Grow to fill the column (so fill-pages get a definite height to flex into)
+   * but never shrink below content (so tall pages scroll the column). */
+  flex: 1 0 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* A page that should fill the viewport exactly instead of scrolling the column
+ * (the chat console). Its own internal regions scroll; the page never does. */
+.app-page--fill {
+  flex: 1;
+  min-height: 0;
 }
 
 /* Sidebar nav link — reuses the design-system sidebar tokens but laid out as a
@@ -84,5 +117,11 @@
     align-items: center;
     border-right: 0;
     border-bottom: 1px solid var(--panel-border);
+  }
+  /* Rail stacks above the content here, so hand the scroll back to the window
+   * rather than pinning the column to the viewport height. */
+  .app-content {
+    height: auto;
+    overflow-y: visible;
   }
 }

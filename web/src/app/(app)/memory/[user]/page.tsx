@@ -36,8 +36,14 @@ export default async function UserMemoryPage({
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <Link href="/memory" className="text-ui-xs">
-          ← all users
+        <Link
+          href="/memory"
+          className="group inline-flex items-center gap-1 text-ui-xs text-[color:var(--ui-ink-subtle)] no-underline transition-colors hover:text-[color:var(--ui-ink-accent)]"
+        >
+          <span className="inline-block transition-transform duration-150 ease-out group-hover:-translate-x-0.5">
+            ←
+          </span>
+          all users
         </Link>
       </div>
       <PageHeader
@@ -108,15 +114,22 @@ export default async function UserMemoryPage({
                   <li key={sid}>
                     <Link
                       href={`/memory/${encodeURIComponent(userId)}/sessions/${encodeURIComponent(sid)}`}
-                      className="no-underline"
+                      className="group block rounded-xl no-underline outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--ui-ring-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--ui-bg)]"
                     >
                       <SurfacePanel
                         tone="soft"
                         padding="md"
-                        className="flex items-center justify-between transition-colors hover:border-ui-active"
+                        className="flex items-center justify-between transition-[transform,border-color,box-shadow] duration-150 ease-out group-hover:-translate-y-0.5 group-hover:border-ui-active group-hover:shadow-[0_18px_30px_-22px_color-mix(in_oklab,var(--ui-border-active)_60%,transparent)] group-focus-visible:border-ui-active"
                       >
-                        <span className="font-mono text-ui-xs text-[color:var(--ui-ink)]">{sid}</span>
-                        <span className="text-ui-xs text-[color:var(--ui-ink-subtle)]">Edit →</span>
+                        <span className="font-mono text-ui-xs text-[color:var(--ui-ink)] transition-colors group-hover:text-[color:var(--ui-ink-accent)]">
+                          {sid}
+                        </span>
+                        <span className="inline-flex items-center gap-1 text-ui-xs text-[color:var(--ui-ink-subtle)] transition-colors group-hover:text-[color:var(--ui-ink-accent)]">
+                          Edit
+                          <span className="inline-block transition-transform duration-150 ease-out group-hover:translate-x-0.5">
+                            →
+                          </span>
+                        </span>
                       </SurfacePanel>
                     </Link>
                   </li>

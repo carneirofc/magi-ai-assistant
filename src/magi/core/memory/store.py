@@ -5,6 +5,8 @@ so the raw conversation (role + content per turn) round-trips losslessly. Layout
 
     <root>/
       persona.md                         # evolved behavior (base: prompts/team/lead.md)
+      identity.json                      # global bot identity (name/description/avatar; magi/core/identity)
+      identity/avatar.<ext>              # the bot's profile-picture bytes
       users/<user>/
         long_term.md                     # durable facts learned about the user
         long_term_facts.json             # curated profile: id-addressable facts (curator)
@@ -22,6 +24,7 @@ policy, no context assembly here — `MemoryManager` layers those on top.
 
 from pathlib import Path
 
+from magi.core.identity import IdentityStore
 from magi.core.memory.adapters import Blob, BulletLog, JsonFacts, JsonWindow, slug
 
 _PERSONA_HEADER = "Persona & evolved behavior"
@@ -53,6 +56,10 @@ class FileMemoryStore:
     def __init__(self, root: Path):
         self.root = Path(root)
         self.persona = BulletLog(self.root / "persona.md", _PERSONA_HEADER)
+        # The global bot identity (name, description, profile picture) — the
+        # presented self, distinct from the persona's evolving behavior. Sits on
+        # the root because it's non-scoped, like the persona. See magi/core/identity.
+        self.identity = IdentityStore(self.root)
 
     def scoped(self, user_id: object, session_id: object) -> ScopedMemory:
         """The memory adapters for one (user, session) scope."""

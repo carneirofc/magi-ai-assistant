@@ -15,6 +15,7 @@ export function RawFileEditor({
   sessionId,
   initialContent,
   initialVersion,
+  maxRows = 24,
 }: {
   kind: string;
   label: string;
@@ -23,6 +24,7 @@ export function RawFileEditor({
   sessionId?: string;
   initialContent: string;
   initialVersion: string;
+  maxRows?: number;
 }) {
   const [content, setContent] = useState(initialContent);
   const [version, setVersion] = useState(initialVersion);
@@ -53,7 +55,7 @@ export function RawFileEditor({
     else setError(`Save failed (${res.status}).`);
   }
 
-  const rows = Math.min(24, Math.max(4, content.split("\n").length + 1));
+  const rows = Math.min(maxRows, Math.max(4, content.split("\n").length + 1));
 
   return (
     <div className="flex flex-col gap-2">

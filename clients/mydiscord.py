@@ -468,11 +468,20 @@ class DiscordClient:
             log_info(f"command !{cmd} from user={user_id} session={session_id}")
             st = self.conversation.context_stats(scoped_user_id(self.platform, user_id), session_id)
             sec = st["sections"]
+            # Knowledge auto-injection is a separate, per-message contribution (not a
+            # memory section); show it only when it's on, with its upper-bound budget.
+            kn = st.get("knowledge") or {}
+            knowledge_line = (
+                f"• knowledge: auto-inject top_k={kn['top_k']} (≤~{kn['est_max_tokens']}t/turn)\n"
+                if kn.get("auto_inject")
+                else ""
+            )
             await channel.send(
                 f"📊 Context **~{st['est_tokens']} tok** ({st['ratio']:.0%} of {st['budget_tokens']})\n"
                 f"• short-term: {st['short_term_turns']} turns (~{sec['short_term']}t)\n"
                 f"• long-term ~{sec['long_term']}t · episodes ~{sec['episodes']}t · "
                 f"persona ~{sec['persona']}t\n"
+                f"{knowledge_line}"
                 "Use `!flush` to reset this chat's short-term history."
             )
             return True

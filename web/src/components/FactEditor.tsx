@@ -113,7 +113,11 @@ export function FactEditor({
         <ul className="flex flex-col gap-2">
           {facts.map((f) => (
             <li key={f.id}>
-              <SurfacePanel tone="soft" padding="md" className="flex flex-col gap-2">
+              <SurfacePanel
+                tone="soft"
+                padding="md"
+                className="group flex flex-col gap-2 transition-[border-color,box-shadow] duration-150 ease-out hover:border-ui-active hover:shadow-[0_16px_28px_-22px_color-mix(in_oklab,var(--ui-border-active)_55%,transparent)]"
+              >
                 {editingId === f.id ? (
                   <>
                     <TextAreaInput
@@ -140,7 +144,7 @@ export function FactEditor({
                 ) : (
                   <div className="flex items-start justify-between gap-3">
                     <p className="min-w-0 text-ui-sm text-[color:var(--ui-ink)]">{f.text}</p>
-                    <div className="flex shrink-0 gap-1">
+                    <div className="flex shrink-0 gap-1 opacity-70 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
                       <OutlineButton
                         controlSize="icon"
                         aria-label="Edit memory"

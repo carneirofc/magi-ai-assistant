@@ -97,6 +97,18 @@ const NAV: NavItem[] = [
     ),
   },
   {
+    href: "/identity",
+    label: "Identity",
+    match: (p) => p.startsWith("/identity"),
+    icon: (
+      <Icon>
+        <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+        <circle cx="9" cy="10" r="2" />
+        <path d="M4 18l4.5-4 3 2.5L15 12l5 5" />
+      </Icon>
+    ),
+  },
+  {
     href: "/persona",
     label: "Persona",
     match: (p) => p.startsWith("/persona"),

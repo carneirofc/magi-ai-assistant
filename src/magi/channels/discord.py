@@ -69,6 +69,12 @@ def serve_with_admin(client: DiscordClient) -> None:
         "(config.admin_enabled)"
     )
     admin_server = uvicorn.Server(
-        uvicorn.Config(build_admin_app(), host=config.admin_host, port=config.admin_port)
+        uvicorn.Config(
+            # Share this bot's memory orchestrator so the admin operator triggers
+            # (summarize / curate / flush) run the real model-backed passes.
+            build_admin_app(memory_manager=client.conversation.memory),
+            host=config.admin_host,
+            port=config.admin_port,
+        )
     )
     asyncio.run(run_gateway(client.serve_async(), admin_server.serve()))

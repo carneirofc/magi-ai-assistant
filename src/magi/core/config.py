@@ -114,6 +114,14 @@ class Config:
     # here to pre-populate it for the memory layer.
     persona_seed: str = ""
 
+    # --- Bot identity (see magi/core/identity). A global, operator-set profile —
+    # display name, description, and profile picture — the bot presents as itself.
+    # Managed from the admin frontend; the name/description are injected into every
+    # run as text, and the run context tells the model it HAS a profile picture. The
+    # picture is never force-fed each turn (that reads as user content and derails
+    # the model); the model pulls it in on demand via its profile-picture tools
+    # (view_profile_picture / send_profile_picture, magi/agent/tools/identity). ---
+
     # --- Team behavior / robustness ---
     # Hard cap on tool calls per run (incl. member delegations) so a lead can't
     # loop forever delegating. None/0 = no limit.
@@ -195,6 +203,12 @@ class Config:
     knowledge_enabled: bool = False
     knowledge_collection: str = "chatbot_knowledge"
     knowledge_top_k: int = 5
+    # Auto-injection into the run context: when > 0 (and knowledge is enabled),
+    # ConversationService folds the top-k corpus chunks most relevant to the user's
+    # message straight into context each turn — in addition to the on-demand
+    # search_knowledge tool — so the model has reference material up front without
+    # having to ask. 0 = off (tool-only retrieval), the default.
+    knowledge_context_top_k: int = 0
     knowledge_chunk_chars: int = 1_200  # target chunk size before overlap
     knowledge_chunk_overlap: int = 150  # chars repeated between adjacent chunks
     # Subject is a hard filter at query time; tags are a soft boost (re-rank, never

@@ -69,6 +69,7 @@ def test_post_message_runs_a_turn_and_returns_the_reply():
     assert resp.status_code == 200
     assert resp.json() == {
         "text": "the answer", "reasoning": None, "is_error": False, "media": [],
+        "usage": None,
     }
     assert conversation.calls == [("handle", "api:u1", "win-1", "hi")]
 
@@ -97,6 +98,35 @@ def test_reply_media_is_serialized_on_the_wire():
     assert audio["url"] == "https://cdn.example/x.mp3" and audio["data_base64"] is None
 
 
+def test_usage_is_serialized_on_the_wire():
+    """Token accounting rides the reply when the run reported metrics."""
+    from magi.core.conversation import ConversationUsage
+
+    reply = ConversationReply(
+        text="hi",
+        usage=ConversationUsage(
+            input_tokens=120,
+            output_tokens=30,
+            total_tokens=150,
+            cached_tokens=64,
+            reasoning_tokens=10,
+            context_window=8192,
+        ),
+    )
+    client, _ = _client(reply)
+
+    resp = client.post("/v1/sessions/s/messages", json={"user_id": "u1", "text": "hi"})
+
+    assert resp.json()["usage"] == {
+        "input_tokens": 120,
+        "output_tokens": 30,
+        "total_tokens": 150,
+        "cached_tokens": 64,
+        "reasoning_tokens": 10,
+        "context_window": 8192,
+    }
+
+
 def test_error_reply_travels_in_band_as_200():
     reply = ConversationReply(text="sorry, that failed", is_error=True)
     client, _ = _client(reply)
@@ -114,6 +144,60 @@ def test_empty_text_is_rejected():
 
     assert resp.status_code == 422
     assert conversation.calls == []
+
+
+# --- bot identity (read-only; managed via the admin surface) -----------------
+_PNG_1x1 = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+)
+
+
+def _identity_client(auth_token=None):
+    """A client whose fake conversation exposes a real IdentityStore over a temp
+    root (the chat identity routes read `conversation.memory.store.identity`)."""
+    import tempfile
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from magi.core.identity import IdentityStore
+
+    store = IdentityStore(Path(tempfile.mkdtemp()))
+    conversation = _FakeConversation()
+    conversation.memory = SimpleNamespace(store=SimpleNamespace(identity=store))
+    return TestClient(create_app(conversation, auth_token=auth_token)), store
+
+
+def test_identity_read_is_empty_by_default():
+    client, _ = _identity_client()
+
+    body = client.get("/v1/identity").json()
+
+    assert body["display_name"] == "" and body["description"] == ""
+    assert body["has_avatar"] is False and body["avatar_mime"] is None
+    assert body["version"]
+    assert client.get("/v1/identity/avatar").status_code == 404
+
+
+def test_identity_read_reflects_configured_profile():
+    client, store = _identity_client()
+    store.set_fields(display_name="Alyssa", description="calm")
+    store.set_avatar(_PNG_1x1, "image/png", "a.png")
+
+    body = client.get("/v1/identity").json()
+
+    assert body["display_name"] == "Alyssa" and body["description"] == "calm"
+    assert body["has_avatar"] is True and body["avatar_mime"] == "image/png"
+    av = client.get("/v1/identity/avatar")
+    assert av.status_code == 200
+    assert av.headers["content-type"].startswith("image/png")
+    assert av.content == _PNG_1x1
+
+
+def test_identity_read_requires_auth_when_token_set():
+    client, _ = _identity_client(auth_token="secret")
+    assert client.get("/v1/identity").status_code == 401
+    ok = client.get("/v1/identity", headers={"Authorization": "Bearer secret"})
+    assert ok.status_code == 200
 
 
 def _parse_sse(body: str) -> list[tuple[str, dict]]:
@@ -137,7 +221,7 @@ def test_stream_emits_deltas_then_done():
     assert _parse_sse(resp.text) == [
         ("delta", {"text": "the "}),
         ("delta", {"text": "answer"}),
-        ("done", {"text": "the answer", "reasoning": None, "is_error": False, "media": []}),
+        ("done", {"text": "the answer", "reasoning": None, "is_error": False, "media": [], "usage": None}),
     ]
     assert conversation.calls == [("handle_stream", "api:u1", "win-1", "hi")]
 
@@ -169,7 +253,7 @@ def test_stream_emits_reasoning_and_tool_frames():
         ("tool_call", {"id": "c1", "name": "web_search", "args": {"q": "x"}}),
         ("tool_result", {"id": "c1", "result": "hit", "is_error": False}),
         ("delta", {"text": "the answer"}),
-        ("done", {"text": "the answer", "reasoning": None, "is_error": False, "media": []}),
+        ("done", {"text": "the answer", "reasoning": None, "is_error": False, "media": [], "usage": None}),
     ]
 
 
