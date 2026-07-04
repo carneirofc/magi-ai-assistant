@@ -31,7 +31,7 @@ The public/private boundary maps onto extension points already in the codebase:
   what to remember*.
 - **Prompts are files** loaded by `load_prompt()` — persona is data, not code.
 - **Members are a registry** (`MEMBER_BUILDERS`) — specialists are pluggable.
-- **Config is code-first** via `configure()` at `main.py` / `main_api.py` —
+- **Config is code-first** via `configure()` at `main.py` —
   deployment is already a thin, separable layer.
 
 Two spots are hardcoded and block a clean split; fix them before publishing:

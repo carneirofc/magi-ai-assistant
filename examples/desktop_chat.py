@@ -9,7 +9,7 @@ the intended desktop pattern:
 
 Two backends, same code path below — pick one:
 
-    # Talk to a running service (python main_api.py):
+    # Talk to a running service (python main.py api):
     python examples/desktop_chat.py --http http://127.0.0.1:8000
 
     # Or embed the whole brain in-process (needs a model backend reachable, e.g.
@@ -144,7 +144,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if not args.embedded and not args.http:
-        args.http = "http://127.0.0.1:8000"  # sensible default: local main_api.py
+        args.http = "http://127.0.0.1:8000"  # sensible default: local main.py api
 
     client = build_client(args)
     root = tk.Tk()

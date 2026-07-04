@@ -56,7 +56,7 @@ def serve_with_admin(client: DiscordClient) -> None:
 
     Unlike the HTTP API channel (`channels/api.py`), Discord has no ASGI app to
     mount the admin surface onto, so this instead starts a second uvicorn server
-    (bound to `admin_host`/`admin_port`, same as `main_admin.py` standalone) and
+    (bound to `admin_host`/`admin_port`, same as `python main.py admin` standalone) and
     runs it concurrently with the gateway connection via `gateway.run_gateway`.
     See ADR 0002, ADR 0003, and `admin_enabled` in `core/config.py`.
     """

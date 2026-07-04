@@ -39,8 +39,9 @@ ENV PATH="/app/.venv/bin:$PATH"
 # under data/ — mount a volume over it in compose to persist across rebuilds.
 RUN mkdir -p /app/data
 
-# HTTP service by default. The container entrypoints overlay only the bits that
-# differ in a container (bind 0.0.0.0, reach the host llama-server); the Discord
-# bot is the alternate command (see docker-compose.app.yaml).
+# HTTP service by default. One entrypoint, `python main.py <channel> --docker`;
+# --docker overlays only the bits that differ in a container (bind 0.0.0.0, reach
+# the host llama-server). The Discord bot / admin API are alternate commands
+# (see docker-compose.app.yaml).
 EXPOSE 8000
-CMD ["python", "main_api_docker.py"]
+CMD ["python", "main.py", "api", "--docker"]

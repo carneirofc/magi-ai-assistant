@@ -43,8 +43,8 @@ Both entrypoints serve the **same brain** (`magi/channels/bootstrap.py`); only t
 transport differs.
 
 ```bash
-python main.py          # Discord bot (needs DISCORD_BOT_TOKEN)
-python main_api.py      # standalone HTTP service on 127.0.0.1:8000
+python main.py discord  # Discord bot (needs DISCORD_BOT_TOKEN)
+python main.py api      # standalone HTTP service on 127.0.0.1:8000
 ```
 
 The startup banner prints every effective setting (secrets masked) — confirm your
@@ -81,12 +81,12 @@ The full contract is in [channels.md](channels.md).
 end. Point it at the OpenAI-compatible shim and you get a full UI for free.
 
 Open WebUI runs in Docker, so the app must be reachable from the container: bind it
-to `0.0.0.0` (`api_host="0.0.0.0"` in `main_api.py`) and set `API_AUTH_TOKEN`, since
+to `0.0.0.0` (`api_host="0.0.0.0"` in `main.py` (configure_api)) and set `API_AUTH_TOKEN`, since
 the port is now non-local.
 
 ```bash
 # 1. Start the chatbot HTTP service (shim on :8000).
-python main_api.py
+python main.py api
 
 # 2. Run Open WebUI pointed at the app (it needs a non-empty key; reuse the token).
 docker run -d -p 3000:8080 \

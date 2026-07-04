@@ -10,7 +10,7 @@ model backend — the app boots and degrades gracefully when a service is down.
 ```mermaid
 flowchart TB
     subgraph host["Your machine"]
-        APP[magi<br/>main.py / main_api.py]
+        APP[magi<br/>main.py]
         LS[llama-server<br/>:8888 /v1 — chat backend]
     end
 
@@ -85,8 +85,8 @@ docker compose -f docker-compose.app.yaml --profile discord up --build discord
 
 The container reaches the host's `llama-server` and any host-published service
 via `host.docker.internal` (compose wires `host-gateway`), mirroring how the
-host-run app uses `localhost`. Config stays code-first: the container entrypoints
-(`main_api_docker.py` / `main_discord_docker.py`) reuse each deployment's
+host-run app uses `localhost`. Config stays code-first: the container modes
+(`python main.py api --docker` / `python main.py discord --docker`) reuse each deployment's
 `apply_deployment_config()` and overlay only the container deltas — bind
 `0.0.0.0`, point the backend URL at the host. `./data` is volume-mounted so the
 sqlite db, memory files, and local byte archive survive rebuilds. Optional extras

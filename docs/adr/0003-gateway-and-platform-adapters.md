@@ -60,7 +60,7 @@ concrete gaps fell out of formalizing that convention:
    (`channels/api.py`) that delegates to the existing `build_api_app()` and
    wraps it in a `uvicorn.Server`, so the HTTP channel also demonstrably
    satisfies the Protocol — proof it's a real contract, not a Discord-shaped
-   abstraction with one implementer. `main_api.py` is not required to switch
+   abstraction with one implementer. `main.py api` is not required to switch
    to it; it keeps calling `uvicorn.run(build_api_app(), ...)` directly.
 
 Deliberately **not** in this slice: per-platform allowlists/admin-tiers, cron,

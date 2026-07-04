@@ -36,8 +36,8 @@ it is the engine that several bots share:
 ```mermaid
 flowchart TD
     subgraph entry["Entrypoints (deployment + secrets)"]
-        M1[main.py — Discord]
-        M2[main_api.py — HTTP]
+        M1[main.py discord — Discord]
+        M2[main.py api — HTTP]
     end
 
     subgraph ch["magi.channels (transport)"]

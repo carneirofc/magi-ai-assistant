@@ -9,7 +9,7 @@ codes against the same calls whether the brain runs in-process or behind HTTP:
     client = embed(user_id="local", model_provider="llamacpp",
                    llamacpp_base_url="http://127.0.0.1:8888/v1")
 
-    # Remote: talk to a running `python main_api.py`.
+    # Remote: talk to a running `python main.py api`.
     client = connect("http://127.0.0.1:8000", user_id="local")
 
     # Either one, wrapped for a GUI's blocking/threaded world:
@@ -118,7 +118,7 @@ def connect(
     auth_token: Optional[str] = None,
     timeout: float = 120.0,
 ) -> HttpClient:
-    """Build a remote client for a running magi HTTP service (`main_api.py`).
+    """Build a remote client for a running magi HTTP service (`python main.py api`).
 
     `auth_token` is the service's `API_AUTH_TOKEN` when auth is on. `user_id`
     scopes durable memory (namespaced server-side under the same platform the

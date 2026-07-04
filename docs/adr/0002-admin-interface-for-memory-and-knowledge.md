@@ -39,7 +39,8 @@ Next.js BFF. Twenty decisions, grouped:
    entrypoint, importing `FileMemoryStore` / `KnowledgeStore` / `SemanticIndex`
    directly (no team/LLM; it never runs the model).
 3. **Minimal repo footprint.** `src/magi/channels/admin.py` (`create_admin_app` /
-   `build_admin_app`, mirroring `api.py`), `main_admin.py` + `main_admin_docker.py`,
+   `build_admin_app`, mirroring `api.py`), the `admin` subcommand in `main.py`
+   (`python main.py admin`, with `--docker` for the container),
    and one new `web/` dir for the Next.js app. No `apps/`+`packages/` restructure
    until the frontend has real shared packages.
 17. **BFF topology.** browser → Next.js route handlers/server actions → Python
@@ -153,7 +154,7 @@ Decisions #2/#19 (separate deployable, admin-api unpublished) stay the default
 and the recommended production posture. For a single-operator/dev deployment
 that would rather not run a second process, `config.admin_enabled` (off by
 default) serves the admin surface **alongside** whichever channel entrypoint is
-running, instead of via `main_admin.py`:
+running, instead of via `python main.py admin`:
 
 - **HTTP API** (`channels/api.py`) — the admin app is mounted onto the same
   FastAPI app (`app.mount("/", admin_app)`, added last so it only catches what

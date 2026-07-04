@@ -18,7 +18,7 @@
 # Bake in optional extras at build time, e.g.:  EXTRAS="--extra s3" docker compose ...
 
 services:
-  # HTTP API + OpenAI-compatible shim (main_api_docker.py → bind 0.0.0.0:8000).
+  # HTTP API + OpenAI-compatible shim (main.py api --docker → bind 0.0.0.0:8000).
   api:
     build:
       context: .
@@ -27,7 +27,7 @@ services:
     image: magi-app:local
     container_name: magi-api
     restart: unless-stopped
-    command: ["python", "main_api_docker.py"]
+    command: ["python", "main.py", "api", "--docker"]
     ports:
       - "8000:8000"
     env_file:
@@ -43,12 +43,12 @@ services:
       retries: 5
       start_period: 20s
 
-  # Operator admin API (main_admin_docker.py → channels/admin.py). Manages memory +
+  # Operator admin API (main.py admin --docker → channels/admin.py). Manages memory +
   # the knowledge corpus. Reuses the app image, different command. NOT published —
   # reachable only on the compose network, fronted by the `web` BFF below. Started
   # with `--profile admin`. See ADR 0002. Alternative for a single-operator setup
   # that would rather not run this as its own service: set `admin_enabled=True` in
-  # the `api`/`discord` entrypoint's apply_deployment_config() and drop this
+  # the `api`/`discord` channel's configure_* in main.py and drop this
   # service — the chat process serves /admin/v1/* itself (see the ADR addendum).
   admin-api:
     build:
@@ -58,7 +58,7 @@ services:
     image: magi-app:local
     container_name: magi-admin-api
     restart: unless-stopped
-    command: ["python", "main_admin_docker.py"]
+    command: ["python", "main.py", "admin", "--docker"]
     profiles: ["admin"]
     expose:
       - "8100"                    # compose-network only; no host `ports:` mapping
@@ -95,7 +95,7 @@ services:
     depends_on:
       - admin-api
 
-  # Discord bot (main_discord_docker.py). Outbound-only, so no ports. Started only
+  # Discord bot (main.py discord --docker). Outbound-only, so no ports. Started only
   # with `--profile discord` so it stays out of the way until you set a bot token.
   discord:
     build:
@@ -105,7 +105,7 @@ services:
     image: magi-app:local
     container_name: magi-discord
     restart: unless-stopped
-    command: ["python", "main_discord_docker.py"]
+    command: ["python", "main.py", "discord", "--docker"]
     profiles: ["discord"]
     env_file:
       - .env                      # must include DISCORD_BOT_TOKEN

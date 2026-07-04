@@ -9,7 +9,7 @@ Covered event types:
   - Emoji reactions (Unicode + custom guild emoji)
   - Voice state changes (join / leave / move / mute / stream)
 
-Run: python main_discord.py check
+Run: python main.py discord --check
 """
 
 import re

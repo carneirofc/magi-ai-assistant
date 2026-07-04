@@ -54,7 +54,7 @@ specialist member (`build_discord_agent`) acts inside the current live conversat
 ## HTTP API
 
 ```bash
-python main_api.py      # standalone HTTP service; binds 127.0.0.1:8000 by default
+python main.py api      # standalone HTTP service; binds 127.0.0.1:8000 by default
 ```
 
 The native contract ([`magi/channels/api.py`](../src/magi/channels/api.py)) is

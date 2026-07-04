@@ -21,7 +21,7 @@ flowchart LR
 ## How it works
 
 ```python
-# in main.py / main_api.py
+# in main.py
 from magi.core.config import configure
 
 def apply_deployment_config() -> None:

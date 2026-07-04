@@ -11,8 +11,8 @@
     needed the first time, or to disable auth on a volume that already has accounts
     (the flag is ignored once an account exists).
 
-    The chatbot service must already be running (python main_api.py) and bound to
-    an interface the container can reach: set api_host="0.0.0.0" in main_api.py
+    The chatbot service must already be running (python main.py api) and bound to
+    an interface the container can reach: set api_host="0.0.0.0" in main.py (configure_api)
     and API_AUTH_TOKEN in .env, since the port is then non-local.
 
 .EXAMPLE

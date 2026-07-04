@@ -1,9 +1,9 @@
 """Application configuration — code-first, set at the entrypoint.
 
 Settings are plain Python: the `Config` dataclass below holds the defaults, and
-each entrypoint (main.py, main_discord.py, main_api.py) overrides what its
+the channel configs in `main.py` override what each
 deployment needs via `configure(...)` before building anything. To find out
-what a value is, read the entrypoint and this file — no env-var archaeology.
+what a value is, read the channel config and this file — no env-var archaeology.
 The startup banner (`config.log_settings()`, called from magi/channels/bootstrap.py)
 prints the effective values at runtime.
 
@@ -283,7 +283,7 @@ class Config:
 
     # --- Admin service (magi/channels/admin). An operator-only tool to view and
     # manage memory + organize the knowledge corpus. ADR 0002's default is a
-    # SEPARATE deployable (main_admin.py) fronted by the Next.js BFF (web/), which
+    # SEPARATE deployable (`python main.py admin`) fronted by the Next.js BFF (web/), which
     # holds the token server-side — keeps the write-capable surface off the public
     # brain entirely. Reached only through the BFF; bind localhost / keep the port
     # unpublished. admin_auth_token (secret) gates every /admin route with
@@ -292,8 +292,8 @@ class Config:
     admin_port: int = 8100
     admin_auth_token: str | None = _secret("ADMIN_AUTH_TOKEN")
     # Opt-in convenience for a single-operator/dev deployment that doesn't want a
-    # second process: serve the admin surface ALONGSIDE this entrypoint's own
-    # transport instead of running main_admin.py separately.
+    # second process: serve the admin surface ALONGSIDE this channel's own
+    # transport instead of running `python main.py admin` separately.
     #   - HTTP API channel (channels/api.py) — mounted onto the SAME FastAPI app,
     #     so it rides api_host:api_port; admin_host/admin_port are unused here.
     #   - Discord channel (channels/discord.py) — there's no ASGI app to mount

@@ -87,16 +87,22 @@ defined in [CONTEXT.md](CONTEXT.md); architecture decisions in [docs/adr/](docs/
 ## Run
 
 ```bash
-python main.py          # Discord bot (needs DISCORD_BOT_TOKEN)
-python main_api.py      # standalone HTTP service for external clients
+python main.py discord  # Discord bot (needs DISCORD_BOT_TOKEN)
+python main.py api      # standalone HTTP service for external clients
 ```
 
 Both serve the same brain (`magi/channels/bootstrap.py`); only the transport differs.
 
+A **frameless native desktop shell** renders the web frontend (`web/`) in a
+chromeless, translucent window and serves it from one process — no separate web
+server — with a JS↔Python bridge (`uv sync --extra desktop`, then `python main.py
+desktop`). See [docs/desktop.md](docs/desktop.md#frameless-desktop-shell-native-window-over-the-web-frontend).
+
 The admin surface (memory + knowledge management, `magi/channels/admin.py`, see
-ADR 0002) normally runs as its own process (`main_admin.py`) behind the Next.js
-BFF. Set `admin_enabled=True` in `main.py` / `main_api.py` to serve it alongside
-the bot instead — one process, no second `python main_admin.py` to keep running.
+ADR 0002) normally runs as its own process (`python main.py admin`) behind the
+Next.js BFF. Set `admin_enabled=True` in `main.py` (configure_discord /
+configure_api) to serve it alongside the bot instead — one process, no second
+`python main.py admin` to keep running.
 On the HTTP API it rides the same port (`/admin/v1/*`); on Discord it opens a
 second local port (`admin_host`/`admin_port`). Keep `ADMIN_AUTH_TOKEN` set and the
 admin port unpublished either way.
@@ -121,9 +127,9 @@ docker compose -f docker-compose.app.yaml --profile discord up --build discord
 
 The container reaches the host's `llama-server` (and any other host-published
 service) via `host.docker.internal`, exactly as the host-run app reaches
-`localhost`. Config stays code-first: the container entrypoints
-(`main_api_docker.py` / `main_discord_docker.py`) reuse each deployment's
-`apply_deployment_config()` and overlay only the bits that differ in a container
+`localhost`. Config stays code-first: the container modes
+(`python main.py api --docker` / `python main.py discord --docker`) reuse each
+deployment's `apply_deployment_config()` and overlay only the bits that differ in a container
 (bind `0.0.0.0`, point the backend URL at the host). To enable an optional extra
 in the image, pass it at build time: `EXTRAS="--extra s3" docker compose -f
 docker-compose.app.yaml up --build`.
@@ -132,7 +138,7 @@ docker-compose.app.yaml up --build`.
 
 [`magi.client`](src/magi/client/__init__.py) is the front door for a desktop GUI:
 one surface, two interchangeable backends. Embed the whole brain in a Python GUI
-(`embed(...)`) with no server, or talk to a running `main_api.py` over HTTP
+(`embed(...)`) with no server, or talk to a running `python main.py api` over HTTP
 (`connect(...)`) — same call sites either way, same durable memory for the same
 `user_id`. `SyncClient` wraps either one in blocking methods for toolkits that
 own the main thread (Tkinter, PyQt/PySide, wx).
@@ -204,14 +210,14 @@ into the message text as markdown.
 front end. Point it at the shim and you get a full UI for free.
 
 Open WebUI runs in Docker, so the app must be reachable from the container: bind
-it to `0.0.0.0` (set `api_host="0.0.0.0"` in `main_api.py`) and set
+it to `0.0.0.0` (set `api_host="0.0.0.0"` in `main.py` (configure_api)) and set
 `API_AUTH_TOKEN` in `.env`, since the port is now non-local.
 
 PowerShell:
 
 ```powershell
 # 1. Start the chatbot HTTP service (OpenAI-compatible shim on :8000).
-python main_api.py
+python main.py api
 
 # 2. In another terminal, run Open WebUI pointed at the app. Open WebUI needs a
 #    non-empty key; use your API_AUTH_TOKEN (any string works if auth is off).
@@ -228,7 +234,7 @@ Bash:
 
 ```bash
 # 1. Start the chatbot HTTP service (OpenAI-compatible shim on :8000).
-python main_api.py
+python main.py api
 
 # 2. In another terminal, run Open WebUI pointed at the app. Open WebUI needs a
 #    non-empty key; use your API_AUTH_TOKEN (any string works if auth is off).
@@ -246,8 +252,8 @@ conversation maps to its own server-side session automatically.
 
 ## Configuration
 
-Code-first: each entrypoint sets its deployment in `apply_deployment_config()`
-(see `main.py` / `main_api.py`); defaults live in `magi/core/config.py`. Only
+Code-first: each channel config sets its deployment in `apply_deployment_config()`
+(see `main.py`); defaults live in `magi/core/config.py`. Only
 secrets come from `.env` (`DISCORD_BOT_TOKEN`, `LITELLM_MASTER_KEY`,
 `LLAMACPP_API_KEY`, `QDRANT_API_KEY`, `API_AUTH_TOKEN` — the last gates `/v1`
 with `Authorization: Bearer <token>`). The effective values are printed at
@@ -272,8 +278,7 @@ Off by default. Two interchangeable backends, picked by `storage_backend`:
 
 ### Local backend (zero setup)
 
-Nothing to install or run — just turn it on in the entrypoint (`main.py` /
-`main_api.py`):
+Nothing to install or run — just turn it on in the channel config (`main.py`):
 
 ```python
 configure(
@@ -297,7 +302,7 @@ S3_ACCESS_KEY_ID=rustfsadmin
 S3_SECRET_ACCESS_KEY=rustfsadmin
 ```
 
-Then turn it on in the entrypoint (`main.py` / `main_api.py`):
+Then turn it on in the channel config (`main.py`):
 
 ```python
 configure(
