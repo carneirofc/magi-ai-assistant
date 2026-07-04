@@ -4,8 +4,8 @@
 
 import { PageHeader, StatusMessage, SurfacePanel } from "@carneirofc/ui";
 
-import { IdentityEditor } from "@/components/IdentityEditor";
-import { getIdentity } from "@/lib/admin-api";
+import { IdentityEditor } from "@carneirofc/magi-web/components/IdentityEditor";
+import { getIdentity } from "@carneirofc/magi-web/lib/admin-api";
 
 export const dynamic = "force-dynamic";
 

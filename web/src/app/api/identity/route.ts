@@ -5,7 +5,7 @@
 
 import { NextResponse } from "next/server";
 
-import { getIdentity } from "@/lib/chat-api";
+import { getIdentity } from "@carneirofc/magi-web/lib/chat-api";
 
 export const dynamic = "force-dynamic";
 

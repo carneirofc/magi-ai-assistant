@@ -2,8 +2,8 @@
 
 import { EmptyState, PageHeader, StatusMessage } from "@carneirofc/ui";
 
-import { UserGrid } from "@/components/UserGrid";
-import { listUsers } from "@/lib/admin-api";
+import { UserGrid } from "@carneirofc/magi-web/components/UserGrid";
+import { listUsers } from "@carneirofc/magi-web/lib/admin-api";
 
 export const dynamic = "force-dynamic";
 

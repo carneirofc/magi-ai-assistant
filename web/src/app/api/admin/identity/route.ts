@@ -4,7 +4,7 @@
 
 import { NextResponse } from "next/server";
 
-import { getIdentity, updateIdentity } from "@/lib/admin-api";
+import { getIdentity, updateIdentity } from "@carneirofc/magi-web/lib/admin-api";
 
 export const dynamic = "force-dynamic";
 

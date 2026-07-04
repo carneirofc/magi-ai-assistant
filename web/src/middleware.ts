@@ -6,7 +6,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-import { session, verifySession } from "@/lib/session";
+import { session, verifySession } from "@carneirofc/magi-web/lib/session";
 
 const PUBLIC_PATHS = ["/login", "/api/auth/login"];
 

@@ -5,8 +5,8 @@
 
 import { PageHeader, StatusBadge, StatusMessage } from "@carneirofc/ui";
 
-import { ChatConsole } from "@/components/ChatConsole";
-import { getChatHealth } from "@/lib/chat-api";
+import { ChatConsole } from "@carneirofc/magi-web/components/ChatConsole";
+import { getChatHealth } from "@carneirofc/magi-web/lib/chat-api";
 
 export const dynamic = "force-dynamic";
 

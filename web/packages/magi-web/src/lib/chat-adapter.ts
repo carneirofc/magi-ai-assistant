@@ -18,7 +18,7 @@ import type {
   ToolCallMessagePart,
 } from "@assistant-ui/react";
 
-import type { InboundAttachment } from "@/lib/chat-api";
+import type { InboundAttachment } from "./chat-api";
 
 /** Where the console draws its session/user scoping from at send time. Read
  * lazily so edits to the user id (or a "New chat") take effect on the next run

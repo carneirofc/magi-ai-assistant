@@ -2,8 +2,8 @@
 
 import { PageHeader, StatusMessage } from "@carneirofc/ui";
 
-import { SubjectManager } from "@/components/SubjectManager";
-import { listSubjects } from "@/lib/admin-api";
+import { SubjectManager } from "@carneirofc/magi-web/components/SubjectManager";
+import { listSubjects } from "@carneirofc/magi-web/lib/admin-api";
 
 export const dynamic = "force-dynamic";
 

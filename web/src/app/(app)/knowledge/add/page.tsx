@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { PageHeader, StatusMessage } from "@carneirofc/ui";
 
-import { AddKnowledge } from "@/components/AddKnowledge";
-import { listSubjects, listTags } from "@/lib/admin-api";
+import { AddKnowledge } from "@carneirofc/magi-web/components/AddKnowledge";
+import { listSubjects, listTags } from "@carneirofc/magi-web/lib/admin-api";
 
 export const dynamic = "force-dynamic";
 

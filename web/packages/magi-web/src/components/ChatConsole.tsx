@@ -54,13 +54,13 @@ import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { OutlineButton, TextInput } from "@carneirofc/ui";
 
-import { createChatModelAdapter, type ChatUsage } from "@/lib/chat-adapter";
-import { createChatAttachmentAdapter } from "@/lib/chat-attachments";
-import { createDictationAdapter, dictationSupported } from "@/lib/chat-dictation";
-import { ContextDisplay, type ThreadTokenUsage } from "@/components/assistant-ui/context-display";
-import { CodeHeader, CodeSyntaxHighlighter } from "@/components/CodeBlock";
-import { MermaidDiagram } from "@/components/MermaidDiagram";
-import { clearSessionHistory, createSessionHistoryAdapter } from "@/lib/chat-history";
+import { createChatModelAdapter, type ChatUsage } from "../lib/chat-adapter";
+import { createChatAttachmentAdapter } from "../lib/chat-attachments";
+import { createDictationAdapter, dictationSupported } from "../lib/chat-dictation";
+import { ContextDisplay, type ThreadTokenUsage } from "./assistant-ui/context-display";
+import { CodeHeader, CodeSyntaxHighlighter } from "./CodeBlock";
+import { MermaidDiagram } from "./MermaidDiagram";
+import { clearSessionHistory, createSessionHistoryAdapter } from "../lib/chat-history";
 import {
   activeSession,
   createSession,
@@ -72,7 +72,7 @@ import {
   touchSession,
   type ChatSession,
   type SessionRegistry,
-} from "@/lib/chat-sessions";
+} from "../lib/chat-sessions";
 
 const USER_KEY = "magi.chat.userId";
 const RAIL_KEY = "magi.chat.railCollapsed";

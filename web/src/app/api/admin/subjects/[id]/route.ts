@@ -2,7 +2,7 @@
 
 import { NextResponse } from "next/server";
 
-import { deleteSubject, editSubject } from "@/lib/admin-api";
+import { deleteSubject, editSubject } from "@carneirofc/magi-web/lib/admin-api";
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

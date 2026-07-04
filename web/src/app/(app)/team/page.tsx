@@ -5,9 +5,9 @@
 
 import { PageHeader, StatusBadge, StatusMessage } from "@carneirofc/ui";
 
-import { TeamView } from "@/components/TeamView";
-import { getChatHealth, getIntrospection } from "@/lib/chat-api";
-import type { TeamSnapshot } from "@/lib/introspection-types";
+import { TeamView } from "@carneirofc/magi-web/components/TeamView";
+import { getChatHealth, getIntrospection } from "@carneirofc/magi-web/lib/chat-api";
+import type { TeamSnapshot } from "@carneirofc/magi-web/lib/introspection-types";
 
 export const dynamic = "force-dynamic";
 

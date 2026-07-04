@@ -1,0 +1,54 @@
+name: Publish @carneirofc/magi-web
+
+# Publishes the frontend library to GitHub Packages. Trigger by pushing a tag
+# that matches the package version, e.g.:
+#   git tag magi-web-v0.1.0 && git push origin magi-web-v0.1.0
+# (bump packages/magi-web/package.json "version" first — GitHub Packages rejects
+# republishing an existing version). Or run manually from the Actions tab.
+on:
+  push:
+    tags:
+      - "magi-web-v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  # Write to publish @carneirofc/magi-web; read to pull @carneirofc/ui (same
+  # owner) during install. GITHUB_TOKEN carries both for same-owner packages.
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # The npm workspace root is web/ (the reference app + packages/*).
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+          scope: "@carneirofc"
+
+      # Installs the whole workspace. The lockfile may lag the workspace split,
+      # so fall back to a fresh install; @carneirofc/ui is pulled from GitHub
+      # Packages using the same token.
+      - name: Install workspace
+        run: npm ci || npm install
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The library ships TypeScript source (no bundle step), so a clean
+      # typecheck is the build gate before publishing.
+      - name: Typecheck library
+        run: npm run typecheck -w @carneirofc/magi-web
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to GitHub Packages
+        run: npm publish -w @carneirofc/magi-web
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

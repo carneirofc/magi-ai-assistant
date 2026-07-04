@@ -22,7 +22,7 @@ import {
   TextInput,
 } from "@carneirofc/ui";
 
-import { encodeDocId } from "@/lib/encode";
+import { encodeDocId } from "../lib/encode";
 
 type Doc = {
   doc_id: string;

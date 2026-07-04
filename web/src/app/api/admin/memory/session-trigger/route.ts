@@ -4,7 +4,7 @@
 
 import { NextResponse } from "next/server";
 
-import { triggerSessionMemory, type MemoryTriggerAction } from "@/lib/admin-api";
+import { triggerSessionMemory, type MemoryTriggerAction } from "@carneirofc/magi-web/lib/admin-api";
 
 type Payload = {
   userId?: string;

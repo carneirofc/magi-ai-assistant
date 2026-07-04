@@ -12,10 +12,10 @@ import {
   SurfacePanel,
 } from "@carneirofc/ui";
 
-import { CopyId } from "@/components/CopyId";
-import { DocumentActions } from "@/components/DocumentActions";
-import { DocumentMeta } from "@/components/DocumentMeta";
-import { getKnowledgeDocument, listSubjects, listTags } from "@/lib/admin-api";
+import { CopyId } from "@carneirofc/magi-web/components/CopyId";
+import { DocumentActions } from "@carneirofc/magi-web/components/DocumentActions";
+import { DocumentMeta } from "@carneirofc/magi-web/components/DocumentMeta";
+import { getKnowledgeDocument, listSubjects, listTags } from "@carneirofc/magi-web/lib/admin-api";
 
 export const dynamic = "force-dynamic";
 

@@ -4,7 +4,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
-import { session, signSession } from "@/lib/session";
+import { session, signSession } from "@carneirofc/magi-web/lib/session";
 
 export async function POST(req: Request) {
   const form = await req.formData();

@@ -3,7 +3,7 @@
 
 import { NextResponse } from "next/server";
 
-import { setDocumentSubject } from "@/lib/admin-api";
+import { setDocumentSubject } from "@carneirofc/magi-web/lib/admin-api";
 
 export async function PUT(req: Request) {
   const body = (await req.json().catch(() => ({}))) as { docId?: string; subject?: string };

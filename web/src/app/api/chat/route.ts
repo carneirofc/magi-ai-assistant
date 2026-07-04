@@ -8,8 +8,8 @@
 
 import { NextResponse } from "next/server";
 
-import { openMessageStream, type InboundAttachment } from "@/lib/chat-api";
-import { offloadReplyMedia } from "@/lib/chat-media-offload";
+import { openMessageStream, type InboundAttachment } from "@carneirofc/magi-web/lib/chat-api";
+import { offloadReplyMedia } from "@carneirofc/magi-web/lib/chat-media-offload";
 
 // Node runtime + no caching: streaming must not be collapsed into a single body.
 export const runtime = "nodejs";

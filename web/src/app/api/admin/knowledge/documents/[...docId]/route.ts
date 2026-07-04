@@ -4,7 +4,7 @@
 
 import { NextResponse } from "next/server";
 
-import { deleteDocument, renameDocument } from "@/lib/admin-api";
+import { deleteDocument, renameDocument } from "@carneirofc/magi-web/lib/admin-api";
 
 function docIdOf(parts: string[]): string {
   return parts.map(decodeURIComponent).join("/");

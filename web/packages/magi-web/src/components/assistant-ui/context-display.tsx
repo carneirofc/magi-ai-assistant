@@ -23,8 +23,8 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
+} from "../ui/tooltip";
+import { cn } from "../../lib/utils";
 import {
   createContext,
   useContext,

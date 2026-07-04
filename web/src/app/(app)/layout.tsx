@@ -1,7 +1,7 @@
 // Layout for every authed dashboard page: wraps children in the sidebar shell.
 // The /login route lives outside this group so it stays chrome-free.
 
-import { AppShell } from "@/components/AppShell";
+import { AppShell } from "@carneirofc/magi-web/components/AppShell";
 
 export default function AppGroupLayout({
   children,
