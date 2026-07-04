@@ -17,7 +17,7 @@ the same treatment with a smaller gap.
 import asyncio
 import re
 import time
-from typing import Annotated, Any
+from typing import Annotated
 
 import httpx
 from agno.tools import tool

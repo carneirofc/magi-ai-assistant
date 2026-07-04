@@ -15,7 +15,7 @@ media never enters the model's context, so a vision-only backend never sees an
 
 import mimetypes
 from pathlib import Path
-from typing import Annotated, Any, Final, Optional
+from typing import Annotated, Final, Optional
 from urllib.parse import urlparse
 
 import httpx
