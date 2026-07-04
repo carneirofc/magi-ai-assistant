@@ -5,10 +5,18 @@ and owns the on-disk format for that shape. Nothing here knows about *kinds*
 (long-term vs episodes vs ...) or scope — that lives one layer up in the store's
 scope-bound bundle. Keeping the IO dumb is what makes memory auditable.
 
-  - `BulletLog`   — append-only `- <ts> :: <content>` markdown (logs)
+  - `BulletLog`   — append-only `- <content>` markdown bullets (logs)
   - `Blob`        — single header + body, whole-file replace (summaries)
   - `JsonWindow`  — a JSON list of turn dicts (live window + pending buffer)
   - `JsonFacts`   — a JSON list of id-addressable facts (the curated profile)
+
+The two markdown shapes (`BulletLog`, `Blob`) are Obsidian-native notes: each file
+opens in an Obsidian vault with a YAML frontmatter block (`type`, `tags`, `created`)
+that Obsidian surfaces as note properties. Frontmatter is metadata, not note content,
+so every read returns the body with the frontmatter stripped — it never reaches the
+model context or the operator viewer, only Obsidian. Bullets are untimestamped (the
+`created` stamp lives in frontmatter); the legacy `- <ts> :: <content>` line is still
+parsed on read so files written before this format round-trip unchanged.
 """
 
 import json
@@ -31,33 +39,66 @@ def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
-class BulletLog:
-    """Append-only markdown: a `# header` then `- <ts> :: <content>` bullets."""
+# --- Obsidian frontmatter ---------------------------------------------------
+_FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n", re.DOTALL)
 
-    def __init__(self, path: Path, header: str):
+
+def _frontmatter(note_type: str, tags: list[str]) -> str:
+    """A leading Obsidian YAML frontmatter block: type + tags + a created stamp.
+
+    Tags use inline (flow) `[a, b]` style deliberately: a block list would emit
+    `- tag` lines, which the bullet parsers below would mistake for content.
+    """
+    return (
+        "---\n"
+        f"type: {note_type}\n"
+        f"tags: [{', '.join(tags)}]\n"
+        f"created: {_now()}\n"
+        "---\n"
+    )
+
+
+def strip_frontmatter(text: str) -> str:
+    """Drop a leading Obsidian frontmatter block, if present (else return as-is).
+
+    Frontmatter is Obsidian metadata, not note content — the markdown adapters
+    return the body without it so it never reaches the model context or the
+    operator viewer. Files written before frontmatter existed pass through untouched.
+    """
+    return _FRONTMATTER_RE.sub("", text, count=1)
+
+
+class BulletLog:
+    """Append-only Obsidian note: frontmatter, a `# header`, then `- <content>` bullets."""
+
+    def __init__(self, path: Path, header: str, note_type: str = "note", tags: list[str] | None = None):
         self.path = Path(path)
         self.header = header
+        self.note_type = note_type
+        self.tags = tags or []
 
     def _ensure_header(self) -> None:
         if not self.path.exists():
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(f"# {self.header}\n\n", encoding="utf-8")
+            head = _frontmatter(self.note_type, self.tags) + f"# {self.header}\n\n"
+            self.path.write_text(head, encoding="utf-8")
 
     def append(self, content: str) -> None:
-        """Append one timestamped bullet."""
+        """Append one bullet (untimestamped — the frontmatter `created` stamps the file)."""
         self._ensure_header()
-        line = f"- {_now()} :: {content.strip()}\n"
+        line = f"- {content.strip()}\n"
         with self.path.open("a", encoding="utf-8") as fh:
             fh.write(line)
 
     def read(self) -> str:
-        """The whole file, stripped (empty string when absent)."""
+        """The note body — frontmatter stripped, whitespace-trimmed (empty when absent)."""
         if not self.path.exists():
             return ""
-        return self.path.read_text(encoding="utf-8").strip()
+        return strip_frontmatter(self.path.read_text(encoding="utf-8")).strip()
 
     def bodies(self) -> list[str]:
-        """The bullet bodies (content after `:: `), in order."""
+        """The bullet bodies, in order. Handles both the current `- <content>` form
+        and the legacy `- <ts> :: <content>` form (content after `:: `)."""
         out = []
         for ln in self.read().splitlines():
             if ln.startswith("- "):
@@ -88,31 +129,41 @@ class BulletLog:
         return "\n".join(header + ([""] if header else []) + kept).strip()
 
     def seed(self, scaffold: str) -> None:
-        """Write a one-time initial body (header + scaffold) if the file is absent."""
+        """Write a one-time initial body (frontmatter + scaffold) if the file is absent.
+
+        The scaffold carries its own `# header`, so frontmatter is the only prefix added.
+        """
         if self.path.exists():
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(scaffold, encoding="utf-8")
+        self.path.write_text(_frontmatter(self.note_type, self.tags) + scaffold, encoding="utf-8")
 
     def delete(self) -> None:
         self.path.unlink(missing_ok=True)
 
 
 class Blob:
-    """A single `# header` + body file, replaced whole. Used for summaries."""
+    """A single Obsidian note — frontmatter, a `# header`, and a body — replaced whole.
 
-    def __init__(self, path: Path, header: str):
+    Used for summaries. Like `BulletLog`, `read` returns the body with the frontmatter
+    stripped, so the metadata reaches Obsidian but not the model context.
+    """
+
+    def __init__(self, path: Path, header: str, note_type: str = "note", tags: list[str] | None = None):
         self.path = Path(path)
         self.header = header
+        self.note_type = note_type
+        self.tags = tags or []
 
     def read(self) -> str:
         if not self.path.exists():
             return ""
-        return self.path.read_text(encoding="utf-8").strip()
+        return strip_frontmatter(self.path.read_text(encoding="utf-8")).strip()
 
     def write(self, body: str) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(f"# {self.header}\n\n{body.strip()}\n", encoding="utf-8")
+        head = _frontmatter(self.note_type, self.tags)
+        self.path.write_text(f"{head}# {self.header}\n\n{body.strip()}\n", encoding="utf-8")
 
     def delete(self) -> None:
         self.path.unlink(missing_ok=True)

@@ -166,7 +166,11 @@ class LongTerm:
 
     def _whole(self, mem: ScopedMemory, facts: list[str]) -> str:
         if not facts:
-            return mem.long_term.read()  # nothing curated yet; show raw facts
+            # Nothing curated yet — render the raw remember-log as clean bullets.
+            # `recent(0)` returns every body, and `bodies()` drops the markdown
+            # header and any legacy per-line timestamp, so no note scaffolding leaks
+            # into the context.
+            return "\n".join(f"- {b}" for b in mem.long_term.recent(0))
         return "\n".join(f"- {f}" for f in facts)
 
     def render_for_curator(self, mem: ScopedMemory) -> str:
@@ -246,9 +250,12 @@ class Episodes:
         self.tail_limit = tail_limit
 
     def render(self, mem: ScopedMemory, query: Optional[str]) -> str:
+        # The non-semantic fallback renders the recent tail as clean bullets
+        # (`bodies()` strips the note header + any legacy timestamp) rather than the
+        # raw `tail()` file text, so only episode content reaches the context.
         return retrieved_or(
             self.retriever, mem.user_id, query, self.retriever_key, self.top_k,
-            lambda: mem.episodes.tail(self.tail_limit),
+            lambda: "\n".join(f"- {b}" for b in mem.episodes.recent(self.tail_limit)),
         )
 
     def record_episode(self, mem: ScopedMemory, summary: str) -> None:
