@@ -1,0 +1,74 @@
+name: CI
+
+# Quality + vulnerability gates for both libraries. Lint/typecheck/tests are
+# blocking; dependency audits are advisory here (they surface in the logs) — the
+# enforced vulnerability layer is CodeQL (codeql.yml) + Dependabot (dependabot.yml).
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: engine · lint · test · audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv + Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+
+      - name: Sync (with dev group)
+        run: uv sync --dev
+
+      - name: Ruff lint
+        run: uv run ruff check src tests
+
+      - name: Tests
+        run: uv run pytest -q
+
+      - name: Dependency vulnerability audit (advisory)
+        continue-on-error: true
+        run: |
+          uv export --no-emit-project --format requirements-txt -o requirements.txt
+          uvx pip-audit -r requirements.txt
+
+  web:
+    name: frontend · typecheck · audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+          scope: "@carneirofc"
+
+      # Pulls @carneirofc/ui from GitHub Packages (same owner) with the job token;
+      # links the @carneirofc/magi-web workspace. Lockfile may lag → plain install.
+      - name: Install workspace
+        run: npm ci || npm install
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Typecheck app + library
+        run: |
+          npm run typecheck
+          npm run typecheck -w @carneirofc/magi-web
+
+      - name: Dependency vulnerability audit (advisory)
+        continue-on-error: true
+        run: npm audit --audit-level=high

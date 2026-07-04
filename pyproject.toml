@@ -70,9 +70,19 @@ packages = ["src/magi"]
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
+    "ruff>=0.9.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-ra"
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+# Default rule set (pyflakes F + essential pycodestyle E). Kept conservative so
+# the lint gate is meaningful without demanding a repo-wide reformat — `ruff
+# format` is intentionally not enforced in CI yet. Tighten (e.g. add "I", "UP")
+# in a follow-up once the tree is clean under them.
