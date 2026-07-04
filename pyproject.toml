@@ -9,19 +9,19 @@ requires-python = ">=3.14"
 # `[tool.uv.sources]` editable path source at this working tree so engine edits
 # are live with no reinstall (see docs/split-plan.md).
 dependencies = [
-    "agno>=2.6.11",
-    "anthropic>=0.105.2",
+    "agno>=2.6.22",
+    "anthropic>=0.116.0",
     "ddgs>=9.14.4",
     "discord.py>=2.4.0",
     "docker>=7.1.0",
-    "fastapi>=0.136.3",
+    "fastapi>=0.139.0",
     "httpx>=0.28.0",
     "litellm>=1.87.0",
     "ollama>=0.6.2",
-    "openai>=2.40.0",
+    "openai>=2.44.0",
     "python-dotenv>=1.2.2",
-    "sqlalchemy>=2.0.50",
-    "uvicorn[standard]>=0.48.0",
+    "sqlalchemy>=2.0.51",
+    "uvicorn[standard]>=0.50.0",
 ]
 
 [project.optional-dependencies]
@@ -36,7 +36,7 @@ semantic = [
 # specialist touches it, so the base install stays lean. Enable with:
 # uv sync --extra mcp
 mcp = [
-    "mcp>=1.9.0",
+    "mcp>=1.28.1",
 ]
 # Object storage (s3_enabled=True). Optional: magi.core.storage.s3 lazy-imports boto3
 # and the factory no-ops when it's absent, so the base install stays lean. Backs
@@ -44,7 +44,7 @@ mcp = [
 # S3-compatible server — RustFS/MinIO locally, or AWS S3. Enable with:
 # uv sync --extra s3
 s3 = [
-    "boto3>=1.35.0",
+    "boto3>=1.43.40",
 ]
 # Desktop shell (`python main.py desktop`). Optional: magi.desktop is imported only
 # when that channel runs (main.py lazy-imports it), so the base install and the
@@ -68,7 +68,7 @@ packages = ["src/magi"]
 
 [dependency-groups]
 dev = [
-    "pytest>=8.3.0",
+    "pytest>=9.1.1",
     "pytest-asyncio>=0.24.0",
     "ruff>=0.9.0",
 ]
