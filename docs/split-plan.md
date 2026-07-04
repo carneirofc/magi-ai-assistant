@@ -3,7 +3,7 @@
 _Status: planning. Created 2026-06-28._
 
 How to split this project into a **public open-source engine** and a **private
-`alyssa` persona repo**, while developing both locally without publishing a
+persona repo**, while developing both locally without publishing a
 version on every change.
 
 ---
@@ -12,13 +12,13 @@ version on every change.
 
 | Question | Decision |
 |---|---|
-| What is the public repo? | **Runnable app + a neutral demo persona** — boots and chats out of the box; Alyssa overlays it privately. |
-| How does `alyssa` consume the engine? | **Versioned dependency** — but a local *editable path source* during active dev (see below); a published version only when shipping. |
-| Where does the memory/knowledge system live? | **Split: mechanism public, policy private** — store/index/curation plumbing is open; the curation prompt + what-to-remember policy stays in `alyssa`. |
+| What is the public repo? | **Runnable app + a neutral demo persona** — boots and chats out of the box; a private persona overlays it. |
+| How does the persona repo consume the engine? | **Versioned dependency** — but a local *editable path source* during active dev (see below); a published version only when shipping. |
+| Where does the memory/knowledge system live? | **Split: mechanism public, policy private** — store/index/curation plumbing is open; the curation prompt + what-to-remember policy stays in the persona repo. |
 
 Both repos are cloned locally and will stay that way for the foreseeable future:
 - Engine (this repo): `C:\Users\claud\__Code__\chatbot`
-- Persona:            `C:\Users\claud\__Code__\alyssa`
+- Persona:            `C:\Users\claud\__Code__\<persona>`
 
 ---
 
@@ -41,20 +41,20 @@ Two spots are hardcoded and block a clean split; fix them before publishing:
    dir wins, the bundled demo `prompts/` is the fallback.
 2. [`agent/members/__init__.py`](../agent/members/__init__.py) — `MEMBER_BUILDERS`
    is a hardcoded import list. Expose `register_member(builder)` (or entry-points)
-   so `alyssa` adds private specialists without editing the public tree.
+   so the persona repo adds private specialists without editing the public tree.
 
 ---
 
 ## Target topology
 
 ```
-<engine>  (public, pip-installable)          alyssa  (private)
+<engine>  (public, pip-installable)          <persona>  (private)
 ├── pyproject.toml   name="<engine>", v0.x   ├── pyproject.toml   deps: <engine>
 ├── core/                                     ├── prompts/team/
-│   ├── memory/     ← mechanism (public)     │   ├── SOUL.md          ← her
-│   ├── knowledge/  ← mechanism (public)     │   └── lead.md          ← her routing+rules
+│   ├── memory/     ← mechanism (public)     │   ├── SOUL.md          ← persona voice
+│   ├── knowledge/  ← mechanism (public)     │   └── lead.md          ← routing+rules
 │   ├── storage/                             ├── prompts/curation.md  ← what-to-remember policy
-│   ├── conversation.py                      ├── alyssa/              ← private members (own namespace)
+│   ├── conversation.py                      ├── <persona>/          ← private members (own namespace)
 │   └── prompts.py  ← overlay-aware          ├── main.py              ← configure() + secrets
 ├── agent/                                    └── .env
 │   ├── curator.py  ← CurateFn *mechanism*
@@ -66,14 +66,14 @@ Two spots are hardcoded and block a clean split; fix them before publishing:
 ```
 
 Namespace caveat: the engine's top-level imports are generic (`core`, `agent`,
-`channels`). In `alyssa`'s venv those names belong to the engine — **do not name
-any `alyssa` package `core`/`agent`/`channels`.** Give `alyssa` its own package.
+`channels`). In the persona repo's venv those names belong to the engine — **do not name
+any persona package `core`/`agent`/`channels`.** Give the persona repo its own package.
 
 ---
 
 ## Local development without publishing (do this first)
 
-Use a **uv editable path source**: `alyssa`'s venv links to the engine's working
+Use a **uv editable path source**: the persona repo's venv links to the engine's working
 tree, so every engine edit is live with no reinstall, no version bump, no publish.
 
 ### Step 1 — make the engine installable (one-time, `chatbot/pyproject.toml`)
@@ -92,11 +92,11 @@ packages = ["core", "agent", "channels"]
 
 (`prompts/` need not be packaged for local dev — see the bonus below.)
 
-### Step 2 — reference it from `alyssa/pyproject.toml`
+### Step 2 — reference it from `<persona>/pyproject.toml`
 
 ```toml
 [project]
-name = "alyssa"
+name = "<persona>"
 dependencies = [
     "chatbot",          # the engine, by its package name
 ]
@@ -108,7 +108,7 @@ chatbot = { path = "../chatbot", editable = true }
 ### Step 3 — wire it up
 
 ```powershell
-cd C:\Users\claud\__Code__\alyssa
+cd C:\Users\claud\__Code__\<persona>
 uv sync
 ```
 
@@ -117,12 +117,12 @@ resolve to the live engine. Editing engine code needs **no** re-sync; only
 changing the engine's *dependencies* or *package set* does.
 
 **Why no republish:** `editable = true` installs a `.pth` pointer to `../chatbot`,
-not a snapshot. The engine source tree *is* what alyssa imports.
+not a snapshot. The engine source tree *is* what the persona repo imports.
 
 **Bonus:** `PROMPTS_DIR` is computed from `__file__`, so an editable install
 resolves it to the real `chatbot/prompts/` automatically — demo prompts load live
 before the overlay seam exists. (That same `__file__` relativity is why the
-overlay fix is needed later, so alyssa can supply its *own* prompts.)
+overlay fix is needed later, so the persona repo can supply its *own* prompts.)
 
 ### When you eventually publish
 
@@ -148,7 +148,7 @@ Stays on the existing injection seam:
 - **Public (mechanism):** `JsonFacts`, the store/index, `apply_ops`, chunking, the
   `CurateFn` *type*, and the manager that applies results. Ships a generic default
   curation prompt.
-- **Private (policy):** `alyssa/prompts/curation.md` — the actual
+- **Private (policy):** `<persona>/prompts/curation.md` — the actual
   what-to-remember / tone policy — injected by `build_memory_curator()` reading the
   overlay. The planned memory-management system builds on the public mechanism;
   only the policy prompt is private.
@@ -159,7 +159,7 @@ Stays on the existing injection seam:
 
 1. Land the two seam fixes (prompt overlay + member registry). Safe; keep current
    persona working in place.
-2. Move `SOUL.md` + `lead.md` + private members out to `alyssa`; replace with a
+2. Move `SOUL.md` + `lead.md` + private members out to the persona repo; replace with a
    neutral demo persona in the engine.
 3. **Scan git _history_ (not just the tree) for secrets and `data/memory/`.** A
    leaked `.env`/token or per-user memory in an old commit survives the split.
@@ -176,8 +176,8 @@ Stays on the existing injection seam:
 - [ ] **Phase 1 — seam fixes.** Prompt overlay + open member registry. Engine still
       runs with the current persona; nothing user-visible changes.
 - [ ] **Phase 2 — persona extraction.** Move `SOUL.md`/`lead.md`/private members and
-      the curation policy prompt into `alyssa`; add a neutral demo persona to the
-      engine. Move the deployment `configure()`/`main.py` into `alyssa`.
+      the curation policy prompt into the persona repo; add a neutral demo persona to the
+      engine. Move the deployment `configure()`/`main.py` into the persona repo.
 - [ ] **Phase 3 — publish gate.** History secret/data scan, LICENSE, README trim,
       first tag. Decide history-rewrite vs. fresh-root.
 - [ ] **Phase 4 — flip dependency.** Optionally swap the editable path source for a
@@ -187,10 +187,10 @@ Stays on the existing injection seam:
 
 ## Open items
 
-- **Public engine name.** Still TBD (the private repo is `alyssa`). Candidates
+- **Public engine name.** Still TBD. Candidates
   discussed: `mneme`/`mnemo` (memory), `coterie`/`cadre` (team), `lodestar`. The
   engine's package/distribution name should be chosen before Phase 4 so the
-  `alyssa` pin is stable.
+  persona repo's pin is stable.
 - **Build backend.** `hatchling` assumed; `setuptools` works too
   (`[tool.setuptools] packages = ["core","agent","channels"]`).
 - **Prompts as wheel data.** Needed only for a non-editable (published) install;

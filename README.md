@@ -89,7 +89,7 @@ More views in the [admin UI README](web/README.md#screenshots).
 
 magi is meant to be *overlaid*, not forked. A persona repo depends on the engine
 and adds its own persona + specialists without editing the public tree — this is
-how the private `alyssa` overlay is built (full plan in
+how a private persona overlay is built (full plan in
 [docs/split-plan.md](docs/split-plan.md); the frontend twin in
 [docs/frontend-split.md](docs/frontend-split.md)).
 

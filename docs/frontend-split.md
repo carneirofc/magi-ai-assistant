@@ -3,8 +3,8 @@
 _Status: implemented (initial cut). Created 2026-07-04._
 
 The frontend twin of [`split-plan.md`](split-plan.md). That doc split the Python
-side into a public **`magi` engine** (mechanism) and a private **`alyssa`
-persona** (policy). This doc does the same one layer up for the web frontend:
+side into a public **`magi` engine** (mechanism) and a private **persona
+overlay** (policy). This doc does the same one layer up for the web frontend:
 extract a reusable **`@carneirofc/magi-web`** library from the admin app, so a
 persona overlay can build its own UI on the shared components + chat runtime.
 
@@ -14,7 +14,7 @@ persona overlay can build its own UI on the shared components + chat runtime.
 
 | Question | Decision |
 |---|---|
-| Who consumes the UI library? | **Your own persona overlays** (e.g. `alyssa`). Internal reuse — no public-API/semver rigor yet. |
+| Who consumes the UI library? | **Your own persona overlays.** Internal reuse — no public-API/semver rigor yet. |
 | One artifact or several? | **Separate artifacts** — `@carneirofc/magi-web` (npm) and `magi` (pip), versioned independently. Mirrors the Python split. |
 | Why is the npm scope `@carneirofc`, not `@magi`? | GitHub Packages binds the **scope to the repo owner**. "magi" lives in the package *name*, not the scope. A `@magi` scope would need a `magi` GitHub org — not worth it for internal reuse. |
 | Ship a bundle or source? | **Source** (`.ts`/`.tsx`), consumed via Next `transpilePackages`. The library mixes client components and server utilities (`fs`/`crypto`); a pre-bundle would flatten the RSC `"use client"` boundary. |
@@ -42,15 +42,15 @@ is ~composition + a theme; if it doesn't, you've shipped a copy-paste.
 ## Topology
 
 ```
-magi (this repo)                             alyssa (private overlay)
+magi (this repo)                             persona (private overlay)
 └── web/                                      └── web-overlay/            ← a thin Next app
     ├── package.json      workspace root          ├── package.json        deps: @carneirofc/magi-web
     │                     (magi-admin-web,             │                          @carneirofc/ui
     │                      the reference app)          ├── next.config.mjs transpilePackages: [...]
     ├── next.config.mjs   transpilePackages           ├── .npmrc          @carneirofc → GitHub Packages
-    ├── src/app/          ← example pages + BFF        ├── app/            ← her pages (compose lib components)
-    ├── src/middleware.ts                              │   ├── globals.css @source + her theme tokens
-    └── packages/                                      │   └── api/        ← her BFF (backend URLs, auth)
+    ├── src/app/          ← example pages + BFF        ├── app/            ← its pages (compose lib components)
+    ├── src/middleware.ts                              │   ├── globals.css @source + its theme tokens
+    └── packages/                                      │   └── api/        ← its BFF (backend URLs, auth)
         └── magi-web/     ← THE LIBRARY               └── ...
             ├── package.json   @carneirofc/magi-web
             ├── src/components/ ← presentational
@@ -118,7 +118,7 @@ export default nextConfig;
 @source "../node_modules/@carneirofc/ui/dist";
 
 /* personalize: override design tokens for this persona */
-:root { --brand: /* her accent */; }
+:root { --brand: /* the persona's accent */; }
 ```
 
 **4. Compose pages + honor the BFF route contract** — the overlay owns routes; it

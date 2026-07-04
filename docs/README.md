@@ -4,8 +4,8 @@
 that routes to a team of specialists — wrapped in deliberate memory, an optional
 knowledge corpus, a durable byte archive, and a model-agnostic backend. The same
 brain is served over many channels (a Discord bot, an HTTP API, an
-OpenAI-compatible shim). It is built to be the engine a private *persona* (e.g.
-`alyssa`) installs and extends without forking.
+OpenAI-compatible shim). It is built to be the engine a private *persona*
+overlay installs and extends without forking.
 
 > The name nods to *Neon Genesis Evangelion*'s MAGI supercomputer — three linked
 > units reasoning as one. Here: one shared brain backed by a roster of specialists,

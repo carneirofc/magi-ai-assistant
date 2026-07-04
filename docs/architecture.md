@@ -16,7 +16,7 @@ it is the engine that several bots share:
   backend; Claude (via a LiteLLM proxy) and Ollama are drop-in alternatives — the
   team code never names a provider.
 - **Engine + persona.** The public engine boots and chats with a neutral demo
-  persona. A private persona repo (e.g. `alyssa`) overlays prompts and registers
+  persona. A private persona overlay repo overlays prompts and registers
   its own specialists *without editing the engine tree*. See
   [split-plan.md](split-plan.md).
 

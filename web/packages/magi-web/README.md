@@ -8,7 +8,7 @@ stays in the consuming app.
 
 Published to **GitHub Packages** under `@carneirofc` (the scope is bound to the
 repo owner; "magi" lives in the package name). Consumed by the in-repo
-`magi-admin-web` reference app and by private persona overlays (e.g. `alyssa`).
+`magi-admin-web` reference app and by private persona overlays.
 
 ---
 
