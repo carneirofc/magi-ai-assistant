@@ -45,6 +45,11 @@ jobs:
   web:
     name: frontend · typecheck · audit
     runs-on: ubuntu-latest
+    # Overrides the workflow default so the job token can read @carneirofc/ui
+    # from GitHub Packages (same owner) during install.
+    permissions:
+      contents: read
+      packages: read
     defaults:
       run:
         working-directory: web
