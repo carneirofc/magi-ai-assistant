@@ -7,7 +7,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
-type NavItem = { href: string; label: string; icon: ReactNode; match: (p: string) => boolean };
+export type NavItem = { href: string; label: string; icon: ReactNode; match: (p: string) => boolean };
 
 const stroke = {
   fill: "none",
@@ -25,7 +25,7 @@ function Icon({ children }: { children: ReactNode }) {
   );
 }
 
-const NAV: NavItem[] = [
+export const DEFAULT_NAV: NavItem[] = [
   {
     href: "/",
     label: "Dashboard",
@@ -132,22 +132,41 @@ const NAV: NavItem[] = [
   },
 ];
 
-type SidebarProps = { collapsed?: boolean; onToggle?: () => void };
+type SidebarProps = {
+  collapsed?: boolean;
+  onToggle?: () => void;
+  /** Brand wordmark shown next to the logo (default "MAGI"). */
+  brand?: string;
+  /** Small caps tagline under the wordmark (default "Admin"). */
+  tagline?: string;
+  /** Single-glyph logo mark (default the brand's first letter). */
+  logo?: string;
+  /** Nav items (default the reference app's routes — see DEFAULT_NAV). */
+  nav?: NavItem[];
+};
 
-export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
+export function Sidebar({
+  collapsed = false,
+  onToggle,
+  brand = "MAGI",
+  tagline = "Admin",
+  logo,
+  nav = DEFAULT_NAV,
+}: SidebarProps) {
   const pathname = usePathname() ?? "/";
+  const mark = logo ?? brand.charAt(0) ?? "M";
 
   return (
     <aside className="app-rail">
       <div className="rail-head">
-        <Link href="/" className="rail-brand no-underline" title="MAGI Admin">
+        <Link href="/" className="rail-brand no-underline" title={`${brand} ${tagline}`}>
           <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[color:var(--ui-bg-active)] text-[color:var(--ui-ink-highlight)] text-ui-sm font-bold">
-            M
+            {mark}
           </span>
           <span className="rail-label flex flex-col leading-tight">
-            <strong className="cyber-title text-ui-md">MAGI</strong>
+            <strong className="cyber-title text-ui-md">{brand}</strong>
             <span className="text-ui-2xs uppercase tracking-[0.18em] text-[color:var(--ui-ink-subtle)]">
-              Admin
+              {tagline}
             </span>
           </span>
         </Link>
@@ -171,7 +190,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
       </div>
 
       <nav className="flex flex-1 flex-col gap-1">
-        {NAV.map((item) => (
+        {nav.map((item) => (
           <Link
             key={item.href}
             href={item.href}

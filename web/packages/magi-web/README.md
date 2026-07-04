@@ -54,22 +54,45 @@ tokens. In `globals.css`:
 
 ## Use
 
-Import by subpath (mirrors the reference app's old `@/components` / `@/lib`):
+Import by subpath. The library ships the whole runnable surface — components, the
+BFF route handlers, the page views, and the auth middleware — so a consuming app
+is a thin `app/` tree that **mounts** them and supplies env + theme.
 
-```tsx
-import { ChatConsole } from "@carneirofc/magi-web/components/ChatConsole";
-import { AppShell } from "@carneirofc/magi-web/components/AppShell";
-import { createSessionHistoryAdapter } from "@carneirofc/magi-web/lib/chat-history";
+```ts
+// app/api/chat/route.ts — mount the BFF handler (logic in the lib)
+export { POST } from "@carneirofc/magi-web/routes/chat";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 ```
 
-`ChatConsole` takes no props — it streams against **fixed same-origin BFF paths**
-(`/api/chat`, `/api/chat/blobs/*`). That's the integration contract: your app
-implements those routes, and that's where the engine URL + auth token live. The
-library never sees a backend URL. Copy the reference app's `src/app/api/chat/`
-handlers as your starting point.
+```tsx
+// app/(app)/chat/page.tsx — mount the page view
+export { default } from "@carneirofc/magi-web/pages/chat";
+export const dynamic = "force-dynamic";
+```
+
+```ts
+// middleware.ts — mount the auth gate, own the matcher
+export { middleware } from "@carneirofc/magi-web/middleware";
+export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"] };
+```
+
+**Why the config literals stay in your file:** Next reads route-segment config
+(`dynamic`/`runtime`) and the middleware `matcher` *statically* from the file at
+the route path — it does not follow them through a package re-export. So the
+handler/page/middleware **logic** comes from the library; the config **literals**
+are declared in your thin file.
+
+**No backend URL crosses the boundary.** The lib clients read `ADMIN_API_URL` /
+`CHAT_API_URL` + `*_AUTH_TOKEN` (and `ADMIN_PASSWORD` / `SESSION_SECRET`) from
+**your** `.env`. The library hardcodes nothing.
 
 - `components/*` — `ChatConsole`, `AppShell`, `Sidebar`, `MemoryTabs`,
-  `KnowledgeList`, `TeamView`, `CodeBlock`, `MermaidDiagram`, …
+  `KnowledgeList`, `TeamView`, `LoginView`, `DashboardError`, `CodeBlock`, …
+- `routes/*` — the BFF proxy handlers (`chat`, `admin/*`, `auth/*`, `identity/*`).
+- `pages/*` — server page views (`dashboard`, `chat`, `team`, `memory`,
+  `knowledge`, …); each also exports a copy-driven `…View` for reskinning.
+- `middleware` — the session-cookie auth gate.
 - `lib/*` — chat runtime (assistant-ui adapters, SSE, history/session/attachment/
   dictation), the typed admin API client (`api-types.ts`), shared utils.
 
@@ -80,24 +103,27 @@ You reskin and compose; you don't fork. The seams:
 | Want to change… | Where |
 |---|---|
 | Colors / fonts / accent | override `@carneirofc/ui` theme tokens in your `globals.css` |
-| Which pages exist | your own `app/` routes — import only the components you want |
-| Backend URL / auth / secrets | your own `app/api/*` BFF route handlers |
+| Brand wordmark / logo / nav | `<AppShell brand tagline logo nav>` props (default to the reference values) |
+| Page copy (titles/descriptions) | the `…View` `copy` prop, or write a bespoke `app/` page |
+| Which routes/pages exist | your thin `app/` tree — mount only what you want |
+| Backend URL / auth / secrets | your `.env` (the lib clients read it) |
 | A bespoke widget | a component in your app, composed alongside imported ones |
 | The engine data contract | pin a `@carneirofc/magi-web` version built against that engine |
 
 ```tsx
-// your app/dashboard/page.tsx — compose library + your own components
-import { AppShell } from "@carneirofc/magi-web/components/AppShell";
-import { StatCard } from "@carneirofc/magi-web/components/StatCard";
-import { MyCustomPanel } from "@/components/MyCustomPanel";
+// your app/(app)/chat/page.tsx — reskin the header without forking
+import { ChatView } from "@carneirofc/magi-web/pages/chat";
+export const dynamic = "force-dynamic";
+export default function ChatPage() {
+  return <ChatView copy={{ title: "Talk to Ada", subtitle: "ada // chat" }} />;
+}
+```
 
-export default function Dashboard() {
-  return (
-    <AppShell>
-      <StatCard label="Users" value={42} />
-      <MyCustomPanel />
-    </AppShell>
-  );
+```tsx
+// your app/(app)/layout.tsx — reskin the shell
+import { AppShell } from "@carneirofc/magi-web/components/AppShell";
+export default function Layout({ children }: { children: React.ReactNode }) {
+  return <AppShell brand="Ada" tagline="Console">{children}</AppShell>;
 }
 ```
 

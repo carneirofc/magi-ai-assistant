@@ -9,12 +9,24 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
-import { Sidebar } from "./Sidebar";
+import { Sidebar, type NavItem } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
 const STORAGE_KEY = "magi:rail-collapsed";
 
-export function AppShell({ children }: { children: ReactNode }) {
+type AppShellProps = {
+  children: ReactNode;
+  /** Brand wordmark for the rail (default "MAGI"). */
+  brand?: string;
+  /** Small caps tagline under the wordmark (default "Admin"). */
+  tagline?: string;
+  /** Single-glyph logo mark (default the brand's first letter). */
+  logo?: string;
+  /** Nav items (default the reference app's routes). */
+  nav?: NavItem[];
+};
+
+export function AppShell({ children, brand, tagline, logo, nav }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   // Restore the last choice on mount. Reading localStorage during render would
@@ -33,7 +45,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="app-shell" data-collapsed={collapsed}>
-      <Sidebar collapsed={collapsed} onToggle={toggle} />
+      <Sidebar
+        collapsed={collapsed}
+        onToggle={toggle}
+        brand={brand}
+        tagline={tagline}
+        logo={logo}
+        nav={nav}
+      />
       <div className="app-content">
         <div className="app-content-inner">
           <Topbar />

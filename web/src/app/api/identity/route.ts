@@ -1,18 +1,7 @@
 // BFF: the bot's presented identity (name/description/avatar flag), read from the
-// chat-api. The chat console renders this as the assistant's face + name. The
-// bearer token stays server-side (chat-api.ts). Management goes through
-// /api/admin/identity, not here.
+// chat-api. Handler logic lives in the library; this file mounts it at
+// /api/identity.
 
-import { NextResponse } from "next/server";
-
-import { getIdentity } from "@carneirofc/magi-web/lib/chat-api";
+export { GET } from "@carneirofc/magi-web/routes/identity";
 
 export const dynamic = "force-dynamic";
-
-export async function GET() {
-  const identity = await getIdentity();
-  if (!identity) {
-    return NextResponse.json({ error: "chat-api unreachable" }, { status: 502 });
-  }
-  return NextResponse.json(identity, { headers: { "Cache-Control": "no-store" } });
-}

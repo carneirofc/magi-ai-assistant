@@ -1,27 +1,16 @@
 import type { Metadata } from "next";
 import { ThemeToggleButton } from "@carneirofc/ui";
+import { themeInitScript } from "@carneirofc/magi-web/lib/theme";
 import "@carneirofc/ui/styles.css";
 import "./globals.css";
 
+// Branding + document metadata are policy — they stay here in the app, not the
+// library. The theme-flash-prevention script is mechanism, imported from the
+// library (see @carneirofc/magi-web/lib/theme).
 export const metadata: Metadata = {
   title: "MAGI Admin",
   description: "Operator dashboard for MAGI memory & knowledge",
 };
-
-// Resolve + apply the theme before first paint so there's no light→dark flash.
-// Mirrors @carneirofc/ui's ThemeToggleButton: it reads/writes the "ui-theme"
-// localStorage key and toggles data-theme on <html>.
-const THEME_INIT = `
-try {
-  var t = localStorage.getItem("ui-theme");
-  if (t !== "light" && t !== "dark") {
-    t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  }
-  document.documentElement.setAttribute("data-theme", t);
-} catch (e) {
-  document.documentElement.setAttribute("data-theme", "light");
-}
-`;
 
 export default function RootLayout({
   children,
@@ -31,7 +20,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body>
         {children}

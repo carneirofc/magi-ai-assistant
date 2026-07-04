@@ -185,9 +185,9 @@ export function IdentityEditor({ initial }: { initial: AdminIdentity }) {
           >
             {avatarSrc ? (
               // eslint-disable-next-line @next/next/no-img-element -- BFF-served, dynamic; no loader needed
-              <img src={avatarSrc} alt="Bot avatar" className="h-full w-full object-cover" />
+              <img src={avatarSrc} alt="Profile picture" className="h-full w-full object-cover" />
             ) : (
-              <span aria-hidden>🧠</span>
+              <span aria-hidden>{(displayName.trim()[0] || "M").toUpperCase()}</span>
             )}
             <div
               className={`pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/55 text-white transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 ${

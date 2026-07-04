@@ -1,5 +1,5 @@
 // Server-only client for the Python chat-api (channels/api.py). Unlike admin-api.ts
-// this reads a DIFFERENT upstream — the running brain — to introspect its live
+// this reads a DIFFERENT upstream — the running assistant — to introspect its live
 // team/tools/MCP roster (read-only). The bearer token (API_AUTH_TOKEN, matching
 // the chat-api's) lives here on the server and NEVER reaches the browser; import
 // this only from server components or route handlers.

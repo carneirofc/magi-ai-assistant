@@ -1,14 +1,4 @@
-// BFF proxy: create a subject. Session already verified by middleware.
+// BFF proxy: create a subject. Handler logic lives in the library; this file mounts
+// it at /api/admin/subjects.
 
-import { NextResponse } from "next/server";
-
-import { createSubject } from "@carneirofc/magi-web/lib/admin-api";
-
-export async function POST(req: Request) {
-  const body = (await req.json().catch(() => ({}))) as { name?: string; description?: string };
-  const res = await createSubject(body.name ?? "", body.description ?? "");
-  return new NextResponse(await res.text(), {
-    status: res.status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
+export { POST } from "@carneirofc/magi-web/routes/admin/subjects";

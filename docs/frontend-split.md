@@ -1,6 +1,7 @@
 # Frontend split & distribution plan
 
-_Status: implemented (initial cut). Created 2026-07-04._
+_Status: implemented. Created 2026-07-04; extended to ship routes + pages +
+middleware from the library (app is now thin re-exports)._
 
 The frontend twin of [`split-plan.md`](split-plan.md). That doc split the Python
 side into a public **`magi` engine** (mechanism) and a private **persona
@@ -27,15 +28,27 @@ Same discipline that keeps `core/` persona-neutral on the Python side:
 
 | Library (`@carneirofc/magi-web`) — mechanism | App / overlay — policy |
 |---|---|
-| Presentational components (`components/*`) | Which pages/routes exist |
-| Chat runtime (assistant-ui adapters, SSE, history/session/attachment/dictation) | Branding, theme tokens, copy |
-| Typed admin API client (`lib/api-types.ts`, generated from the engine's OpenAPI) | Backend URLs, auth, cookies |
-| Shared utils | The **BFF route handlers** (`app/api/*`) — env config + secrets live here |
+| Presentational components (`components/*`) | Which routes/pages to mount (the thin `app/` tree) |
+| Chat runtime (assistant-ui adapters, SSE, history/session/attachment/dictation) | Branding, theme tokens, page copy (overridable props) |
+| Typed admin API client (`lib/api-types.ts`, generated from the engine's OpenAPI) | Backend URLs, auth, secrets — read from **env** by the lib clients |
+| Shared utils | Route-segment config literals (`dynamic`/`runtime`) + middleware `matcher` |
+| **BFF route handlers** (`routes/*`) — the same-origin proxy logic | The `.env` that feeds them (`ADMIN_API_URL`, `*_AUTH_TOKEN`, `ADMIN_PASSWORD`, `SESSION_SECRET`, …) |
+| **Auth middleware** (`middleware`) + **page views** (`pages/*`) | Root `layout.tsx`, `globals.css`, `next.config.mjs` |
 
 **The rule that makes it a library, not a fork:** the library owns *zero*
-policy — no hardcoded backend URL, no branding strings, no auth. All injected by
-the consumer via props/config and the server-side BFF. If that holds, an overlay
-is ~composition + a theme; if it doesn't, you've shipped a copy-paste.
+policy — no hardcoded backend URL, no branding strings, no auth. It reads config
+from **env** (never `getenv` of anything but secrets/URLs) and takes every copy/
+brand string as an **overridable prop defaulted to the reference text**. So the
+routes and page views ship in the library as *mechanism*; the app supplies the
+env, the theme, and the choice of which of them to mount. If that holds, an
+overlay is ~composition + a theme; if it doesn't, you've shipped a copy-paste.
+
+> **History:** the initial cut kept the BFF routes, pages, and copy on the app
+> side. They were then extracted into the library — they held no policy (secrets
+> live in the lib clients, read from env; copy is generic and now prop-overridable),
+> so an overlay no longer copy-pastes ~1400 lines of plumbing. The app's `app/`
+> tree is now thin **re-export files** that mount library `routes/*` + `pages/*`
+> and declare the route-segment config Next reads statically.
 
 ---
 
@@ -48,13 +61,18 @@ magi (this repo)                             persona (private overlay)
     │                     (magi-admin-web,             │                          @carneirofc/ui
     │                      the reference app)          ├── next.config.mjs transpilePackages: [...]
     ├── next.config.mjs   transpilePackages           ├── .npmrc          @carneirofc → GitHub Packages
-    ├── src/app/          ← example pages + BFF        ├── app/            ← its pages (compose lib components)
-    ├── src/middleware.ts                              │   ├── globals.css @source + its theme tokens
-    └── packages/                                      │   └── api/        ← its BFF (backend URLs, auth)
-        └── magi-web/     ← THE LIBRARY               └── ...
+    ├── src/app/          ← thin re-exports that       ├── app/            ← mounts lib routes + pages
+    │                       mount lib routes/pages      │   ├── globals.css @source + its theme tokens
+    ├── src/middleware.ts ← re-exports lib mw + matcher │   └── .env         backend URLs, auth (policy)
+    ├── .env              ← backend URLs, auth (policy) └── ...
+    └── packages/
+        └── magi-web/     ← THE LIBRARY
             ├── package.json   @carneirofc/magi-web
             ├── src/components/ ← presentational
-            ├── src/lib/        ← chat runtime + API client
+            ├── src/routes/     ← BFF handler logic (proxy the engine)
+            ├── src/pages/      ← page views (copy via props)
+            ├── src/middleware.ts ← auth gate
+            ├── src/lib/        ← chat runtime + API client (read env)
             └── scripts/gen-api.mjs
 ```
 
@@ -121,36 +139,48 @@ export default nextConfig;
 :root { --brand: /* the persona's accent */; }
 ```
 
-**4. Compose pages + honor the BFF route contract** — the overlay owns routes; it
-imports mechanism from the lib and supplies policy through its own BFF handlers.
-The chat runtime calls **fixed same-origin paths** (`/api/chat`,
-`/api/chat/blobs/*`) rather than taking a backend URL — so the seam is a *route
-contract*: the overlay implements those routes, and that's where the engine URL +
-auth token live. The library never sees a backend URL.
+**4. Mount routes + pages; set env** — the overlay owns *which* routes/pages exist
+and the `.env` behind them; the library ships the handler logic and views. Each
+`app/` file is a thin re-export. Next reads route-segment config (`dynamic`/
+`runtime`) and the middleware `matcher` statically from the file at the route
+path, so those literals stay in the overlay's files while the logic comes from the
+library.
+
+```ts
+// web-overlay/app/api/chat/route.ts — mount the library's BFF handler
+export { POST } from "@carneirofc/magi-web/routes/chat";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+// The engine URL + auth token come from THIS app's .env (CHAT_API_URL,
+// API_AUTH_TOKEN) — the lib client reads them; the library never hardcodes a URL.
+```
 
 ```tsx
-// web-overlay/app/chat/page.tsx
-import { ChatConsole } from "@carneirofc/magi-web/components/ChatConsole";
-
-export default function ChatPage() {
-  // No props — the console streams against /api/chat, a BFF route THIS app owns.
-  return <ChatConsole />;
-}
+// web-overlay/app/chat/page.tsx — mount the library's page view
+export { default } from "@carneirofc/magi-web/pages/chat";
+export const dynamic = "force-dynamic";
+// To reskin the header, import { ChatView } and render <ChatView copy={{ title: … }} />.
 ```
 
 ```ts
-// web-overlay/app/api/chat/route.ts — the overlay's BFF (policy)
-// Proxy to the engine; inject CHAT_API_URL + auth here. Copy the reference
-// app's src/app/api/chat/route.ts as the starting point.
+// web-overlay/middleware.ts — mount the auth gate, own the matcher
+export { middleware } from "@carneirofc/magi-web/middleware";
+export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"] };
 ```
+
+An overlay that wants a bespoke page composes the library's `…View` (or raw
+`components/*`) alongside its own components, and reskins the shell via
+`<AppShell brand="…" nav={…} />`.
 
 ### Personalization points, at a glance
 
 | Want to change… | Where |
 |---|---|
 | Colors / fonts / accent | `globals.css` theme tokens (override `@carneirofc/ui`) |
-| Which pages exist | the overlay's `app/` routes — import only the components you want |
-| Backend URL / auth / secrets | the overlay's `app/api/*` BFF route handlers |
+| Brand wordmark / logo / nav | `<AppShell brand tagline logo nav>` props (default to the reference values) |
+| Page copy (titles/descriptions) | the `…View` `copy` prop, or write a bespoke `app/` page |
+| Which routes/pages exist | the overlay's thin `app/` tree — mount only what you want |
+| Backend URL / auth / secrets | the overlay's `.env` (the lib clients read it); never hardcoded |
 | Add a bespoke widget | a component in the overlay, alongside imported ones |
 | The engine contract (types) | pin a `@carneirofc/magi-web` version built against that engine |
 

@@ -2,7 +2,7 @@
 // conversation's memory server-side keyed by session id, but has no endpoint to
 // enumerate sessions — so the *list* of conversations lives here, in localStorage,
 // per browser. Each entry is just an id + a derived title + timestamps; switching
-// sessions re-keys the runtime (a fresh, empty transcript) while the brain still
+// sessions re-keys the runtime (a fresh, empty transcript) while the assistant still
 // remembers that id's history on its side.
 //
 // All helpers are pure: they take the current registry and return a new one. The

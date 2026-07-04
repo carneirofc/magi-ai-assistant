@@ -1,5 +1,5 @@
 // assistant-ui ChatModelAdapter that drives the chat console off our BFF SSE route
-// (/api/chat → chat-api /v1/sessions/{id}/messages/stream). The brain keeps its
+// (/api/chat → chat-api /v1/sessions/{id}/messages/stream). The assistant keeps its
 // own per-(user, session) context server-side, so each run transmits only the
 // newest user turn (its text + attachments); the local runtime keeps the visible
 // transcript.
@@ -72,7 +72,7 @@ function parseFrame(frame: string): SseFrame | null {
   }
 }
 
-/** The most recent user message — the only turn we forward, since the brain
+/** The most recent user message — the only turn we forward, since the assistant
  * reconstructs the rest of the conversation from its session memory. */
 function latestUserMessage(messages: readonly ThreadMessage[]): ThreadMessage | null {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -104,7 +104,7 @@ function quotedText(message: ThreadMessage | null): string {
 }
 
 /** Fold a quoted span into the outgoing text as a Markdown blockquote, so the
- * brain sees what the user is citing ahead of their message. */
+ * assistant sees what the user is citing ahead of their message. */
 function withQuote(text: string, quote: string): string {
   if (!quote) return text;
   const block = quote

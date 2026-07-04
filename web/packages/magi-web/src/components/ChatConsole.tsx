@@ -1,6 +1,6 @@
 "use client";
 
-// The chat console: an operator playground for talking to the running brain over
+// The chat console: an operator playground for talking to the running assistant over
 // streaming SSE. Built on assistant-ui's LocalRuntime (state, streaming, auto-
 // scroll, cancel come for free) but rendered with unstyled primitives themed via
 // @carneirofc/ui tokens so it matches the rest of the dashboard.
@@ -17,7 +17,7 @@
 // The `user_id` scopes durable memory (chat "as" any user to test their memory).
 // Conversations are tracked client-side (chat-sessions.ts): the session rail lists
 // them, switching re-keys ChatThread → a fresh runtime with an empty transcript,
-// while the brain still remembers that session id server-side. The bearer token
+// while the assistant still remembers that session id server-side. The bearer token
 // stays server-side; see api/chat/route.ts.
 
 import {
@@ -412,7 +412,7 @@ function ChatThread({
      <UserIdContext.Provider value={userId}>
       <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
         {/* Select text in any message to pop a "Quote" action; it captures the
-            span into the composer, cited back to the brain on the next send. */}
+            span into the composer, cited back to the assistant on the next send. */}
         <SelectionToolbarPrimitive.Root className="z-50 flex items-center overflow-hidden rounded-lg border border-ui bg-[color:var(--ui-bg)] shadow-lg">
           <SelectionToolbarPrimitive.Quote className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-ui-2xs font-medium text-[color:var(--ui-ink)] hover:bg-[color:var(--ui-bg-soft)]">
             <QuoteIcon />
@@ -466,7 +466,7 @@ function ChatThread({
 // A round sender chip beside each message. The user's shows the first letter of
 // the active user id (so "chatting as" someone is visible at a glance); the
 // assistant's is the configured profile picture (Identity page), falling back to
-// a brain glyph in accent colors when none is set.
+// the assistant's initial in accent colors when none is set.
 function Avatar({ kind }: { kind: "user" | "assistant" }) {
   const userId = useContext(UserIdContext);
   const identity = useContext(IdentityContext);
@@ -496,7 +496,7 @@ function Avatar({ kind }: { kind: "user" | "assistant" }) {
       title={isUser ? `You — ${userId}` : assistantName}
       aria-hidden
     >
-      {isUser ? initial : "🧠"}
+      {isUser ? initial : (assistantName.trim()[0] || "M").toUpperCase()}
     </div>
   );
 }
