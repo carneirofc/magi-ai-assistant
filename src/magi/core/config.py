@@ -304,6 +304,55 @@ class Config:
     # production setup either way; this doesn't change auth or the bind defaults.
     admin_enabled: bool = False
 
+    # --- Desktop shell (magi/desktop). A frameless, widget-style native window
+    # (PySide6 + QtWebEngine) that renders the SAME Next.js frontend as the browser
+    # (web/), served by a Node child process THIS process owns and tears down — one
+    # executable, no separately-run web server. The frontend is unchanged; a
+    # JS<->Python bridge (QWebChannel) is injected for native actions. Needs the
+    # optional `desktop` extra (uv sync --extra desktop). See docs/desktop.md.
+    # Loopback-only by construction: the child binds 127.0.0.1 on an ephemeral port.
+    #
+    # Serve the chat+admin API in-process (loopback) so every frontend page —
+    # dashboard, memory, knowledge, subjects, team, chat — is live from this one
+    # command. It's the `admin_enabled` single-app shape (one FastAPI app serving
+    # /v1/* AND /admin/v1/*); the shell points the BFF at it. Turn OFF to reuse a
+    # backend already running elsewhere (set CHAT_API_URL / ADMIN_API_URL for the
+    # frontend instead). See magi/desktop/backend.py.
+    desktop_serve_backend: bool = True
+    # Secrets the web frontend's BFF needs, forwarded by the shell to the Node child
+    # so it never depends on a bundled `web/.env` (absent in a frozen build):
+    #   ADMIN_PASSWORD  — the single operator password its login checks.
+    #   SESSION_SECRET  — HMAC key signing the session cookie; REQUIRED by the
+    #                     frontend (it throws without it). The shell auto-generates
+    #                     a stable one (persisted in QSettings) when this is unset,
+    #                     so the desktop app works out of the box.
+    # (The API_AUTH_TOKEN / ADMIN_AUTH_TOKEN the BFF presents upstream are the same
+    #  api_auth_token / admin_auth_token above.)
+    admin_password: str | None = _secret("ADMIN_PASSWORD")
+    session_secret: str | None = _secret("SESSION_SECRET")
+    # `desktop_web_dir` is the built web/ project (contains .next/); None =
+    # auto-resolve (repo web/ from source, or <_MEIPASS>/web when frozen).
+    desktop_web_dir: str | None = None
+    # The Node executable used to run the frontend server. "node" (on PATH) by
+    # default; set an absolute path for a frozen build shipping its own runtime.
+    desktop_node_command: str = "node"
+    # Route the window opens on. The frontend's auth gate (web/ middleware) bounces
+    # an unauthenticated launch to /login first; the signed session cookie then
+    # persists in the window's own profile so later launches land here directly.
+    desktop_start_path: str = "/chat"
+    # Initial window size (px); restored per-launch from QSettings after the first run.
+    desktop_window_width: int = 420
+    desktop_window_height: int = 680
+    # Translucent frame around the web content: a rounded, semi-transparent panel
+    # with this inset (px) and corner radius, doubling as the window's drag border.
+    desktop_window_margin: int = 12
+    desktop_window_radius: int = 16
+    # Frameless + translucent chrome. Off (a normal titled window) is handy for
+    # debugging the web content; the bridge and server behave the same either way.
+    desktop_frameless: bool = True
+    # How long to wait (seconds) for the Node child to start serving before giving up.
+    desktop_server_ready_timeout: float = 30.0
+
     def log_settings(self) -> None:
         """Dump the effective config to the console (secrets masked).
 
@@ -311,7 +360,7 @@ class Config:
         backend urls, model ids, context windows, paths — in one place.
         """
         # Secrets that must never hit the log verbatim.
-        masked = {"litellm_api_key", "llamacpp_api_key", "openai_api_key", "DISCORD_BOT_TOKEN", "qdrant_api_key", "api_auth_token", "admin_auth_token", "seanime_token", "s3_access_key_id", "s3_secret_access_key"}
+        masked = {"litellm_api_key", "llamacpp_api_key", "openai_api_key", "DISCORD_BOT_TOKEN", "qdrant_api_key", "api_auth_token", "admin_auth_token", "seanime_token", "s3_access_key_id", "s3_secret_access_key", "admin_password", "session_secret"}
         # Long prose: log the length, not the body.
         prose = {"system_prompt", "persona_seed"}
 

@@ -46,6 +46,13 @@ mcp = [
 s3 = [
     "boto3>=1.35.0",
 ]
+# Desktop shell (`python main.py desktop`). Optional: magi.desktop is imported only
+# when that channel runs (main.py lazy-imports it), so the base install and the
+# other channels stay Qt-free. Provides PySide6 + QtWebEngine to render the web
+# frontend in a frameless native window. Enable with: uv sync --extra desktop
+desktop = [
+    "PySide6>=6.8.0",
+]
 
 [build-system]
 requires = ["hatchling"]
