@@ -40,6 +40,18 @@ const NAV: NavItem[] = [
     ),
   },
   {
+    href: "/chat",
+    label: "Chat",
+    match: (p) => p.startsWith("/chat"),
+    icon: (
+      <Icon>
+        <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v8A1.5 1.5 0 0 1 18.5 15H9l-4 4z" />
+        <path d="M8 8.5h8" />
+        <path d="M8 11.5h5" />
+      </Icon>
+    ),
+  },
+  {
     href: "/memory",
     label: "Memory",
     match: (p) => p.startsWith("/memory"),

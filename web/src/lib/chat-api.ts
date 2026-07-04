@@ -32,6 +32,48 @@ export async function getIntrospection(): Promise<TeamSnapshot> {
   return (await res.json()) as TeamSnapshot;
 }
 
+/** An attachment the client sends for the agent to see. Mirrors the chat-api's
+ * `InboundImage` / `InboundFile` wire shape: exactly one of `data_base64` / `url`
+ * is set (a base64 `data:` URI may also ride in `url`). */
+export interface InboundAttachment {
+  mime_type?: string;
+  filename?: string;
+  url?: string;
+  data_base64?: string;
+}
+
+export interface ChatMessageBody {
+  /** Stable id that scopes durable memory for this speaker (see api.py `_scoped`). */
+  user_id: string;
+  /** The operator's message (may be empty when attachments are sent). */
+  text: string;
+  /** Images the agent should see this turn (chat-api `images[]`). */
+  images?: InboundAttachment[];
+  /** Non-image files the agent should see this turn (chat-api `files[]`). */
+  files?: InboundAttachment[];
+}
+
+/** Open the chat-api's SSE stream for one session and return the raw upstream
+ * Response, so the BFF route can pipe its body straight to the browser without
+ * ever handing the bearer token to the client. The reply arrives as `delta`
+ * frames (incremental text) terminated by a `done` frame (final text + media).
+ * Throws only on a transport error — a non-2xx upstream is returned as-is for
+ * the caller to translate. */
+export async function openMessageStream(
+  sessionId: string,
+  body: ChatMessageBody,
+): Promise<Response> {
+  return fetch(
+    `${baseUrl()}/v1/sessions/${encodeURIComponent(sessionId)}/messages/stream`,
+    {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    },
+  );
+}
+
 /** Chat-api liveness. Returns its /healthz body, or null when unreachable — the
  * page surfaces an online/offline indicator without failing outright. */
 export async function getChatHealth(): Promise<Record<string, unknown> | null> {
