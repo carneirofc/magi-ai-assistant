@@ -426,7 +426,7 @@ function ChatThread({
             <ThreadPrimitive.Empty>
               <div className="m-auto flex max-w-sm flex-col items-center gap-1 text-center">
                 <p className="text-ui-sm font-medium text-[color:var(--ui-ink-muted)]">
-                  Talk to the running brain
+                  Talk to the assistant
                 </p>
                 <p className="text-ui-xs text-[color:var(--ui-ink-subtle)]">
                   Drag in images or files, dictate with the mic, and watch it think and
@@ -927,7 +927,7 @@ function Composer({
         </ComposerPrimitive.If>
 
         <ComposerPrimitive.Input
-          placeholder="Message the brain…  (Enter to send, Shift+Enter for a newline)"
+          placeholder="Message the assistant…  (Enter to send, Shift+Enter for a newline)"
           className="max-h-40 min-h-[2.5rem] w-full resize-none bg-transparent px-2 py-1.5 text-ui-sm text-[color:var(--ui-ink)] outline-none placeholder:text-[color:var(--ui-ink-subtle)]"
         />
 

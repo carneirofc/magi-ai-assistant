@@ -23,6 +23,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+
+def _emit_write(path: Path) -> None:
+    """Announce an identity-file mutation to the memory write observer (see
+    magi/core/memory/adapters). Imported lazily inside the call to sidestep an import
+    cycle: `magi.core.memory` imports the store, which imports this module."""
+    from magi.core.memory.adapters import emit_write  # noqa: PLC0415 — avoids a cycle.
+
+    emit_write(path)
+
+
 # The image mime types an avatar may be stored as, mapped to the on-disk
 # extension. A raster format the vision model can read; the set is deliberately
 # small (an operator uploads a normal picture, not an arbitrary blob).
@@ -146,6 +156,9 @@ class IdentityStore:
         self._remove_avatar_files()
         stored = f"avatar.{ext}"
         (self.avatar_dir / stored).write_bytes(data)
+        # Version the avatar subtree (the just-written bytes and the removed prior
+        # file); `_write_json` below versions the metadata sidecar.
+        _emit_write(self.avatar_dir)
         meta = self._read_json()
         meta["avatar"] = {
             "mime": mime,
@@ -158,6 +171,7 @@ class IdentityStore:
     def clear_avatar(self) -> BotIdentity:
         """Remove the profile picture; the name + description stay."""
         self._remove_avatar_files()
+        _emit_write(self.avatar_dir)
         meta = self._read_json()
         meta.pop("avatar", None)
         self._write_json(meta)
@@ -177,6 +191,7 @@ class IdentityStore:
         self.meta_path.write_text(
             json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
+        _emit_write(self.meta_path)
 
     # --- render (injected into every run) -----------------------------------
     def context_text(self) -> str:

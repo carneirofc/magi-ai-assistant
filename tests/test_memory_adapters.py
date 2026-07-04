@@ -61,6 +61,43 @@ def test_bullet_log_parses_legacy_timestamped_lines(tmp_path):
     assert log.recent(1) == ["talked about docker"]
 
 
+def test_read_clean_strips_legacy_timestamps_but_keeps_prose(tmp_path):
+    """read_clean() de-timestamps legacy bullets without dropping headers/prose —
+    what the persona injection relies on so ISO stamps never reach the model."""
+    path = tmp_path / "persona.md"
+    path.write_text(
+        "# Persona & evolved behavior\n\n"
+        "Base prose about who you are.\n\n"
+        "- 2026-07-03T22:09:48 :: be concise\n"
+        "- already clean\n"
+        "- 2026-07-04T08:40:51 :: prefer bullets :: keep this colon\n",
+        encoding="utf-8",
+    )
+    log = BulletLog(path, header="Persona & evolved behavior")
+
+    clean = log.read_clean()
+    assert "2026-07-03T22:09:48" not in clean
+    assert "Base prose about who you are." in clean  # prose preserved
+    assert "- be concise" in clean
+    assert "- already clean" in clean  # untouched
+    # Only the leading ISO stamp is stripped; a "::" inside real content survives.
+    assert "- prefer bullets :: keep this colon" in clean
+
+
+def test_overwrite_replaces_body_and_preserves_frontmatter(tmp_path):
+    path = tmp_path / "persona.md"
+    log = BulletLog(path, header="Persona", note_type="persona", tags=["memory/persona"])
+    log.append("one")  # creates the file with frontmatter
+    created_line = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.startswith("created:")][0]
+
+    log.overwrite("# Persona\n\n- two")
+
+    raw = path.read_text(encoding="utf-8")
+    assert raw.startswith("---\n")  # frontmatter kept
+    assert created_line in raw  # original created stamp preserved, not re-stamped
+    assert log.read() == "# Persona\n\n- two"
+
+
 def test_blob_replaces_whole_file_with_header_and_body(tmp_path):
     path = tmp_path / "summary.md"
     blob = Blob(path, header="Long-term summary", note_type="session-summary")

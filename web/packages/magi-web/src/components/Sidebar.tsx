@@ -119,24 +119,56 @@ const NAV: NavItem[] = [
       </Icon>
     ),
   },
+  {
+    href: "/settings",
+    label: "Settings",
+    match: (p) => p.startsWith("/settings"),
+    icon: (
+      <Icon>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 13a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+      </Icon>
+    ),
+  },
 ];
 
-export function Sidebar() {
+type SidebarProps = { collapsed?: boolean; onToggle?: () => void };
+
+export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
   const pathname = usePathname() ?? "/";
 
   return (
     <aside className="app-rail">
-      <Link href="/" className="flex items-center gap-2 no-underline">
-        <span className="grid h-8 w-8 place-items-center rounded-lg bg-[color:var(--ui-bg-active)] text-[color:var(--ui-ink-highlight)] text-ui-sm font-bold">
-          M
-        </span>
-        <span className="flex flex-col leading-tight">
-          <strong className="cyber-title text-ui-md">MAGI</strong>
-          <span className="text-ui-2xs uppercase tracking-[0.18em] text-[color:var(--ui-ink-subtle)]">
-            Admin
+      <div className="rail-head">
+        <Link href="/" className="rail-brand no-underline" title="MAGI Admin">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[color:var(--ui-bg-active)] text-[color:var(--ui-ink-highlight)] text-ui-sm font-bold">
+            M
           </span>
-        </span>
-      </Link>
+          <span className="rail-label flex flex-col leading-tight">
+            <strong className="cyber-title text-ui-md">MAGI</strong>
+            <span className="text-ui-2xs uppercase tracking-[0.18em] text-[color:var(--ui-ink-subtle)]">
+              Admin
+            </span>
+          </span>
+        </Link>
+
+        <button
+          type="button"
+          onClick={onToggle}
+          className="rail-toggle"
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-pressed={collapsed}
+        >
+          <Icon>
+            {collapsed ? (
+              <path d="M9 6l6 6-6 6" />
+            ) : (
+              <path d="M15 6l-6 6 6 6" />
+            )}
+          </Icon>
+        </button>
+      </div>
 
       <nav className="flex flex-1 flex-col gap-1">
         {NAV.map((item) => (
@@ -146,9 +178,10 @@ export function Sidebar() {
             className="rail-link"
             data-active={item.match(pathname)}
             aria-current={item.match(pathname) ? "page" : undefined}
+            title={collapsed ? item.label : undefined}
           >
             {item.icon}
-            <span>{item.label}</span>
+            <span className="rail-label">{item.label}</span>
           </Link>
         ))}
       </nav>
@@ -157,13 +190,14 @@ export function Sidebar() {
         <button
           type="submit"
           className="rail-link w-full cursor-pointer border-0 bg-transparent text-left text-[color:var(--ui-ink-subtle)]"
+          title={collapsed ? "Sign out" : undefined}
         >
           <Icon>
             <path d="M15 4h3a1.5 1.5 0 0 1 1.5 1.5v13A1.5 1.5 0 0 1 18 20h-3" />
             <path d="M10 8l-4 4 4 4" />
             <path d="M6 12h10" />
           </Icon>
-          <span>Sign out</span>
+          <span className="rail-label">Sign out</span>
         </button>
       </form>
     </aside>

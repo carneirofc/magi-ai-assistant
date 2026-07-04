@@ -57,7 +57,7 @@ export default async function DashboardPage() {
       <PageHeader
         subtitle="magi // admin"
         title="Dashboard"
-        description="Memory and knowledge at a glance — durable facts the model keeps and the shared document corpus it searches."
+        description="Memory and knowledge at a glance — durable facts the assistant keeps and the shared document corpus it searches."
         pills={
           <StatusBadge tone={health ? "success" : "error"}>
             <span

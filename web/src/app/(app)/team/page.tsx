@@ -32,7 +32,7 @@ export default async function TeamPage() {
       <PageHeader
         subtitle="magi // team"
         title="Team"
-        description="The live roster this process runs — the lead router, its specialist members and their tools, and any MCP servers they connect to."
+        description="The live roster powering the assistant — the lead router, its specialist members and their tools, and any MCP servers they connect to."
         pills={
           <>
             <StatusBadge tone={health ? "success" : "error"}>

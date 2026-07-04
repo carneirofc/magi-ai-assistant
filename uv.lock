@@ -1008,8 +1008,8 @@ wheels = [
 ]
 
 [[package]]
-name = "magi"
-version = "0.1.1"
+name = "magi-ai-assistant"
+version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "agno" },
@@ -1030,6 +1030,9 @@ dependencies = [
 [package.optional-dependencies]
 desktop = [
     { name = "pyside6" },
+]
+git = [
+    { name = "gitpython" },
 ]
 mcp = [
     { name = "mcp" },
@@ -1057,6 +1060,7 @@ requires-dist = [
     { name = "discord-py", specifier = ">=2.4.0" },
     { name = "docker", specifier = ">=7.1.0" },
     { name = "fastapi", specifier = ">=0.136.3" },
+    { name = "gitpython", marker = "extra == 'git'", specifier = ">=3.1.40" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "litellm", specifier = ">=1.87.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.9.0" },
@@ -1068,7 +1072,7 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2.0.50" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.48.0" },
 ]
-provides-extras = ["semantic", "mcp", "s3", "desktop"]
+provides-extras = ["semantic", "mcp", "s3", "git", "desktop"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -27,7 +27,7 @@ export default async function KnowledgePage() {
       <PageHeader
         subtitle="magi // knowledge"
         title="Knowledge"
-        description="The shared, read-only document corpus the model searches — chunked and embedded faithfully so retrieval returns source text."
+        description="The shared, read-only document corpus the assistant searches — chunked and embedded faithfully so retrieval returns source text."
       >
         <Link
           href="/knowledge/add"

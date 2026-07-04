@@ -23,7 +23,7 @@ export default async function IdentityPage() {
       <PageHeader
         subtitle="magi // identity"
         title="Identity"
-        description="The bot's name, description, and profile picture — how it presents itself. Injected into every conversation (the model reads it and, when enabled, sees the picture) and shown as the assistant's face in chat."
+        description="The assistant's name, description, and profile picture — how it presents itself. Injected into every conversation (the assistant reads it and, when enabled, sees the picture) and shown as its face in chat."
       />
 
       {error ? (

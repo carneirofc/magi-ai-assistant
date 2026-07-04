@@ -23,6 +23,7 @@ from magi.core.knowledge import (
 )
 from magi.core.memory import CurationInput, CurationResult, FactOp, build_memory
 from magi.core.memory.store import FileMemoryStore
+from magi.core.settings import OperatorSettingsStore
 
 
 # --- store: list_documents aggregation --------------------------------------
@@ -336,7 +337,8 @@ class _FakeRetriever:
 
 
 def _client(
-    documents=(), auth_token=None, memory=None, detail=None, retriever=None, subjects=None, tags=()
+    documents=(), auth_token=None, memory=None, detail=None, retriever=None, subjects=None,
+    tags=(), settings_store=None,
 ):
     if memory is None:
         memory = FileMemoryStore(Path(tempfile.mkdtemp()))  # empty: no users on disk
@@ -348,6 +350,7 @@ def _client(
         subjects,
         retriever=retriever,
         auth_token=auth_token,
+        settings_store=settings_store,
     )
     return TestClient(app)
 
@@ -911,3 +914,89 @@ def test_session_kind_requires_session_id(tmp_path):
     assert _client(memory=_seed_memory(tmp_path)).get(
         "/admin/v1/memory/files/session_window?user_id=u1"
     ).status_code == 422
+
+
+# --- operator settings: memory location + git-versioning --------------------
+def _settings_client(tmp_path, *, memory=None, auth_token=None):
+    memory = memory or FileMemoryStore(tmp_path / "mem")
+    store = OperatorSettingsStore(tmp_path / "operator-settings.json")
+    return _client(memory=memory, settings_store=store, auth_token=auth_token), memory, store
+
+
+def test_get_memory_settings_reports_defaults_and_active_dir(tmp_path):
+    memory = FileMemoryStore(tmp_path / "mem")
+    client, _, _ = _settings_client(tmp_path, memory=memory)
+
+    body = client.get("/admin/v1/settings/memory").json()
+    assert body["git_enabled"] is False  # config default
+    assert body["active_memory_dir"] == str(memory.root)
+    assert body["version"]  # a token is always present (hash of the empty file)
+
+
+def test_put_memory_settings_persists_and_moves_version(tmp_path):
+    client, _, store = _settings_client(tmp_path)
+    before = client.get("/admin/v1/settings/memory").json()
+
+    resp = client.put(
+        "/admin/v1/settings/memory",
+        json={
+            "memory_dir": "~/magi-mem",
+            "git_enabled": True,
+            "git_author_name": "op",
+            "git_author_email": "op@host",
+            "expected_version": before["version"],
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["memory_dir"] == "~/magi-mem" and body["git_enabled"] is True
+    assert body["git_author_name"] == "op"
+    assert body["version"] != before["version"]
+    # Persisted to disk, so a fresh read of the store agrees.
+    assert store.read_memory().memory_dir == "~/magi-mem"
+
+
+def test_put_memory_settings_stale_version_is_409(tmp_path):
+    client, _, _ = _settings_client(tmp_path)
+    resp = client.put(
+        "/admin/v1/settings/memory",
+        json={"memory_dir": "/data/mem", "git_enabled": False, "expected_version": "stale"},
+    )
+    assert resp.status_code == 409
+
+
+def test_memory_settings_restart_required_reflects_drift(tmp_path):
+    memory = FileMemoryStore(tmp_path / "mem")
+    client, _, _ = _settings_client(tmp_path, memory=memory)
+
+    # Point at the dir the process is already using -> no restart pending.
+    aligned = client.put(
+        "/admin/v1/settings/memory",
+        json={"memory_dir": str(memory.root), "git_enabled": False},
+    ).json()
+    assert aligned["restart_required"] is False
+
+    # Point somewhere else -> a restart is needed to pick it up.
+    moved = client.put(
+        "/admin/v1/settings/memory",
+        json={"memory_dir": str(tmp_path / "elsewhere"), "git_enabled": False,
+              "expected_version": aligned["version"]},
+    ).json()
+    assert moved["restart_required"] is True
+
+
+def test_put_memory_settings_503_without_store(tmp_path):
+    # No settings store wired (e.g. a minimal app): writes are refused, not faked.
+    client = _client(memory=FileMemoryStore(tmp_path / "mem"))
+    resp = client.put(
+        "/admin/v1/settings/memory",
+        json={"memory_dir": "/data/mem", "git_enabled": False},
+    )
+    assert resp.status_code == 503
+
+
+def test_memory_settings_requires_bearer_when_token_set(tmp_path):
+    client, _, _ = _settings_client(tmp_path, auth_token="secret")
+    assert client.get("/admin/v1/settings/memory").status_code == 401
+    ok = client.get("/admin/v1/settings/memory", headers={"Authorization": "Bearer secret"})
+    assert ok.status_code == 200

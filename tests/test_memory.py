@@ -66,6 +66,73 @@ def test_evolve_persona_appends_and_persists(manager):
     assert "You are Alyssa." in manager.store.persona.read()
 
 
+def test_persona_context_omits_legacy_timestamps(tmp_path):
+    """A legacy persona file (`- <ts> :: ...`) must not leak its timestamps into the
+    assembled context — the model should see clean rules, not ISO stamps."""
+    store = FileMemoryStore(tmp_path / "memory")
+    store.persona.path.parent.mkdir(parents=True, exist_ok=True)
+    store.persona.path.write_text(
+        "# Persona & evolved behavior\n\n- 2026-07-03T22:09:48 :: be evocative\n",
+        encoding="utf-8",
+    )
+    mgr = MemoryManager(store=store, short_term_max=3)
+    mgr.set_scope(user_id="u1", session_id="s1")
+
+    context = mgr.build_context()
+    assert "be evocative" in context
+    assert "2026-07-03T22:09:48" not in context
+
+
+def test_persona_adjustments_deduped_on_write(tmp_path):
+    """Near-identical adjustments the curator keeps appending collapse to one; the
+    seed prose survives."""
+    mgr = MemoryManager(
+        store=FileMemoryStore(tmp_path / "memory"),
+        short_term_max=3,
+        persona_seed="You are Alyssa.",
+    )
+    mgr.set_scope(user_id="u1", session_id="s1")
+
+    mgr.evolve_persona("Be concise.")
+    mgr.evolve_persona("be concise")  # same rule, reworded case/punctuation
+    mgr.evolve_persona("Be concise!")
+
+    body = mgr.store.persona.read_clean()
+    assert body.count("oncise") == 1  # only one survives
+    assert "You are Alyssa." in body  # seed prose untouched
+
+
+def test_persona_adjustments_capped_to_newest(tmp_path):
+    mgr = MemoryManager(
+        store=FileMemoryStore(tmp_path / "memory"),
+        short_term_max=3,
+        persona_seed="You are Alyssa.",
+        persona_adjustments_max=2,
+    )
+    mgr.set_scope(user_id="u1", session_id="s1")
+
+    for i in range(5):
+        mgr.evolve_persona(f"rule {i}")
+
+    body = mgr.store.persona.read_clean()
+    assert "rule 4" in body and "rule 3" in body  # newest kept
+    assert "rule 0" not in body  # oldest dropped
+    assert "You are Alyssa." in body
+
+
+def test_persona_compaction_heals_existing_duplicates_at_startup(tmp_path):
+    """Constructing the manager compacts a persona that already piled up duplicates."""
+    store = FileMemoryStore(tmp_path / "memory")
+    store.persona.path.parent.mkdir(parents=True, exist_ok=True)
+    store.persona.path.write_text(
+        "# Persona & evolved behavior\n\n- be nice\n- be nice\n- be nice\n",
+        encoding="utf-8",
+    )
+    mgr = MemoryManager(store=store, short_term_max=3)
+
+    assert mgr.store.persona.read_clean().count("- be nice") == 1
+
+
 def test_build_context_includes_written_memory(manager):
     manager.remember("User is a CTF player.")
     manager.record_episode("Helped debug auth middleware.")

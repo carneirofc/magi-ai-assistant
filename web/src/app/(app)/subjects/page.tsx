@@ -21,7 +21,7 @@ export default async function SubjectsPage() {
       <PageHeader
         subtitle="magi // knowledge"
         title="Subjects"
-        description="The controlled vocabulary documents are grouped by. A hard filter on the model's knowledge search."
+        description="The controlled vocabulary documents are grouped by. A hard filter on the assistant's knowledge search."
       />
       {error ? (
         <StatusMessage role="alert" tone="error">

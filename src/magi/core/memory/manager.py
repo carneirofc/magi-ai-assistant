@@ -70,6 +70,7 @@ class MemoryManager:
         store: FileMemoryStore,
         short_term_max: int,
         persona_seed: str = "",
+        persona_adjustments_max: int = 0,
         summarize_session_fn: Optional[SummarizeFn] = None,
         summarize_every: int = 10,
         long_term_recent_raw: int = 5,
@@ -111,8 +112,14 @@ class MemoryManager:
             pending_max=session_pending_max,
             summary_max_chars=session_summary_max_chars,
         )
+        # The newest-N cap the persona's adjustments are deduped/capped to after each
+        # write (0 = dedupe only). See store.compact_persona.
+        self._persona_adjustments_max = max(0, persona_adjustments_max)
         if persona_seed:
             self.store.seed_persona(persona_seed)
+        # Heal any accumulated duplicates once at startup (curator pile-up in the
+        # adjustments section); a clean persona is a no-op with no write.
+        self._compact_persona()
 
     # --- scope --------------------------------------------------------------
     def set_scope(self, user_id: object, session_id: object) -> MemoryScope:
@@ -192,7 +199,7 @@ class MemoryManager:
             user_message=user_message,
             assistant_reply=assistant_reply,
             current_facts=self.long_term.render_for_curator(mem),
-            persona=self.store.persona.read(),
+            persona=self.store.persona.read_clean(),
         )
         try:
             result = await self._curate_fn(inp)
@@ -225,7 +232,7 @@ class MemoryManager:
             user_message=f"(session summary under review)\n{summary}",
             assistant_reply="",
             current_facts=self.long_term.render_for_curator(mem),
-            persona=self.store.persona.read(),
+            persona=self.store.persona.read_clean(),
         )
         try:
             result = await self._curate_fn(inp)
@@ -249,6 +256,7 @@ class MemoryManager:
             applied.append("episode")
         if result.persona_adjustment and result.persona_adjustment.strip():
             self.store.persona.append(result.persona_adjustment.strip())
+            self._compact_persona()
             applied.append("persona")
         if applied:
             log_info(f"memory: curated [{', '.join(applied)}] for user {mem.user_id}")
@@ -309,8 +317,19 @@ class MemoryManager:
 
     def evolve_persona(self, adjustment: str) -> str:
         self.store.persona.append(adjustment)
+        self._compact_persona()
         log_info(f"memory: persona evolved: {adjustment!r}")
         return "Persona adjustment recorded."
+
+    def _compact_persona(self) -> None:
+        """Dedupe/cap the persona's adjustments after a write (never breaks a chat)."""
+        try:
+            dropped = self.store.compact_persona(self._persona_adjustments_max)
+        except Exception as exc:  # noqa: BLE001 — a compaction hiccup must not break a chat.
+            log_warning(f"memory: persona compaction failed: {type(exc).__name__}: {exc}")
+            return
+        if dropped:
+            log_info(f"memory: compacted persona, dropped {dropped} duplicate/excess adjustment(s)")
 
     # --- reads --------------------------------------------------------------
     def recall_long_term(self) -> str:
@@ -330,7 +349,7 @@ class MemoryManager:
         """
         mem = self.mem
         return {
-            "persona": self.store.persona.read(),
+            "persona": self.store.persona.read_clean(),
             "long_term": self.long_term.render(mem, query),
             "episodes": self.episodes.render(mem, query),
             "short_term": self.session.render(mem, query),

@@ -22,6 +22,7 @@ parsed on read so files written before this format round-trip unchanged.
 import json
 import re
 import uuid
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -37,6 +38,39 @@ def slug(value: object) -> str:
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+# --- write notifications ----------------------------------------------------
+# The IO layer stays dumb, but it announces *that* a file changed so an optional
+# backend can react — the git-backed memory (magi/core/memory/git_backend) uses this
+# to commit each write. Exactly one observer at a time (one repo per memory root, one
+# process); None keeps writes plain. The identity store emits through here too, so
+# the whole memory tree — not just these adapters — is versioned. Kept here, in the
+# leaf IO module, so both the adapters and the identity store can import it without a
+# cycle (the git backend depends on this, never the reverse).
+WriteObserver = Callable[[Path], None]
+_write_observer: WriteObserver | None = None
+
+
+def set_write_observer(observer: WriteObserver | None) -> None:
+    """Register (or clear, with None) the sink notified after every file mutation."""
+    global _write_observer
+    _write_observer = observer
+
+
+def emit_write(path: Path) -> None:
+    """Notify the write observer that `path` was just written/removed (no-op when
+    none is registered). A failing observer must never break the memory write that
+    triggered it, so its errors are swallowed with a warning."""
+    observer = _write_observer
+    if observer is None:
+        return
+    try:
+        observer(path)
+    except Exception as exc:  # noqa: BLE001 — a write observer must never break a memory write.
+        log_warning(
+            f"memory: write observer failed for {path.name}: {type(exc).__name__}: {exc}"
+        )
 
 
 # --- Obsidian frontmatter ---------------------------------------------------
@@ -68,6 +102,25 @@ def strip_frontmatter(text: str) -> str:
     return _FRONTMATTER_RE.sub("", text, count=1)
 
 
+# Retired per-line bullet timestamp: `- 2026-07-03T22:09:48 :: <content>`. The
+# `created` stamp now lives in frontmatter, so bullets are written untimestamped —
+# but files in the old format still carry it, and a whole-note `read()` returns it
+# verbatim. Anchored to a leading ISO stamp so a `::` inside real content is never hit.
+_LEGACY_TS_BULLET = re.compile(r"^(- )\d{4}-\d{2}-\d{2}T[\d:]+ :: ")
+
+
+def strip_legacy_ts(text: str) -> str:
+    """Normalize legacy `- <ts> :: <content>` bullets to `- <content>`.
+
+    Prose, headers, and already-clean bullets pass through untouched. Use where a
+    note body is injected verbatim into model context (the persona): `read()` keeps
+    the legacy timestamps, which are noise to the model. `bodies()` already drops
+    them when it splits a log into content; this does the same at the line level
+    while preserving the non-bullet lines a whole-note read must keep.
+    """
+    return "\n".join(_LEGACY_TS_BULLET.sub(r"\1", ln) for ln in text.splitlines())
+
+
 class BulletLog:
     """Append-only Obsidian note: frontmatter, a `# header`, then `- <content>` bullets."""
 
@@ -89,12 +142,36 @@ class BulletLog:
         line = f"- {content.strip()}\n"
         with self.path.open("a", encoding="utf-8") as fh:
             fh.write(line)
+        emit_write(self.path)
 
     def read(self) -> str:
         """The note body — frontmatter stripped, whitespace-trimmed (empty when absent)."""
         if not self.path.exists():
             return ""
         return strip_frontmatter(self.path.read_text(encoding="utf-8")).strip()
+
+    def read_clean(self) -> str:
+        """`read()` with retired per-line bullet timestamps normalized away.
+
+        For consumers that inject the whole note body as-is (the persona), so legacy
+        `- <ts> :: ` bullets don't leak their timestamps into context. Clean files are
+        returned unchanged; prose and headers are preserved.
+        """
+        return strip_legacy_ts(self.read())
+
+    def overwrite(self, body: str) -> None:
+        """Replace the whole note body (frontmatter preserved, else freshly stamped).
+
+        The append-only counterpart is `append`; this is for deliberate compaction
+        (e.g. deduping the persona's evolving adjustments), not the hot write path.
+        A file without frontmatter gains one — bringing a legacy note up to format.
+        """
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        existing = self.path.read_text(encoding="utf-8") if self.path.exists() else ""
+        match = _FRONTMATTER_RE.match(existing)
+        front = match.group(0) if match else _frontmatter(self.note_type, self.tags)
+        self.path.write_text(front + body.strip() + "\n", encoding="utf-8")
+        emit_write(self.path)
 
     def bodies(self) -> list[str]:
         """The bullet bodies, in order. Handles both the current `- <content>` form
@@ -137,9 +214,11 @@ class BulletLog:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(_frontmatter(self.note_type, self.tags) + scaffold, encoding="utf-8")
+        emit_write(self.path)
 
     def delete(self) -> None:
         self.path.unlink(missing_ok=True)
+        emit_write(self.path)
 
 
 class Blob:
@@ -164,9 +243,11 @@ class Blob:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         head = _frontmatter(self.note_type, self.tags)
         self.path.write_text(f"{head}# {self.header}\n\n{body.strip()}\n", encoding="utf-8")
+        emit_write(self.path)
 
     def delete(self) -> None:
         self.path.unlink(missing_ok=True)
+        emit_write(self.path)
 
 
 class JsonWindow:
@@ -196,6 +277,7 @@ class JsonWindow:
     def _write(self, turns: list[dict]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(turns, ensure_ascii=False, indent=2), encoding="utf-8")
+        emit_write(self.path)
 
     def append(self, role: str, content: str, max_entries: int) -> list[dict]:
         """Append a turn, trim to the last `max_entries`, return the evicted turns."""
@@ -221,6 +303,7 @@ class JsonWindow:
 
     def delete(self) -> None:
         self.path.unlink(missing_ok=True)
+        emit_write(self.path)
 
 
 class JsonFacts:
@@ -268,6 +351,7 @@ class JsonFacts:
     def _write(self, facts: list[dict]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(facts, ensure_ascii=False, indent=2), encoding="utf-8")
+        emit_write(self.path)
 
     def add(self, text: str) -> str:
         """Append one fact with a fresh id; return that id."""
@@ -310,3 +394,4 @@ class JsonFacts:
 
     def delete(self) -> None:
         self.path.unlink(missing_ok=True)
+        emit_write(self.path)

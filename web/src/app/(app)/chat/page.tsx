@@ -18,7 +18,7 @@ export default async function ChatPage() {
       <PageHeader
         subtitle="magi // chat"
         title="Chat"
-        description="Talk to the live team over a streaming connection. Handy for probing routing, tools, and what the brain remembers for a given user."
+        description="Talk to the live team over a streaming connection. Handy for probing routing, tools, and what the assistant remembers for a given user."
         pills={
           <StatusBadge tone={health ? "success" : "error"}>
             <span

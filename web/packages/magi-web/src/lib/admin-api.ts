@@ -177,6 +177,44 @@ export function fetchIdentityAvatar(): Promise<Response> {
   return adminRequest("/admin/v1/identity/avatar");
 }
 
+// --- operator settings: memory location + git-versioning --------------------
+export interface AdminMemorySettings {
+  memory_dir: string;
+  git_enabled: boolean;
+  git_author_name: string;
+  git_author_email: string;
+  /** Where the running process actually reads/writes memory right now. */
+  active_memory_dir: string;
+  /** True when the saved settings differ from the running process (restart to apply). */
+  restart_required: boolean;
+  version: string;
+}
+
+export async function getMemorySettings(): Promise<AdminMemorySettings> {
+  return adminGet<AdminMemorySettings>("/admin/v1/settings/memory");
+}
+
+/** Save the memory location + git-versioning (applied on the next restart). Relays
+ * 409 on a stale version and 503 when the settings store isn't wired. */
+export function updateMemorySettings(body: {
+  memory_dir: string;
+  git_enabled: boolean;
+  git_author_name: string;
+  git_author_email: string;
+  expectedVersion?: string;
+}): Promise<Response> {
+  return adminRequest("/admin/v1/settings/memory", {
+    method: "PUT",
+    body: JSON.stringify({
+      memory_dir: body.memory_dir,
+      git_enabled: body.git_enabled,
+      git_author_name: body.git_author_name,
+      git_author_email: body.git_author_email,
+      expected_version: body.expectedVersion,
+    }),
+  });
+}
+
 // --- ingest -----------------------------------------------------------------
 export function ingestDocument(doc: {
   title: string;

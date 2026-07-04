@@ -21,7 +21,7 @@ export default async function MemoryPage() {
       <PageHeader
         subtitle="magi // memory"
         title="Memory"
-        description="Every user the model keeps durable memory for — curated facts, recorded episodes, and live sessions."
+        description="Every user the assistant keeps durable memory for — curated facts, recorded episodes, and live sessions."
       />
 
       {error ? (

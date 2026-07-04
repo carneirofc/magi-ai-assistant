@@ -24,6 +24,7 @@ Two factories, mirroring `channels/api.py`:
 """
 
 import base64
+from pathlib import Path
 from typing import Optional
 
 from agno.utils.log import log_info
@@ -40,10 +41,14 @@ from magi.core.knowledge import (
     Subject,
     SubjectRegistry,
 )
-from magi.core.memory import MemoryManager
+from magi.core.memory import (
+    MemoryManager,
+    resolve_memory_settings,
+)
 from magi.core.memory.adapters import slug as _mem_slug
 from magi.core.memory.semantic import MemoryRetriever
 from magi.core.memory.store import FileMemoryStore, ScopedMemory
+from magi.core.settings import MemoryOverrides, OperatorSettingsStore
 
 # A session id is irrelevant when reading user-level files (facts, episodes,
 # persona): those paths don't depend on it. Use a fixed placeholder so the
@@ -306,6 +311,36 @@ class MemoryTriggerResult(BaseModel):
     detail: str = Field(description="A human-readable one-line summary of what happened.")
 
 
+# --- operator settings wire format -------------------------------------------
+class MemorySettingsOut(BaseModel):
+    """The effective memory settings (operator overrides overlaid on code defaults)
+    the UI edits. `active_memory_dir` is where the RUNNING process actually reads/
+    writes memory; when it differs from `memory_dir`, a saved change is pending and
+    `restart_required` is true — these settings apply at startup, not live. `version`
+    is the optimistic-concurrency token; echo it on a write or risk a 409."""
+
+    memory_dir: str = Field(description="Where memory will live (as the operator typed it; ~ allowed).")
+    git_enabled: bool = Field(description="Whether the memory tree is a git repo committed on every write.")
+    git_author_name: str = Field(description="Commit author name for git-versioned memory.")
+    git_author_email: str = Field(description="Commit author email for git-versioned memory.")
+    active_memory_dir: str = Field(description="The resolved dir the running process is using right now.")
+    restart_required: bool = Field(description="True when saved settings differ from the running process.")
+    version: str = ""
+
+
+class UpdateMemorySettings(BaseModel):
+    """Set the memory location + git-versioning. Applied on the next restart. An empty
+    `memory_dir` clears the override (back to the code default)."""
+
+    memory_dir: str = Field(default="", description="Memory directory ('' = use the code default).")
+    git_enabled: bool = Field(default=False, description="Enable git-versioned memory.")
+    git_author_name: str = Field(default="", description="Commit author name ('' = code default).")
+    git_author_email: str = Field(default="", description="Commit author email ('' = code default).")
+    expected_version: Optional[str] = Field(
+        default=None, description="The version from the last read; rejected with 409 if stale."
+    )
+
+
 def create_admin_app(
     knowledge: KnowledgeStore,
     memory: FileMemoryStore,
@@ -314,6 +349,7 @@ def create_admin_app(
     auth_token: Optional[str] = None,
     archive: Optional[ItemArchive] = None,
     memory_manager: Optional[MemoryManager] = None,
+    settings_store: Optional[OperatorSettingsStore] = None,
 ) -> FastAPI:
     """The FastAPI admin app over already-built stores (pure factory).
 
@@ -328,6 +364,10 @@ def create_admin_app(
     flush from the UI. When it's None, or when it lacks a model-backed summarizer/
     curator (e.g. standalone `python main.py admin`), those trigger endpoints 503
     instead of pretending to run.
+
+    `settings_store` (or None) persists operator overrides — where memory lives and
+    its git-versioning — that the `/settings/memory` routes read/write; those apply on
+    the next restart, so the running `memory` root is reported back as the active one.
     """
     app = FastAPI(title="magi-admin", version="1")
 
@@ -794,6 +834,56 @@ def create_admin_app(
         data, mime = avatar
         return Response(content=data, media_type=mime, headers={"Cache-Control": "no-cache"})
 
+    # --- operator settings: memory location + git-versioning (apply on restart) ---
+    def _memory_settings_out() -> MemorySettingsOut:
+        overrides = settings_store.read_memory() if settings_store else MemoryOverrides()
+        eff = resolve_memory_settings(overrides)
+        active = str(memory.root)
+        # Compare resolved paths so a `~` or trailing-slash difference isn't read as
+        # drift; when the saved dir differs from the one the process booted with, the
+        # change is pending a restart.
+        pending = str(Path(eff.memory_dir).expanduser().resolve())
+        restart_required = pending != str(Path(active).resolve())
+        return MemorySettingsOut(
+            memory_dir=eff.raw_memory_dir,
+            git_enabled=eff.git_enabled,
+            git_author_name=eff.git_author_name,
+            git_author_email=eff.git_author_email,
+            active_memory_dir=active,
+            restart_required=restart_required,
+            version=settings_store.version() if settings_store else "",
+        )
+
+    @app.get(
+        "/admin/v1/settings/memory",
+        response_model=MemorySettingsOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def get_memory_settings() -> MemorySettingsOut:
+        return _memory_settings_out()
+
+    @app.put(
+        "/admin/v1/settings/memory",
+        response_model=MemorySettingsOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def put_memory_settings(body: UpdateMemorySettings) -> MemorySettingsOut:
+        if settings_store is None:
+            raise HTTPException(status_code=503, detail="operator settings not available")
+        if body.expected_version is not None and body.expected_version != settings_store.version():
+            raise HTTPException(status_code=409, detail="stale version; refetch the settings")
+        # Blank strings clear the override (fall back to the code default); the git
+        # toggle is always an explicit choice once saved.
+        settings_store.set_memory(
+            MemoryOverrides(
+                memory_dir=body.memory_dir.strip() or None,
+                git_enabled=body.git_enabled,
+                git_author_name=body.git_author_name.strip() or None,
+                git_author_email=body.git_author_email.strip() or None,
+            )
+        )
+        return _memory_settings_out()
+
     # --- raw-file editor: full-CRUD power on the plumbing kinds ------------
     def _raw_target(kind: str, user_id: Optional[str], session_id: Optional[str]):
         """Resolve (path, is_json, reindex_kind) for an editable file kind, or raise
@@ -909,7 +999,7 @@ def build_admin_app(memory_manager: Optional[MemoryManager] = None) -> FastAPI:
     and the summarize/curate triggers 503 honestly rather than silently no-op."""
     from magi.core.config import config
     from magi.core.items import build_item_archive_from_config
-    from magi.core.memory import build_memory_from_config
+    from magi.core.memory import build_memory_from_config, operator_settings_store
     from magi.core.memory.semantic import build_semantic_index
 
     log_info("building admin app")
@@ -932,4 +1022,5 @@ def build_admin_app(memory_manager: Optional[MemoryManager] = None) -> FastAPI:
         auth_token=config.admin_auth_token,
         archive=archive,
         memory_manager=manager,
+        settings_store=operator_settings_store(),
     )

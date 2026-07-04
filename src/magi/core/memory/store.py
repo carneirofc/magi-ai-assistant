@@ -22,12 +22,19 @@ hands back a `ScopedMemory` bundle bound to that scope. No model calls, no scopi
 policy, no context assembly here — `MemoryManager` layers those on top.
 """
 
+import re
 from pathlib import Path
 
 from magi.core.identity import IdentityStore
 from magi.core.memory.adapters import Blob, BulletLog, JsonFacts, JsonWindow, slug
 
 _PERSONA_HEADER = "Persona & evolved behavior"
+
+
+def _norm_bullet(text: str) -> str:
+    """A comparison key for a persona adjustment: case/whitespace/trailing-punctuation
+    insensitive, so trivially reworded restatements of the same rule collapse together."""
+    return re.sub(r"\s+", " ", text).strip().lower().rstrip(".!?,;: ")
 
 
 class ScopedMemory:
@@ -109,3 +116,50 @@ class FileMemoryStore:
             f"# {_PERSONA_HEADER}\n\n{text.strip()}\n\n"
             "## Adjustments (evolve over time)\n\n"
         )
+
+    def compact_persona(self, max_adjustments: int = 0) -> int:
+        """Dedupe (and optionally cap) the persona's evolving adjustment bullets in place.
+
+        The curator appends one behavior rule per turn, and near-identical rules pile
+        up — bloating every run's context with restatements of the same guidance. This
+        collapses duplicate bullets (compared via `_norm_bullet`, keeping the first
+        occurrence) and, when `max_adjustments > 0`, keeps only the newest that many.
+        The prose base and headers are left untouched.
+
+        Bullets are only touched within the '## Adjustments' section when that marker
+        is present (the seed always writes one), so a `- ` list item in the prose base
+        is never disturbed; a legacy persona without the marker is pure bullets, so all
+        of them are deduped. No-op — and no write — when nothing changes. Returns the
+        number of bullets dropped.
+        """
+        body = self.persona.read_clean()
+        if not body:
+            return 0
+        lines = body.splitlines()
+        start = next(
+            (i + 1 for i, ln in enumerate(lines)
+             if ln.lstrip().startswith("## ") and "adjustment" in ln.lower()),
+            None,
+        )
+        if start is None:  # legacy file: no marker, no prose — dedupe from the first bullet
+            start = next((i for i, ln in enumerate(lines) if ln.startswith("- ")), len(lines))
+        head, region = lines[:start], lines[start:]
+
+        region_bullets = [ln for ln in region if ln.startswith("- ")]
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for ln in region_bullets:
+            key = _norm_bullet(ln[2:])
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(ln)
+        if max_adjustments > 0 and len(deduped) > max_adjustments:
+            deduped = deduped[-max_adjustments:]  # keep the newest
+
+        dropped = len(region_bullets) - len(deduped)
+        if dropped <= 0:
+            return 0
+        new_body = "\n".join(head).rstrip() + "\n\n" + "\n".join(deduped) + "\n"
+        self.persona.overwrite(new_body)
+        return dropped

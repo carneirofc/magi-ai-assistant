@@ -113,6 +113,11 @@ class Config:
     # to itself over time via evolve_persona, so it starts empty. Set a seed
     # here to pre-populate it for the memory layer.
     persona_seed: str = ""
+    # The curator appends a behavior rule to the persona's "Adjustments" section per
+    # turn; near-identical rules pile up and bloat every run's context. After each
+    # persona write the section is deduped and capped to the newest this many bullets
+    # (<= 0 caps nothing but still dedupes). The prose base is never touched.
+    persona_adjustments_max: int = 40
 
     # --- Bot identity (see magi/core/identity). A global, operator-set profile —
     # display name, description, and profile picture — the bot presents as itself.
@@ -172,6 +177,30 @@ class Config:
     # Soft cap on the number of durable facts; beyond it the oldest are dropped with
     # a warning so the sheet can't grow unbounded if the curator stops pruning.
     long_term_facts_max: int = 200
+
+    # --- Git-backed memory (see magi/core/memory/git_backend). When on, the memory
+    # root (memory_dir) is a git repository this backend initializes and manages:
+    # every deliberate memory write — a fact, an episode, a session summary, a
+    # persona adjustment, an identity edit, a short-term turn — is staged and
+    # committed, so the whole memory tree carries a full, inspectable, revertible
+    # history any git tool can read. Off by default; needs the optional `git` extra
+    # (uv sync --extra git; GitPython is lazy-imported, and the factory no-ops when
+    # it's absent so the memory files stay plain and the app still boots). The commit
+    # identity below is written into the repo so commits never depend on the host's
+    # global git config. NOTE: the memory root must be its OWN top-level repo — the
+    # backend refuses to initialize a nested repo inside another one, so point
+    # memory_dir at a directory OUTSIDE the source tree before enabling this (the
+    # default "data/memory" sits inside this checkout and would be rejected). ---
+    memory_git_enabled: bool = False
+    memory_git_author_name: str = "magi-memory"
+    memory_git_author_email: str = "magi-memory@localhost"
+
+    # --- Operator settings (see magi/core/settings). A small JSON file of runtime
+    # overrides an operator edits from the admin UI, layered over the code defaults
+    # above at startup: where memory lives (memory_dir) and its git-versioning. It
+    # lives OUTSIDE the memory tree (it points *at* that tree) and defaults next to
+    # the local data. Empty/absent = pure code defaults; changes apply on restart. ---
+    operator_settings_path: str = "data/operator-settings.json"
 
     # --- Semantic memory search (Qdrant + an embedding model via the proxy).
     # When off, build_context injects long-term/episodic whole; when on, it

@@ -38,6 +38,13 @@
   display: grid;
   grid-template-columns: var(--app-rail-width, 240px) minmax(0, 1fr);
   min-height: 100vh;
+  transition: grid-template-columns 180ms ease;
+}
+
+/* Collapsed rail: icon-only dock. The width var drives the grid track; the
+ * `.rail-label` spans and brand text are hidden below, leaving centered icons. */
+.app-shell[data-collapsed="true"] {
+  --app-rail-width: 72px;
 }
 
 .app-rail {
@@ -52,6 +59,58 @@
   border-right: 1px solid var(--panel-border);
   background: var(--sidebar-shell-bg);
   backdrop-filter: blur(18px);
+  overflow: hidden;
+}
+
+/* Rail header: brand on the left, collapse toggle on the right. Collapses to a
+ * centered stack (logo over toggle) once labels are hidden. */
+.rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.rail-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.rail-toggle {
+  display: grid;
+  place-items: center;
+  height: 2rem;
+  width: 2rem;
+  flex-shrink: 0;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--sidebar-item-ink);
+  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.rail-toggle:hover {
+  background: var(--sidebar-item-hover-bg);
+  color: var(--sidebar-item-hover-ink);
+  border-color: var(--sidebar-item-active-border);
+}
+
+/* Hide every text label and center the icon dock when collapsed. */
+.app-shell[data-collapsed="true"] .rail-label {
+  display: none;
+}
+
+.app-shell[data-collapsed="true"] .rail-head {
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.app-shell[data-collapsed="true"] .rail-link {
+  justify-content: center;
+  padding-inline: 0.5rem;
 }
 
 .app-content {
@@ -64,8 +123,8 @@
 }
 
 .app-content-inner {
-  margin: 0 auto;
-  max-width: 1160px;
+  /* No horizontal cap — content fills the full width of the column so ultrawide
+   * screens are used edge to edge (the `.app-content` padding is the only inset). */
   width: 100%;
   /* Grow to fill the column (so fill-pages get a definite height to flex into)
    * but never shrink below content (so tall pages scroll the column). */
