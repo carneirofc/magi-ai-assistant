@@ -28,7 +28,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from agno.utils.log import log_info, log_warning
+from agno.utils.log import log_info
 
 _IS_WINDOWS = sys.platform.startswith("win")
 

@@ -7,7 +7,6 @@ carrying the raw bytes as an `Image` (which is what makes the model *see* it).
 """
 
 import httpx
-import pytest
 from agno.tools.function import ToolResult
 
 import magi.agent.tools.vision as vision

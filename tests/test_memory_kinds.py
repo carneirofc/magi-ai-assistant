@@ -4,7 +4,6 @@ The manager-level tests in test_memory.py cover behavior end-to-end; these pin t
 kind seam directly: which kinds fold and the session→episode close hand-off.
 """
 
-import pytest
 
 from magi.core.memory.kinds import Episodes, Folds, LongTerm, Renders, Session
 from magi.core.memory.store import FileMemoryStore

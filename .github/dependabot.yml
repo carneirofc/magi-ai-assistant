@@ -1,0 +1,32 @@
+version: 2
+
+# Automated dependency-update + security PRs for every ecosystem in the repo.
+# Grouped so routine bumps arrive as one PR per ecosystem instead of a swarm;
+# security updates still open on their own as GitHub finds vulnerable versions.
+updates:
+  # Python engine (pyproject.toml + uv.lock)
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      python:
+        patterns: ["*"]
+
+  # Frontend workspace (web/ root package.json + packages/magi-web)
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+    groups:
+      web:
+        patterns: ["*"]
+
+  # The GitHub Actions used by the workflows above
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]

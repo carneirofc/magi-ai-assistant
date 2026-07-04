@@ -39,13 +39,20 @@ class ScopedMemory:
         users = root / "users" / slug(user_id)
         sessions = users / "sessions"
         sid = slug(session_id)
-        self.long_term = BulletLog(users / "long_term.md", f"Long-term memory — user {user_id}")
+        self.long_term = BulletLog(
+            users / "long_term.md", f"Long-term memory — user {user_id}",
+            note_type="long-term", tags=["memory/long-term"],
+        )
         # The curated profile: id-addressable facts the curator mutates per-fact.
         self.long_term_facts = JsonFacts(users / "long_term_facts.json")
-        self.episodes = BulletLog(users / "episodic.md", f"Episodic memory — user {user_id}")
+        self.episodes = BulletLog(
+            users / "episodic.md", f"Episodic memory — user {user_id}",
+            note_type="episodic", tags=["memory/episodic"],
+        )
         self.live_turns = JsonWindow(sessions / f"{sid}.json")
         self.session_summary = Blob(
-            sessions / f"{sid}.summary.md", f"Session summary — session {session_id}"
+            sessions / f"{sid}.summary.md", f"Session summary — session {session_id}",
+            note_type="session-summary", tags=["memory/session"],
         )
         self.pending = JsonWindow(sessions / f"{sid}.pending.json")
 
@@ -55,7 +62,10 @@ class FileMemoryStore:
 
     def __init__(self, root: Path):
         self.root = Path(root)
-        self.persona = BulletLog(self.root / "persona.md", _PERSONA_HEADER)
+        self.persona = BulletLog(
+            self.root / "persona.md", _PERSONA_HEADER,
+            note_type="persona", tags=["memory/persona"],
+        )
         # The global bot identity (name, description, profile picture) — the
         # presented self, distinct from the persona's evolving behavior. Sits on
         # the root because it's non-scoped, like the persona. See magi/core/identity.
