@@ -1,6 +1,6 @@
 [project]
 name = "magi"
-version = "0.1.0"
+version = "0.1.1"
 description = "magi — an assistant-core engine: a lead routing to a specialist team, with memory, knowledge, and tools."
 readme = "README.md"
 requires-python = ">=3.14"

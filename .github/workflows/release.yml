@@ -1,0 +1,74 @@
+name: Release (engine + frontend)
+
+# One-shot release of BOTH libraries in lockstep: the Python engine (wheel/sdist
+# onto a GitHub Release) and the @carneirofc/magi-web frontend (to GitHub
+# Packages). Bump both manifests to the same version first, then:
+#   git tag release-v0.1.1 && git push origin release-v0.1.1
+# The single-library workflows (publish-magi.yml / publish-magi-web.yml) still
+# exist for releasing one side independently.
+on:
+  push:
+    tags:
+      - "release-v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # engine: create the GitHub Release + upload artifacts
+  packages: write   # frontend: publish to GitHub Packages
+
+jobs:
+  engine:
+    name: engine → GitHub Release (wheel + sdist)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build sdist + wheel
+        run: uv build
+
+      - name: Publish GitHub Release with artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Use the tag when triggered by one; on manual dispatch fall back to
+          # the engine version so the release is still named sensibly.
+          TAG="$GITHUB_REF_NAME"
+          case "$TAG" in
+            release-v*) ;;
+            *) TAG="release-v$(grep -m1 '^version' pyproject.toml | cut -d'\"' -f2)" ;;
+          esac
+          gh release create "$TAG" dist/* --title "$TAG" --generate-notes \
+          || gh release upload "$TAG" dist/* --clobber
+
+  frontend:
+    name: frontend → GitHub Packages (@carneirofc/magi-web)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+          scope: "@carneirofc"
+
+      - name: Install workspace
+        run: npm ci || npm install
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Typecheck library
+        run: npm run typecheck -w @carneirofc/magi-web
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to GitHub Packages
+        run: npm publish -w @carneirofc/magi-web
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
