@@ -1,7 +1,14 @@
 # magi
 
 <p align="center">
-  <img src="imgs/magi.png" alt="MAGI logo" width="200">
+  <img src="https://raw.githubusercontent.com/carneirofc/magi-ai-assistant/master/imgs/magi.png" alt="MAGI logo" width="200">
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/magi-ai-assistant/"><img src="https://img.shields.io/pypi/v/magi-ai-assistant?logo=pypi&logoColor=white&label=PyPI" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/magi-ai-assistant/"><img src="https://img.shields.io/pypi/pyversions/magi-ai-assistant?logo=python&logoColor=white" alt="Python versions"></a>
+  <a href="https://github.com/carneirofc/magi-ai-assistant/pkgs/npm/magi-web"><img src="https://img.shields.io/badge/npm-%40carneirofc%2Fmagi--web-cb3837?logo=npm&logoColor=white" alt="npm package @carneirofc/magi-web"></a>
+  <a href="https://github.com/carneirofc/magi-ai-assistant/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
 </p>
 
 Personal multi-channel AI assistant on the [Agno](https://www.agno.com/) framework.
@@ -62,44 +69,45 @@ sessions as a chat transcript, promote a session's takeaways into long-term
 memory, manage the knowledge corpus, and edit the global persona and identity.
 It also embeds a **streaming chat console** to talk to the brain as any user.
 Built on the [`@carneirofc/ui`](https://github.com/carneirofc/deedlit.dev) design
-system with light/dark themes. See [`web/`](web/README.md) to run it.
+system with light/dark themes. See [`web/`](https://github.com/carneirofc/magi-ai-assistant/blob/master/web/README.md) to run it.
 
 <p align="center">
-  <img src="web/docs/screenshots/02-dashboard.png" alt="MAGI admin dashboard" width="900">
+  <img src="https://raw.githubusercontent.com/carneirofc/magi-ai-assistant/master/web/docs/screenshots/02-dashboard.png" alt="MAGI admin dashboard" width="900">
 </p>
 
 <table>
   <tr>
-    <td width="50%"><a href="web/docs/screenshots/04-user-detail.png"><img src="web/docs/screenshots/04-user-detail.png" alt="A user's memory — facts as editable cards"></a><br><sub><b>Memory</b> — a user's facts as editable cards, under tabs</sub></td>
-    <td width="50%"><a href="web/docs/screenshots/05-session.png"><img src="web/docs/screenshots/05-session.png" alt="Session rendered as a chat transcript"></a><br><sub><b>Session</b> — the conversation window as a chat transcript</sub></td>
+    <td width="50%"><a href="https://raw.githubusercontent.com/carneirofc/magi-ai-assistant/master/web/docs/screenshots/04-user-detail.png"><img src="https://raw.githubusercontent.com/carneirofc/magi-ai-assistant/master/web/docs/screenshots/04-user-detail.png" alt="A user's memory — facts as editable cards"></a><br><sub><b>Memory</b> — a user's facts as editable cards, under tabs</sub></td>
+    <td width="50%"><a href="https://raw.githubusercontent.com/carneirofc/magi-ai-assistant/master/web/docs/screenshots/05-session.png"><img src="https://raw.githubusercontent.com/carneirofc/magi-ai-assistant/master/web/docs/screenshots/05-session.png" alt="Session rendered as a chat transcript"></a><br><sub><b>Session</b> — the conversation window as a chat transcript</sub></td>
   </tr>
   <tr>
-    <td width="50%"><a href="web/docs/screenshots/06-knowledge.png"><img src="web/docs/screenshots/06-knowledge.png" alt="Knowledge corpus"></a><br><sub><b>Knowledge</b> — corpus as table or cards, filtered by subject/tag</sub></td>
-    <td width="50%"><a href="web/docs/screenshots/09-persona.png"><img src="web/docs/screenshots/09-persona.png" alt="Persona editor"></a><br><sub><b>Persona</b> — edit the global persona and bot identity</sub></td>
+    <td width="50%"><a href="https://raw.githubusercontent.com/carneirofc/magi-ai-assistant/master/web/docs/screenshots/06-knowledge.png"><img src="https://raw.githubusercontent.com/carneirofc/magi-ai-assistant/master/web/docs/screenshots/06-knowledge.png" alt="Knowledge corpus"></a><br><sub><b>Knowledge</b> — corpus as table or cards, filtered by subject/tag</sub></td>
+    <td width="50%"><a href="https://raw.githubusercontent.com/carneirofc/magi-ai-assistant/master/web/docs/screenshots/09-persona.png"><img src="https://raw.githubusercontent.com/carneirofc/magi-ai-assistant/master/web/docs/screenshots/09-persona.png" alt="Persona editor"></a><br><sub><b>Persona</b> — edit the global persona and bot identity</sub></td>
   </tr>
   <tr>
-    <td width="50%"><a href="web/docs/screenshots/08-subjects.png"><img src="web/docs/screenshots/08-subjects.png" alt="Subject registry"></a><br><sub><b>Subjects</b> — the controlled vocabulary the corpus is grouped by</sub></td>
-    <td width="50%"><a href="web/docs/screenshots/06-knowledge-dark.png"><img src="web/docs/screenshots/06-knowledge-dark.png" alt="Dark theme"></a><br><sub><b>Dark theme</b> — a click away, on every page</sub></td>
+    <td width="50%"><a href="https://raw.githubusercontent.com/carneirofc/magi-ai-assistant/master/web/docs/screenshots/08-subjects.png"><img src="https://raw.githubusercontent.com/carneirofc/magi-ai-assistant/master/web/docs/screenshots/08-subjects.png" alt="Subject registry"></a><br><sub><b>Subjects</b> — the controlled vocabulary the corpus is grouped by</sub></td>
+    <td width="50%"><a href="https://raw.githubusercontent.com/carneirofc/magi-ai-assistant/master/web/docs/screenshots/06-knowledge-dark.png"><img src="https://raw.githubusercontent.com/carneirofc/magi-ai-assistant/master/web/docs/screenshots/06-knowledge-dark.png" alt="Dark theme"></a><br><sub><b>Dark theme</b> — a click away, on every page</sub></td>
   </tr>
 </table>
 
-More views in the [admin UI README](web/README.md#screenshots).
+More views in the [admin UI README](https://github.com/carneirofc/magi-ai-assistant/blob/master/web/README.md#screenshots).
 
 ## Use as a library & extend
 
 magi is meant to be *overlaid*, not forked. A persona repo depends on the engine
 and adds its own persona + specialists without editing the public tree — this is
 how a private persona overlay is built (full plan in
-[docs/split-plan.md](docs/split-plan.md); the frontend twin in
-[docs/frontend-split.md](docs/frontend-split.md)).
+[docs/split-plan.md](https://github.com/carneirofc/magi-ai-assistant/blob/master/docs/split-plan.md); the frontend twin in
+[docs/frontend-split.md](https://github.com/carneirofc/magi-ai-assistant/blob/master/docs/frontend-split.md)).
 
 ```toml
 # your-persona/pyproject.toml
 [project]
-dependencies = ["magi"]                 # pin magi==0.1.* to ship against a release
+dependencies = ["magi-ai-assistant"]    # pin magi-ai-assistant==0.1.* for a release
+                                         # (dist name — you still `import magi`)
 
 [tool.uv.sources]                       # …or a live editable link during dev
-magi = { path = "../chatbot", editable = true }
+magi-ai-assistant = { path = "../chatbot", editable = true }
 ```
 
 Two seams, no forking:
@@ -116,32 +124,36 @@ def build_myspecialist(model): ...      # your own agno Agent factory
   prompts; the bundled neutral demo prompts are the fallback
   (`magi/core/prompts.py`). Persona is data, not code.
 - **The frontend mirrors this** — build your admin/chat UI on the published
-  [`@carneirofc/magi-web`](web/packages/magi-web/README.md) component + chat-runtime
+  [`@carneirofc/magi-web`](https://github.com/carneirofc/magi-ai-assistant/blob/master/web/packages/magi-web/README.md) component + chat-runtime
   library.
 
-**Releases.** Tag `v*` builds the engine wheel/sdist onto a GitHub Release
-([`.github/workflows/publish-magi.yml`](.github/workflows/publish-magi.yml)); tag
+**Releases.** Tag `v*` builds the engine and publishes it to PyPI as
+[`magi-ai-assistant`](https://pypi.org/project/magi-ai-assistant/) — plus a
+GitHub Release carrying the wheel/sdist
+([`.github/workflows/publish-magi.yml`](https://github.com/carneirofc/magi-ai-assistant/blob/master/.github/workflows/publish-magi.yml)); tag
 `magi-web-v*` publishes the frontend library to GitHub Packages
-([`.github/workflows/publish-magi-web.yml`](.github/workflows/publish-magi-web.yml)).
+([`.github/workflows/publish-magi-web.yml`](https://github.com/carneirofc/magi-ai-assistant/blob/master/.github/workflows/publish-magi-web.yml)).
+Tag `release-v*` ships both in lockstep
+([`.github/workflows/release.yml`](https://github.com/carneirofc/magi-ai-assistant/blob/master/.github/workflows/release.yml)).
 
 ## Documentation
 
-Full docs live in [`docs/`](docs/) — this README is just the map.
+Full docs live in [`docs/`](https://github.com/carneirofc/magi-ai-assistant/tree/master/docs) — this README is just the map.
 
 | Topic | Doc |
 |---|---|
-| Install & run, first chat, Open WebUI | [getting-started.md](docs/getting-started.md) |
-| Design, request lifecycle, diagrams | [architecture.md](docs/architecture.md) |
-| Deliberate memory (the centerpiece) | [memory.md](docs/memory.md) |
-| Discord / HTTP / OpenAI shim contracts | [channels.md](docs/channels.md) |
-| Desktop app client (embed or HTTP SDK) | [desktop.md](docs/desktop.md) |
-| Every configuration field | [configuration.md](docs/configuration.md) |
-| Team, members, tool catalog | [agent-and-tools.md](docs/agent-and-tools.md) |
-| Docker services, ports, ingestion | [infrastructure.md](docs/infrastructure.md) |
-| Split into engine + persona overlay; releasing both libraries | [split-plan.md](docs/split-plan.md) · [frontend-split.md](docs/frontend-split.md) |
+| Install & run, first chat, Open WebUI | [getting-started.md](https://github.com/carneirofc/magi-ai-assistant/blob/master/docs/getting-started.md) |
+| Design, request lifecycle, diagrams | [architecture.md](https://github.com/carneirofc/magi-ai-assistant/blob/master/docs/architecture.md) |
+| Deliberate memory (the centerpiece) | [memory.md](https://github.com/carneirofc/magi-ai-assistant/blob/master/docs/memory.md) |
+| Discord / HTTP / OpenAI shim contracts | [channels.md](https://github.com/carneirofc/magi-ai-assistant/blob/master/docs/channels.md) |
+| Desktop app client (embed or HTTP SDK) | [desktop.md](https://github.com/carneirofc/magi-ai-assistant/blob/master/docs/desktop.md) |
+| Every configuration field | [configuration.md](https://github.com/carneirofc/magi-ai-assistant/blob/master/docs/configuration.md) |
+| Team, members, tool catalog | [agent-and-tools.md](https://github.com/carneirofc/magi-ai-assistant/blob/master/docs/agent-and-tools.md) |
+| Docker services, ports, ingestion | [infrastructure.md](https://github.com/carneirofc/magi-ai-assistant/blob/master/docs/infrastructure.md) |
+| Split into engine + persona overlay; releasing both libraries | [split-plan.md](https://github.com/carneirofc/magi-ai-assistant/blob/master/docs/split-plan.md) · [frontend-split.md](https://github.com/carneirofc/magi-ai-assistant/blob/master/docs/frontend-split.md) |
 
-Domain vocabulary is defined in [CONTEXT.md](CONTEXT.md); architecture decisions in
-[docs/adr/](docs/adr/); the release history in [CHANGELOG.md](CHANGELOG.md).
+Domain vocabulary is defined in [CONTEXT.md](https://github.com/carneirofc/magi-ai-assistant/blob/master/CONTEXT.md); architecture decisions in
+[docs/adr/](https://github.com/carneirofc/magi-ai-assistant/tree/master/docs/adr); the release history in [CHANGELOG.md](https://github.com/carneirofc/magi-ai-assistant/blob/master/CHANGELOG.md).
 
 ## Run
 
@@ -154,24 +166,24 @@ python main.py admin    # operator admin API (memory + knowledge)
 
 Every chat channel serves the same brain (`magi/channels/bootstrap.py`); only the
 transport differs. Config is code-first: each channel's settings live in its
-`configure_*` function in [`main.py`](main.py), and defaults in
+`configure_*` function in [`main.py`](https://github.com/carneirofc/magi-ai-assistant/blob/master/main.py), and defaults in
 `magi/core/config.py`. Only *secrets* come from `.env` (`DISCORD_BOT_TOKEN`,
 `API_AUTH_TOKEN`, `QDRANT_API_KEY`, …). Add `--docker` to any chat channel to
 overlay the container-only deltas. Full walkthroughs — first chat, Open WebUI,
-Docker, storage backends — are in [docs/](docs/getting-started.md).
+Docker, storage backends — are in [docs/](https://github.com/carneirofc/magi-ai-assistant/blob/master/docs/getting-started.md).
 
 ## Clients
 
 - **HTTP API + OpenAI shim** — JSON over HTTP, session-scoped, with an
   OpenAI-compatible `/v1/chat/completions` so off-the-shelf UIs (Open WebUI,
   LibreChat) work unchanged. Streams `delta` events over SSE, carries media both
-  ways. Contract in [docs/channels.md](docs/channels.md).
-- **Desktop SDK** — [`magi.client`](src/magi/client/__init__.py) embeds the whole
+  ways. Contract in [docs/channels.md](https://github.com/carneirofc/magi-ai-assistant/blob/master/docs/channels.md).
+- **Desktop SDK** — [`magi.client`](https://github.com/carneirofc/magi-ai-assistant/blob/master/src/magi/client/__init__.py) embeds the whole
   brain in a Python GUI (`embed(...)`, no server) or talks to a running API
   (`connect(...)`) behind one call surface; `SyncClient` wraps either in blocking
   methods for Tkinter/PyQt/wx. Runnable example:
-  [`examples/desktop_chat.py`](examples/desktop_chat.py). See
-  [docs/desktop.md](docs/desktop.md).
+  [`examples/desktop_chat.py`](https://github.com/carneirofc/magi-ai-assistant/blob/master/examples/desktop_chat.py). See
+  [docs/desktop.md](https://github.com/carneirofc/magi-ai-assistant/blob/master/docs/desktop.md).
 - **Native desktop shell** — `python main.py desktop` renders the web frontend in
   a chromeless, translucent window and serves it from one process, with a
   JS↔Python bridge.
