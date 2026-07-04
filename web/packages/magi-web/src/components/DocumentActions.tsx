@@ -14,7 +14,7 @@ import {
   TrashIcon,
 } from "@carneirofc/ui";
 
-import { encodeDocId } from "@/lib/encode";
+import { encodeDocId } from "../lib/encode";
 
 export function DocumentActions({ docId, title }: { docId: string; title: string }) {
   const router = useRouter();

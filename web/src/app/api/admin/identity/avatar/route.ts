@@ -4,7 +4,7 @@
 
 import { NextResponse } from "next/server";
 
-import { deleteIdentityAvatar, fetchIdentityAvatar, putIdentityAvatar } from "@/lib/admin-api";
+import { deleteIdentityAvatar, fetchIdentityAvatar, putIdentityAvatar } from "@carneirofc/magi-web/lib/admin-api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

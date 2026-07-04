@@ -3,7 +3,7 @@
 // Referenced from transcripts as /api/chat/blobs/<id> once media is offloaded
 // (chat-media-offload.ts).
 
-import { getBlobStore, isValidBlobId } from "@/lib/blob-store";
+import { getBlobStore, isValidBlobId } from "@carneirofc/magi-web/lib/blob-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

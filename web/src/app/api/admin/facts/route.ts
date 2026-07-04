@@ -3,7 +3,7 @@
 
 import { NextResponse } from "next/server";
 
-import { addFact, deleteFact, updateFact } from "@/lib/admin-api";
+import { addFact, deleteFact, updateFact } from "@carneirofc/magi-web/lib/admin-api";
 
 type Payload = {
   userId?: string;

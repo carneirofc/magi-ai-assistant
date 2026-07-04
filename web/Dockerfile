@@ -10,6 +10,9 @@ WORKDIR /app
 # token. Pass it as a build secret so it never lands in an image layer:
 #   docker build --secret id=node_auth_token,env=NODE_AUTH_TOKEN ...
 COPY package.json package-lock.json* .npmrc ./
+# npm workspaces: the member manifest must be present before install so the
+# lockfile's workspace link resolves (@carneirofc/magi-web is local, not fetched).
+COPY packages/magi-web/package.json ./packages/magi-web/package.json
 # Use the lockfile when present; fall back to a plain install otherwise.
 RUN --mount=type=secret,id=node_auth_token \
     NODE_AUTH_TOKEN="$(cat /run/secrets/node_auth_token 2>/dev/null || true)" \

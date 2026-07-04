@@ -5,10 +5,10 @@
 import Link from "next/link";
 import { PageHeader, StatusMessage, SurfacePanel } from "@carneirofc/ui";
 
-import { CopyId } from "@/components/CopyId";
-import { SessionFile } from "@/components/SessionFile";
-import { SessionMemoryActions } from "@/components/SessionMemoryActions";
-import { getRawFile } from "@/lib/admin-api";
+import { CopyId } from "@carneirofc/magi-web/components/CopyId";
+import { SessionFile } from "@carneirofc/magi-web/components/SessionFile";
+import { SessionMemoryActions } from "@carneirofc/magi-web/components/SessionMemoryActions";
+import { getRawFile } from "@carneirofc/magi-web/lib/admin-api";
 
 export const dynamic = "force-dynamic";
 

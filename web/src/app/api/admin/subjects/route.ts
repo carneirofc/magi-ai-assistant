@@ -2,7 +2,7 @@
 
 import { NextResponse } from "next/server";
 
-import { createSubject } from "@/lib/admin-api";
+import { createSubject } from "@carneirofc/magi-web/lib/admin-api";
 
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as { name?: string; description?: string };

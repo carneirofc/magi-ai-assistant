@@ -85,6 +85,45 @@ system with light/dark themes. See [`web/`](web/README.md) to run it.
 
 More views in the [admin UI README](web/README.md#screenshots).
 
+## Use as a library & extend
+
+magi is meant to be *overlaid*, not forked. A persona repo depends on the engine
+and adds its own persona + specialists without editing the public tree — this is
+how the private `alyssa` overlay is built (full plan in
+[docs/split-plan.md](docs/split-plan.md); the frontend twin in
+[docs/frontend-split.md](docs/frontend-split.md)).
+
+```toml
+# your-persona/pyproject.toml
+[project]
+dependencies = ["magi"]                 # pin magi==0.1.* to ship against a release
+
+[tool.uv.sources]                       # …or a live editable link during dev
+magi = { path = "../chatbot", editable = true }
+```
+
+Two seams, no forking:
+
+```python
+# register private specialists at your entrypoint, before build_team()
+from magi.agent.members import register_member
+
+@register_member
+def build_myspecialist(model): ...      # your own agno Agent factory
+```
+
+- **Prompts are an overlay search path** — point a config dir at your persona's
+  prompts; the bundled neutral demo prompts are the fallback
+  (`magi/core/prompts.py`). Persona is data, not code.
+- **The frontend mirrors this** — build your admin/chat UI on the published
+  [`@carneirofc/magi-web`](web/packages/magi-web/README.md) component + chat-runtime
+  library.
+
+**Releases.** Tag `v*` builds the engine wheel/sdist onto a GitHub Release
+([`.github/workflows/publish-magi.yml`](.github/workflows/publish-magi.yml)); tag
+`magi-web-v*` publishes the frontend library to GitHub Packages
+([`.github/workflows/publish-magi-web.yml`](.github/workflows/publish-magi-web.yml)).
+
 ## Documentation
 
 Full docs live in [`docs/`](docs/) — this README is just the map.
@@ -99,6 +138,7 @@ Full docs live in [`docs/`](docs/) — this README is just the map.
 | Every configuration field | [configuration.md](docs/configuration.md) |
 | Team, members, tool catalog | [agent-and-tools.md](docs/agent-and-tools.md) |
 | Docker services, ports, ingestion | [infrastructure.md](docs/infrastructure.md) |
+| Split into engine + persona overlay; releasing both libraries | [split-plan.md](docs/split-plan.md) · [frontend-split.md](docs/frontend-split.md) |
 
 Domain vocabulary is defined in [CONTEXT.md](CONTEXT.md); architecture decisions in
 [docs/adr/](docs/adr/); the release history in [CHANGELOG.md](CHANGELOG.md).

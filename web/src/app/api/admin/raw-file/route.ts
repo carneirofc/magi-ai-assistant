@@ -3,7 +3,7 @@
 
 import { NextResponse } from "next/server";
 
-import { putRawFile } from "@/lib/admin-api";
+import { putRawFile } from "@carneirofc/magi-web/lib/admin-api";
 
 export async function PUT(req: Request) {
   const b = (await req.json().catch(() => ({}))) as {

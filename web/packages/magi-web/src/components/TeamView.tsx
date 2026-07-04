@@ -16,7 +16,7 @@ import {
   TableRow,
 } from "@carneirofc/ui";
 
-import type { McpServerInfo, TeamSnapshot, ToolInfo } from "@/lib/introspection-types";
+import type { McpServerInfo, TeamSnapshot, ToolInfo } from "../lib/introspection-types";
 
 function ToolTable({ tools }: { tools: ToolInfo[] }) {
   if (tools.length === 0) {

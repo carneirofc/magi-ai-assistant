@@ -2,7 +2,7 @@
 // set). Referenced as <img src="/api/identity/avatar?v=<version>"> so a new upload
 // busts the browser cache via the version query.
 
-import { fetchIdentityAvatar } from "@/lib/chat-api";
+import { fetchIdentityAvatar } from "@carneirofc/magi-web/lib/chat-api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

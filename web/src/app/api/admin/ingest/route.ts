@@ -4,7 +4,7 @@
 
 import { NextResponse } from "next/server";
 
-import { ingestDocument } from "@/lib/admin-api";
+import { ingestDocument } from "@carneirofc/magi-web/lib/admin-api";
 
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as {

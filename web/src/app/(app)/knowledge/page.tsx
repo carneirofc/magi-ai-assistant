@@ -4,8 +4,8 @@
 import Link from "next/link";
 import { EmptyState, PageHeader, PlusIcon, StatusMessage } from "@carneirofc/ui";
 
-import { KnowledgeList } from "@/components/KnowledgeList";
-import { listKnowledgeDocuments, listSubjects } from "@/lib/admin-api";
+import { KnowledgeList } from "@carneirofc/magi-web/components/KnowledgeList";
+import { listKnowledgeDocuments, listSubjects } from "@carneirofc/magi-web/lib/admin-api";
 
 export const dynamic = "force-dynamic";
 

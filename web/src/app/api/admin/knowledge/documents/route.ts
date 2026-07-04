@@ -9,7 +9,7 @@
 
 import { NextResponse } from "next/server";
 
-import { listKnowledgeDocuments } from "@/lib/admin-api";
+import { listKnowledgeDocuments } from "@carneirofc/magi-web/lib/admin-api";
 
 export async function GET() {
   try {

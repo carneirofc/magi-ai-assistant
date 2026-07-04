@@ -17,9 +17,9 @@ import {
   TableRow,
 } from "@carneirofc/ui";
 
-import { StatCard } from "@/components/StatCard";
-import { encodeDocId } from "@/lib/encode";
-import { getHealth, listKnowledgeDocuments, listSubjects, listUsers } from "@/lib/admin-api";
+import { StatCard } from "@carneirofc/magi-web/components/StatCard";
+import { encodeDocId } from "@carneirofc/magi-web/lib/encode";
+import { getHealth, listKnowledgeDocuments, listSubjects, listUsers } from "@carneirofc/magi-web/lib/admin-api";
 
 export const dynamic = "force-dynamic";
 

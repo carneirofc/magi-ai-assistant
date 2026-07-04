@@ -5,8 +5,8 @@
 
 import { NextResponse } from "next/server";
 
-import { deleteThread, readThread, writeThread } from "@/lib/chat-history-store";
-import { offloadTranscriptMedia } from "@/lib/chat-media-offload";
+import { deleteThread, readThread, writeThread } from "@carneirofc/magi-web/lib/chat-history-store";
+import { offloadTranscriptMedia } from "@carneirofc/magi-web/lib/chat-media-offload";
 
 // Node runtime: this touches the filesystem. Never cache — it's mutable state.
 export const runtime = "nodejs";

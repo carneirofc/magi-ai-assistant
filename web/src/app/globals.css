@@ -10,6 +10,11 @@
  * else the utility classes those components emit get tree-shaken away. */
 @source "../../node_modules/@carneirofc/ui/dist";
 
+/* Same reason for the magi-web component library: it now lives outside src/, so
+ * Tailwind won't discover it unless we point at its source explicitly. Resolved
+ * through the workspace symlink in node_modules. */
+@source "../../node_modules/@carneirofc/magi-web/src";
+
 /* ── Syntax highlighting (Shiki) ─────────────────────────────────────
  * The chat's code blocks (react-shiki, see CodeBlock.tsx) emit token colors as
  * CSS `light-dark(<light>, <dark>)`, which the browser resolves from the nearest

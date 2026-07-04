@@ -3,7 +3,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
-import { session } from "@/lib/session";
+import { session } from "@carneirofc/magi-web/lib/session";
 
 export async function POST(req: Request) {
   const jar = await cookies();

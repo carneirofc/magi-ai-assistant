@@ -2,7 +2,7 @@
 
 import { NextResponse } from "next/server";
 
-import { editDocumentTags } from "@/lib/admin-api";
+import { editDocumentTags } from "@carneirofc/magi-web/lib/admin-api";
 
 export async function PATCH(req: Request) {
   const body = (await req.json().catch(() => ({}))) as {

@@ -1,0 +1,45 @@
+name: Release magi (engine)
+
+# Builds the Python engine as an sdist + wheel and attaches them to a GitHub
+# Release. Trigger by pushing a version tag that matches pyproject.toml, e.g.:
+#   git tag v0.1.0 && git push origin v0.1.0
+# A persona overlay (e.g. alyssa) can then pin `magi @ <release-wheel-url>` or
+# `magi==0.1.0` (if you also enable the PyPI step below). During dev it keeps
+# using the uv editable path source — see docs/split-plan.md.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  # Create the GitHub Release and upload the wheel/sdist as assets.
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build sdist + wheel
+        run: uv build
+
+      - name: Publish GitHub Release with artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" --generate-notes \
+          || gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+
+      # Optional — publish to PyPI too. Add a PYPI_API_TOKEN repo secret, then
+      # uncomment. (uv reads UV_PUBLISH_TOKEN.) GitHub Packages does not host
+      # Python distributions, so PyPI or a private index is the pip route.
+      # - name: Publish to PyPI
+      #   env:
+      #     UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      #   run: uv publish

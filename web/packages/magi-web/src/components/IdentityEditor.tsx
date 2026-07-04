@@ -8,7 +8,7 @@
 import { useRef, useState } from "react";
 import { OutlineButton, StatusMessage, TextAreaInput, TextInput } from "@carneirofc/ui";
 
-import type { AdminIdentity } from "@/lib/admin-api";
+import type { AdminIdentity } from "../lib/admin-api";
 
 // Guard against an accidental multi-MB upload replayed to the model every turn.
 const MAX_AVATAR_BYTES = 4 * 1024 * 1024;

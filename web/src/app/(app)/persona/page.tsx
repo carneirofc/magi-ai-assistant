@@ -3,8 +3,8 @@
 
 import { PageHeader, StatusMessage, SurfacePanel } from "@carneirofc/ui";
 
-import { RawFileEditor } from "@/components/RawFileEditor";
-import { getRawFile } from "@/lib/admin-api";
+import { RawFileEditor } from "@carneirofc/magi-web/components/RawFileEditor";
+import { getRawFile } from "@carneirofc/magi-web/lib/admin-api";
 
 export const dynamic = "force-dynamic";
 

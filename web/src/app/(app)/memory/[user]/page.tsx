@@ -4,10 +4,10 @@
 import Link from "next/link";
 import { EmptyState, InfoChip, PageHeader, StatusMessage, SurfacePanel } from "@carneirofc/ui";
 
-import { FactEditor } from "@/components/FactEditor";
-import { MemoryTabs } from "@/components/MemoryTabs";
-import { RawFileEditor } from "@/components/RawFileEditor";
-import { getProfile, getRawFile, listSessions } from "@/lib/admin-api";
+import { FactEditor } from "@carneirofc/magi-web/components/FactEditor";
+import { MemoryTabs } from "@carneirofc/magi-web/components/MemoryTabs";
+import { RawFileEditor } from "@carneirofc/magi-web/components/RawFileEditor";
+import { getProfile, getRawFile, listSessions } from "@carneirofc/magi-web/lib/admin-api";
 
 export const dynamic = "force-dynamic";
 
