@@ -12,8 +12,11 @@ from magi.core.conversation import (
     _EMPTY_REPLY,
     _ERROR_REPLY,
     ConversationDelta,
+    ConversationReasoning,
     ConversationReply,
     ConversationService,
+    ConversationToolCall,
+    ConversationToolResult,
     _inbound_media_urls,
 )
 
@@ -208,6 +211,34 @@ def _final(status="COMPLETED", content=None, reasoning=None):
     return SimpleNamespace(status=status, content=content, reasoning_content=reasoning)
 
 
+def _reasoning(text):
+    """A fake reasoning-delta event (`event` ends with 'ReasoningContentDelta')."""
+    return SimpleNamespace(event="TeamReasoningContentDelta", reasoning_content=text)
+
+
+def _tool_exec(call_id, name, args=None, result=None, error=False):
+    """A fake agno `ToolExecution` payload carried by tool events."""
+    return SimpleNamespace(
+        tool_call_id=call_id,
+        tool_name=name,
+        tool_args=args or {},
+        result=result,
+        tool_call_error=error,
+    )
+
+
+def _tool_started(tool):
+    return SimpleNamespace(event="TeamToolCallStarted", tool=tool)
+
+
+def _tool_completed(tool):
+    return SimpleNamespace(event="TeamToolCallCompleted", tool=tool)
+
+
+def _tool_errored(tool):
+    return SimpleNamespace(event="TeamToolCallError", tool=tool)
+
+
 class _FakeStreamRunner:
     """agno-shaped streaming runner: `arun` is sync and returns the iterator."""
 
@@ -285,3 +316,39 @@ async def test_stream_empty_run_ends_with_honest_fallback():
     items = await _collect(service)
 
     assert items == [ConversationReply(text=_EMPTY_REPLY, is_error=True)]
+
+
+async def test_stream_surfaces_reasoning_and_tool_events():
+    """Reasoning deltas and tool start/result events ride the stream as their own
+    observability items, interleaved with text; the final reply is unchanged."""
+    tool = _tool_exec("call-1", "web_search", {"q": "cats"}, result="found")
+    runner = _FakeStreamRunner(
+        [
+            _reasoning("let me think"),
+            _tool_started(tool),
+            _tool_completed(tool),
+            _delta("the "),
+            _delta("answer"),
+            _final(content="the answer"),
+        ]
+    )
+    service = ConversationService(runner=runner, memory=_FakeMemory())
+
+    items = await _collect(service)
+
+    assert items[0] == ConversationReasoning(text="let me think")
+    assert items[1] == ConversationToolCall(call_id="call-1", name="web_search", args={"q": "cats"})
+    assert items[2] == ConversationToolResult(call_id="call-1", result="found", is_error=False)
+    assert items[3:5] == [ConversationDelta(text="the "), ConversationDelta(text="answer")]
+    assert items[-1] == ConversationReply(text="the answer")
+
+
+async def test_stream_tool_error_event_is_flagged():
+    tool = _tool_exec("c2", "flaky", result="ERROR: boom", error=True)
+    runner = _FakeStreamRunner([_tool_started(tool), _tool_errored(tool), _final(content="ok")])
+    service = ConversationService(runner=runner, memory=_FakeMemory())
+
+    items = await _collect(service)
+
+    assert items[0] == ConversationToolCall(call_id="c2", name="flaky", args={})
+    assert items[1] == ConversationToolResult(call_id="c2", result="ERROR: boom", is_error=True)

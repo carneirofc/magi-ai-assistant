@@ -66,7 +66,7 @@ from contextlib import asynccontextmanager
 from typing import Optional, Protocol, Union
 
 from agno.db.base import BaseDb
-from agno.media import Image
+from agno.media import File, Image
 from agno.utils.log import log_info, log_warning
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -76,7 +76,14 @@ from pydantic import BaseModel, Field, model_validator
 
 from magi.agent.introspect import TeamSnapshot, build_snapshot
 from magi.channels.gateway import scoped_user_id
-from magi.core.conversation import ConversationDelta, ConversationReply, ConversationService
+from magi.core.conversation import (
+    ConversationDelta,
+    ConversationReasoning,
+    ConversationReply,
+    ConversationService,
+    ConversationToolCall,
+    ConversationToolResult,
+)
 
 # This channel's namespace for `scoped_user_id` (ADR 0003) — the native
 # contract and the OpenAI-compatible shim below are one transport/platform,
@@ -98,18 +105,34 @@ class InboundImage(BaseModel):
     data_base64: Optional[str] = None
 
 
+class InboundFile(BaseModel):
+    """A non-image file the client sends for the agent to see (pdf, txt, csv, …).
+    Exactly one of `data_base64` / `url` is set; a base64 `data:` URI may also
+    ride in `url`."""
+
+    mime_type: Optional[str] = None
+    filename: Optional[str] = None
+    url: Optional[str] = None
+    data_base64: Optional[str] = None
+
+
 class MessageRequest(BaseModel):
     user_id: str = Field(min_length=1, description="Stable id of the end user (scopes memory).")
-    text: str = Field(default="", description="The user's message (optional when images are sent).")
+    text: str = Field(
+        default="", description="The user's message (optional when attachments are sent)."
+    )
     images: list[InboundImage] = Field(
         default_factory=list, description="Images the agent should see this turn."
+    )
+    files: list[InboundFile] = Field(
+        default_factory=list, description="Non-image files the agent should see this turn."
     )
 
     @model_validator(mode="after")
     def _require_content(self) -> "MessageRequest":
-        """A turn must carry something — text or at least one image."""
-        if not self.text.strip() and not self.images:
-            raise ValueError("provide text or at least one image")
+        """A turn must carry something — text or at least one attachment."""
+        if not self.text.strip() and not self.images and not self.files:
+            raise ValueError("provide text or at least one attachment")
         return self
 
 
@@ -215,15 +238,60 @@ def _inbound_image(
     return None
 
 
-def _inbound_media(images: Sequence[InboundImage]) -> dict:
-    """The agno `arun(**media)` kwargs for a turn's inbound images (drops any
+def _inbound_file(
+    url: Optional[str],
+    data_base64: Optional[str],
+    mime_type: Optional[str],
+    filename: Optional[str],
+) -> Optional[File]:
+    """Build an inbound agno File from a client reference (the non-image sibling
+    of `_inbound_image`).
+
+    Inline bytes (`data_base64`, or a `data:` URI in `url`) are decoded so any
+    backend can see them; a plain http(s) URL is passed by reference.
+    """
+    if data_base64:
+        try:
+            content = base64.b64decode(data_base64)
+        except ValueError:
+            return None
+        return File(
+            content=content, mime_type=mime_type, format=_subtype(mime_type), filename=filename
+        )
+    if url:
+        decoded = _decode_data_uri(url)
+        if decoded is not None:
+            content, mime = decoded
+            mime = mime_type or mime
+            return File(
+                content=content, mime_type=mime, format=_subtype(mime), filename=filename
+            )
+        if url.lower().startswith(("http://", "https://")):
+            return File(url=url, mime_type=mime_type, filename=filename)
+    return None
+
+
+def _inbound_media(images: Sequence[InboundImage], files: Sequence[InboundFile] = ()) -> dict:
+    """The agno `arun(**media)` kwargs for a turn's inbound attachments (drops any
     item that has neither usable bytes nor an http(s)/data URL)."""
-    built = [
+    built_images = [
         img
         for img in (_inbound_image(i.url, i.data_base64, i.mime_type) for i in images)
         if img is not None
     ]
-    return {"images": built} if built else {}
+    built_files = [
+        f
+        for f in (
+            _inbound_file(i.url, i.data_base64, i.mime_type, i.filename) for i in files
+        )
+        if f is not None
+    ]
+    media: dict = {}
+    if built_images:
+        media["images"] = built_images
+    if built_files:
+        media["files"] = built_files
+    return media
 
 
 class FlushRequest(BaseModel):
@@ -450,7 +518,7 @@ def create_app(
             user_id=_scoped(body.user_id),
             session_id=session_id,
             text=body.text,
-            media=_inbound_media(body.images),
+            media=_inbound_media(body.images, body.files),
         )
         # Errors travel in-band (`is_error`), not as HTTP errors: the run finished
         # and produced an honest reply for the client to show — that's a 200.
@@ -461,14 +529,29 @@ def create_app(
         dependencies=[Depends(require_auth)],
     )
     async def post_message_stream(session_id: str, body: MessageRequest) -> StreamingResponse:
-        media = _inbound_media(body.images)
+        media = _inbound_media(body.images, body.files)
 
         async def events():
             async for item in conversation.handle_stream(
                 user_id=_scoped(body.user_id), session_id=session_id, text=body.text, media=media
             ):
+                # Live observability frames (thinking + tool activity) ride
+                # alongside the text `delta`s; the terminal `done` frame stays
+                # authoritative — clients render it over the assembled deltas.
                 if isinstance(item, ConversationDelta):
                     yield _sse("delta", {"text": item.text})
+                elif isinstance(item, ConversationReasoning):
+                    yield _sse("reasoning", {"text": item.text})
+                elif isinstance(item, ConversationToolCall):
+                    yield _sse(
+                        "tool_call",
+                        {"id": item.call_id, "name": item.name, "args": item.args},
+                    )
+                elif isinstance(item, ConversationToolResult):
+                    yield _sse(
+                        "tool_result",
+                        {"id": item.call_id, "result": item.result, "is_error": item.is_error},
+                    )
                 else:
                     yield _sse("done", _to_wire(item).model_dump())
 

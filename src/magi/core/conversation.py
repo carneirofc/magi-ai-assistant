@@ -51,6 +51,35 @@ def _inbound_media_urls(media: dict[str, Any]) -> list[str]:
     return urls
 
 
+def _tool_call_event(tool: Any) -> Optional["ConversationToolCall"]:
+    """A `ConversationToolCall` from an agno `ToolExecution`, or None if there's
+    no usable tool payload (defensive: the event's `tool` is Optional upstream)."""
+    if tool is None:
+        return None
+    name = getattr(tool, "tool_name", None)
+    if not name:
+        return None
+    args = getattr(tool, "tool_args", None)
+    return ConversationToolCall(
+        call_id=getattr(tool, "tool_call_id", None) or "",
+        name=name,
+        args=args if isinstance(args, dict) else {},
+    )
+
+
+def _tool_result_event(tool: Any) -> Optional["ConversationToolResult"]:
+    """A `ConversationToolResult` from an agno `ToolExecution`, or None when the
+    tool payload is missing."""
+    if tool is None:
+        return None
+    result = getattr(tool, "result", None)
+    return ConversationToolResult(
+        call_id=getattr(tool, "tool_call_id", None) or "",
+        result=result if isinstance(result, str) else ("" if result is None else str(result)),
+        is_error=bool(getattr(tool, "tool_call_error", False)),
+    )
+
+
 _ERROR_REPLY = "Sorry, there was an error processing your message. Please try again later."
 # Run finished cleanly but the lead emitted nothing — e.g. a tool failed and it
 # stalled instead of recovering. Never hand the channel silence: say so honestly.
@@ -88,6 +117,47 @@ class ConversationDelta:
     """One streamed chunk of the reply text (see `handle_stream`)."""
 
     text: str
+
+
+@dataclass(frozen=True)
+class ConversationReasoning:
+    """One streamed chunk of the model's thinking (see `handle_stream`).
+
+    Emitted only when the run produces reasoning; many turns produce none. It is
+    observability, not the answer — the final `ConversationReply` remains
+    authoritative for what to persist.
+    """
+
+    text: str
+
+
+@dataclass(frozen=True)
+class ConversationToolCall:
+    """A tool the lead just started calling, surfaced live for observability.
+
+    `call_id` ties a call to its later `ConversationToolResult`; `name` is the
+    tool/function name and `args` the arguments it was invoked with.
+    """
+
+    call_id: str
+    name: str
+    args: dict
+
+
+@dataclass(frozen=True)
+class ConversationToolResult:
+    """The outcome of a previously started tool call (matched by `call_id`)."""
+
+    call_id: str
+    result: str
+    is_error: bool = False
+
+
+# The streamed items `handle_stream` yields before its terminal reply: text
+# deltas plus the live reasoning/tool observability events.
+ConversationStreamEvent = (
+    ConversationDelta | ConversationReasoning | ConversationToolCall | ConversationToolResult
+)
 
 
 class ConversationService:
@@ -187,13 +257,16 @@ class ConversationService:
         text: str,
         media: Optional[dict] = None,
         extra_context: str = "",
-    ) -> AsyncIterator[ConversationDelta | ConversationReply]:
+    ) -> AsyncIterator[ConversationStreamEvent | ConversationReply]:
         """Like `handle`, but yields the reply incrementally.
 
-        Yields a `ConversationDelta` per text chunk as the model produces it, then
-        exactly one final `ConversationReply` (the authoritative result — channels
-        should render it over the assembled deltas). Memory semantics are identical
-        to `handle`: the turn is recorded and folded once, from the final text.
+        Yields, as the run unfolds: a `ConversationDelta` per text chunk, plus
+        live observability events — `ConversationReasoning` (thinking chunks),
+        `ConversationToolCall`/`ConversationToolResult` (the lead's tool activity)
+        — then exactly one final `ConversationReply` (the authoritative result —
+        channels should render it over the assembled deltas). Memory semantics are
+        identical to `handle`: the turn is recorded and folded once, from the final
+        text. A channel that only wants text can ignore the non-delta events.
         """
         media = media or {}
         user_id = str(user_id)
@@ -210,7 +283,11 @@ class ConversationService:
                 user_id=user_id,
                 session_id=session_id,
                 stream=True,
-                stream_events=False,
+                # Emit the lead's intermediate events (reasoning + tool calls), not
+                # just content, so channels can show live thinking/tool activity.
+                # Member events stay off (team `stream_member_events=False`), so this
+                # is the lead's own activity only, not every delegate's.
+                stream_events=True,
                 # agno yields the full RunOutput as the stream's last item; that is
                 # the same object the non-stream path gets, so both finish alike.
                 yield_run_output=True,
@@ -220,12 +297,30 @@ class ConversationService:
                 if hasattr(event, "status"):  # the final RunOutput/TeamRunOutput
                     final = event
                     continue
-                # Content deltas: `RunContent` (agent) / `TeamRunContent` (team).
-                if getattr(event, "event", "").endswith("RunContent"):
+                # Event names are suffix-matched so the agent (`RunContent`) and
+                # team (`TeamRunContent`) variants both hit the same branch.
+                name = getattr(event, "event", "")
+                # Content deltas: `RunContent` / `TeamRunContent`.
+                if name.endswith("RunContent"):
                     delta = getattr(event, "content", None)
                     if isinstance(delta, str) and delta:
                         chunks.append(delta)
                         yield ConversationDelta(text=delta)
+                # Thinking deltas: `ReasoningContentDelta` / `TeamReasoningContentDelta`.
+                elif name.endswith("ReasoningContentDelta"):
+                    reasoning_chunk = getattr(event, "reasoning_content", None)
+                    if isinstance(reasoning_chunk, str) and reasoning_chunk:
+                        yield ConversationReasoning(text=reasoning_chunk)
+                # Tool started: `ToolCallStarted` / `TeamToolCallStarted`.
+                elif name.endswith("ToolCallStarted"):
+                    call = _tool_call_event(getattr(event, "tool", None))
+                    if call is not None:
+                        yield call
+                # Tool finished (ok or error): `ToolCall(Completed|Error)` variants.
+                elif name.endswith("ToolCallCompleted") or name.endswith("ToolCallError"):
+                    result = _tool_result_event(getattr(event, "tool", None))
+                    if result is not None:
+                        yield result
         except Exception as exc:  # noqa: BLE001 — the stream must end with a reply.
             log_error(f"conversation: stream failed: {type(exc).__name__}: {exc}")
             yield ConversationReply(text=_ERROR_REPLY, is_error=True)

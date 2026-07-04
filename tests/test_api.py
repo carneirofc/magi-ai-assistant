@@ -11,7 +11,13 @@ import json
 from fastapi.testclient import TestClient
 
 from magi.channels.api import create_app
-from magi.core.conversation import ConversationDelta, ConversationReply
+from magi.core.conversation import (
+    ConversationDelta,
+    ConversationReasoning,
+    ConversationReply,
+    ConversationToolCall,
+    ConversationToolResult,
+)
 
 
 class _FakeConversation:
@@ -134,6 +140,37 @@ def test_stream_emits_deltas_then_done():
         ("done", {"text": "the answer", "reasoning": None, "is_error": False, "media": []}),
     ]
     assert conversation.calls == [("handle_stream", "api:u1", "win-1", "hi")]
+
+
+class _RichStreamConversation(_FakeConversation):
+    """Stream that also emits reasoning + tool observability events."""
+
+    async def handle_stream(self, *, user_id, session_id, text, media=None, extra_context=""):
+        self.calls.append(("handle_stream", user_id, session_id, text))
+        self.last_media = media
+        yield ConversationReasoning(text="hmm")
+        yield ConversationToolCall(call_id="c1", name="web_search", args={"q": "x"})
+        yield ConversationToolResult(call_id="c1", result="hit", is_error=False)
+        yield ConversationDelta(text="the answer")
+        yield self.reply
+
+
+def test_stream_emits_reasoning_and_tool_frames():
+    conversation = _RichStreamConversation()
+    client = TestClient(create_app(conversation))
+
+    resp = client.post(
+        "/v1/sessions/s/messages/stream", json={"user_id": "u1", "text": "hi"}
+    )
+
+    assert resp.status_code == 200
+    assert _parse_sse(resp.text) == [
+        ("reasoning", {"text": "hmm"}),
+        ("tool_call", {"id": "c1", "name": "web_search", "args": {"q": "x"}}),
+        ("tool_result", {"id": "c1", "result": "hit", "is_error": False}),
+        ("delta", {"text": "the answer"}),
+        ("done", {"text": "the answer", "reasoning": None, "is_error": False, "media": []}),
+    ]
 
 
 def test_stream_requires_bearer_token_when_configured():
@@ -553,6 +590,80 @@ def test_native_message_allows_image_only_turn():
     assert resp.status_code == 200
     assert conversation.calls[0][3] == ""
     assert len(conversation.last_media["images"]) == 1
+
+
+# --- inbound files (client → agent) ------------------------------------------
+_TXT_B64 = base64.b64encode(b"hello file").decode()
+
+
+def test_native_message_accepts_inbound_file_base64():
+    client, conversation = _client()
+
+    resp = client.post(
+        "/v1/sessions/s/messages",
+        json={
+            "user_id": "u1",
+            "text": "read this",
+            "files": [
+                {"data_base64": _TXT_B64, "mime_type": "text/plain", "filename": "note.txt"}
+            ],
+        },
+    )
+
+    assert resp.status_code == 200
+    files = conversation.last_media["files"]
+    assert len(files) == 1
+    assert files[0].content == b"hello file"
+    assert files[0].mime_type == "text/plain"
+    assert files[0].format == "plain"
+    assert files[0].filename == "note.txt"
+
+
+def test_native_message_passes_file_http_url_by_reference():
+    client, conversation = _client()
+
+    client.post(
+        "/v1/sessions/s/messages",
+        json={
+            "user_id": "u1",
+            "text": "read",
+            "files": [{"url": "https://cdn.example/doc.pdf", "mime_type": "application/pdf"}],
+        },
+    )
+
+    f = conversation.last_media["files"][0]
+    assert f.url == "https://cdn.example/doc.pdf"
+    assert f.content is None
+
+
+def test_native_message_allows_file_only_turn():
+    client, conversation = _client()
+
+    resp = client.post(
+        "/v1/sessions/s/messages",
+        json={"user_id": "u1", "text": "", "files": [{"data_base64": _TXT_B64}]},
+    )
+
+    assert resp.status_code == 200
+    assert conversation.calls[0][3] == ""
+    assert len(conversation.last_media["files"]) == 1
+
+
+def test_native_message_carries_both_images_and_files():
+    client, conversation = _client()
+
+    client.post(
+        "/v1/sessions/s/messages",
+        json={
+            "user_id": "u1",
+            "text": "both",
+            "images": [{"data_base64": _PNG_B64}],
+            "files": [{"data_base64": _TXT_B64, "filename": "n.txt"}],
+        },
+    )
+
+    assert len(conversation.last_media["images"]) == 1
+    assert len(conversation.last_media["files"]) == 1
 
 
 def test_chat_completions_forwards_inbound_image():
