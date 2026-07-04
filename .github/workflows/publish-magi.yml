@@ -1,10 +1,11 @@
 name: Release magi (engine)
 
-# Builds the Python engine as an sdist + wheel and attaches them to a GitHub
-# Release. Trigger by pushing a version tag that matches pyproject.toml, e.g.:
+# Builds the Python engine as an sdist + wheel, publishes them to PyPI, and also
+# attaches them to a GitHub Release. Trigger by pushing a version tag that
+# matches pyproject.toml, e.g.:
 #   git tag v0.1.0 && git push origin v0.1.0
-# A persona overlay (e.g. alyssa) can then pin `magi @ <release-wheel-url>` or
-# `magi==0.1.0` (if you also enable the PyPI step below). During dev it keeps
+# A persona overlay (e.g. alyssa) then pins `magi==0.1.0` from PyPI (GitHub
+# Packages has no Python registry — PyPI is the pip route). During dev it keeps
 # using the uv editable path source — see docs/split-plan.md.
 on:
   push:
@@ -28,6 +29,16 @@ jobs:
       - name: Build sdist + wheel
         run: uv build
 
+      # PyPI is the pip route — GitHub Packages has no Python registry. Needs a
+      # PYPI_API_TOKEN repo secret (a PyPI project-scoped API token); uv reads it
+      # via UV_PUBLISH_TOKEN.
+      - name: Publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: uv publish
+
+      # Also attach the built dists to a GitHub Release for tagged notes and a
+      # direct-download URL fallback.
       - name: Publish GitHub Release with artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -35,11 +46,3 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/* \
             --title "$GITHUB_REF_NAME" --generate-notes \
           || gh release upload "$GITHUB_REF_NAME" dist/* --clobber
-
-      # Optional — publish to PyPI too. Add a PYPI_API_TOKEN repo secret, then
-      # uncomment. (uv reads UV_PUBLISH_TOKEN.) GitHub Packages does not host
-      # Python distributions, so PyPI or a private index is the pip route.
-      # - name: Publish to PyPI
-      #   env:
-      #     UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-      #   run: uv publish

@@ -1,9 +1,45 @@
+# Distribution name is `magi-ai-assistant` (the plain `magi` is taken on PyPI by
+# an unrelated project). The *import* package is still `magi` — see
+# [tool.hatch.build.targets.wheel] below — so overlays keep doing `import magi`.
 [project]
-name = "magi"
-version = "0.1.1"
+name = "magi-ai-assistant"
+version = "0.1.2"
 description = "magi — an assistant-core engine: a lead routing to a specialist team, with memory, knowledge, and tools."
 readme = "README.md"
 requires-python = ">=3.14"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Cláudio Carneiro", email = "claudiofcarneiro@gmail.com" },
+]
+maintainers = [
+    { name = "Cláudio Carneiro", email = "claudiofcarneiro@gmail.com" },
+]
+keywords = [
+    "ai",
+    "assistant",
+    "agent",
+    "agno",
+    "llm",
+    "chatbot",
+    "discord",
+    "memory",
+    "rag",
+    "multi-agent",
+]
+# NB: no "License ::" classifier — the SPDX `license` expression above is the
+# single source of truth (PEP 639); listing both is rejected by modern tooling.
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: OS Independent",
+    "Framework :: FastAPI",
+    "Topic :: Communications :: Chat",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
 # Engine packages a persona (private repo, e.g. alyssa) installs and extends.
 # The persona references this distribution by name; during local dev it points a
 # `[tool.uv.sources]` editable path source at this working tree so engine edits
@@ -23,6 +59,13 @@ dependencies = [
     "sqlalchemy>=2.0.50",
     "uvicorn[standard]>=0.48.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/carneirofc/magi-ai-assistant"
+Repository = "https://github.com/carneirofc/magi-ai-assistant"
+Documentation = "https://github.com/carneirofc/magi-ai-assistant/tree/master/docs"
+Changelog = "https://github.com/carneirofc/magi-ai-assistant/blob/master/CHANGELOG.md"
+Issues = "https://github.com/carneirofc/magi-ai-assistant/issues"
 
 [project.optional-dependencies]
 # Semantic memory search (SEMANTIC_MEMORY=1). Optional: magi.core.memory.semantic
@@ -46,6 +89,15 @@ mcp = [
 s3 = [
     "boto3>=1.35.0",
 ]
+# Git-backed memory (memory_git_enabled=True). Optional: magi.core.memory.git_backend
+# lazy-imports GitPython and the factory no-ops when it's absent, so the base
+# install stays lean. Makes the memory root (memory_dir) a git repository the
+# backend initializes and manages, committing every deliberate memory write so the
+# whole tree has a full, inspectable, revertible history. Enable with:
+# uv sync --extra git
+git = [
+    "GitPython>=3.1.40",
+]
 # Desktop shell (`python main.py desktop`). Optional: magi.desktop is imported only
 # when that channel runs (main.py lazy-imports it), so the base install and the
 # other channels stay Qt-free. Provides PySide6 + QtWebEngine to render the web
@@ -65,6 +117,22 @@ build-backend = "hatchling.build"
 # (see magi/core/prompts.py).
 [tool.hatch.build.targets.wheel]
 packages = ["src/magi"]
+
+# Keep the sdist to Python sources + project docs. Without an explicit include,
+# hatchling sweeps the whole tree into the sdist — including the built Next.js
+# frontend under web/.next/ and its node_modules (hundreds of MB). The frontend
+# ships separately as the @carneirofc/magi-web npm package, so it has no business
+# in the engine's sdist. Leading slashes anchor to the project root — hatchling
+# uses .gitignore matching, so an unanchored "LICENSE" would also pull in every
+# node_modules/**/LICENSE.
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src/magi",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+    "/pyproject.toml",
+]
 
 [dependency-groups]
 dev = [

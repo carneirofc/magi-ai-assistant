@@ -1,6 +1,6 @@
 {
   "name": "@carneirofc/magi-web",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "MAGI frontend library — presentational React components and the SSE chat runtime for building magi-engine admin/chat UIs. Consumed from source via Next.js transpilePackages.",
   "license": "UNLICENSED",
   "type": "module",

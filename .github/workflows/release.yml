@@ -1,8 +1,8 @@
 name: Release (engine + frontend)
 
-# One-shot release of BOTH libraries in lockstep: the Python engine (wheel/sdist
-# onto a GitHub Release) and the @carneirofc/magi-web frontend (to GitHub
-# Packages). Bump both manifests to the same version first, then:
+# One-shot release of BOTH libraries in lockstep: the Python engine (to PyPI,
+# plus wheel/sdist onto a GitHub Release) and the @carneirofc/magi-web frontend
+# (to GitHub Packages). Bump both manifests to the same version first, then:
 #   git tag release-v0.1.1 && git push origin release-v0.1.1
 # The single-library workflows (publish-magi.yml / publish-magi-web.yml) still
 # exist for releasing one side independently.
@@ -28,6 +28,13 @@ jobs:
 
       - name: Build sdist + wheel
         run: uv build
+
+      # PyPI is the pip route — GitHub Packages has no Python registry. Needs a
+      # PYPI_API_TOKEN repo secret; uv reads it via UV_PUBLISH_TOKEN.
+      - name: Publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: uv publish
 
       - name: Publish GitHub Release with artifacts
         env:
