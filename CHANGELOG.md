@@ -58,6 +58,10 @@ All notable changes to **magi** are documented here. The format follows
   still builds a model-free manager.
 - Extracted a shared deterministic curation-apply path reused by both the
   per-turn curator and the new session-summary curation.
+- Deepened the admin memory architecture: a dedicated `MemoryAdmin` module now
+  owns operator memory reads/writes, session snapshots, trigger capability
+  checks, optimistic concurrency, and semantic/archive reconciliation, leaving
+  `channels/admin.py` as a thinner HTTP adapter over that interface.
 - The in-process admin surface is enabled by default in the bundled entrypoints.
 
 ### Docs

@@ -19,6 +19,16 @@ from agno.utils.log import log_info
 
 from magi.core.config import config
 from magi.core.items import ItemArchive, build_item_archive_from_config
+from magi.core.memory.admin import (
+    InvalidRawJsonError,
+    MemoryManagerRequiredError,
+    MemoryAdmin,
+    SessionRequiredError,
+    StaleVersionError,
+    TriggerUnavailableError,
+    UnknownMemoryFileKindError,
+    UserRequiredError,
+)
 from magi.core.memory.curation import CurateFn, CurationInput, CurationResult, FactOp
 from magi.core.memory.git_backend import build_memory_git
 from magi.core.memory.manager import MemoryManager, MemoryScope, SummarizeFn
@@ -33,6 +43,14 @@ __all__ = [
     "CurationInput",
     "CurationResult",
     "FactOp",
+    "MemoryAdmin",
+    "MemoryManagerRequiredError",
+    "StaleVersionError",
+    "TriggerUnavailableError",
+    "UnknownMemoryFileKindError",
+    "UserRequiredError",
+    "SessionRequiredError",
+    "InvalidRawJsonError",
     "EffectiveMemorySettings",
     "resolve_memory_settings",
     "operator_settings_store",

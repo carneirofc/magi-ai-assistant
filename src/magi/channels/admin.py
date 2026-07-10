@@ -42,12 +42,19 @@ from magi.core.knowledge import (
     SubjectRegistry,
 )
 from magi.core.memory import (
+    InvalidRawJsonError,
+    MemoryManagerRequiredError,
     MemoryManager,
+    MemoryAdmin,
+    SessionRequiredError,
+    StaleVersionError,
+    TriggerUnavailableError,
+    UnknownMemoryFileKindError,
+    UserRequiredError,
     resolve_memory_settings,
 )
-from magi.core.memory.adapters import slug as _mem_slug
 from magi.core.memory.semantic import MemoryRetriever
-from magi.core.memory.store import FileMemoryStore, ScopedMemory
+from magi.core.memory.store import FileMemoryStore
 from magi.core.settings import MemoryOverrides, OperatorSettingsStore
 
 # A session id is irrelevant when reading user-level files (facts, episodes,
@@ -370,39 +377,7 @@ def create_admin_app(
     the next restart, so the running `memory` root is reported back as the active one.
     """
     app = FastAPI(title="magi-admin", version="1")
-
-    def _facts(mem: ScopedMemory) -> list[Fact]:
-        return [
-            Fact(id=str(f.get("id", "")), text=str(f.get("text", "")), ts=str(f.get("ts", "")))
-            for f in mem.long_term_facts.read()
-        ]
-
-    def _check_version(mem: ScopedMemory, expected: Optional[str]) -> None:
-        if expected is not None and expected != mem.long_term_facts.version():
-            raise HTTPException(status_code=409, detail="stale version; refetch the profile")
-
-    def _reindex_facts(mem: ScopedMemory) -> None:
-        """Rebuild the user's long-term semantic slice from the current facts, so a
-        deleted/edited fact stops surfacing in recall, and refresh the durable
-        fact-sheet snapshot in the item archive. Each side no-ops when its backend is
-        off, so an admin fact edit stays consistent with the chat path."""
-        if retriever is not None:
-            retriever.reset(mem.user_id, _LONG_TERM_KIND)
-            for text in mem.long_term_facts.texts():
-                retriever.index(mem.user_id, _LONG_TERM_KIND, text)
-        if archive is not None:
-            path = mem.long_term_facts.path
-            data = path.read_bytes() if path.exists() else b"[]"
-            archive.persist(
-                "memory",
-                _mem_slug(mem.user_id),
-                data=data,
-                content_type="application/json",
-                metadata={"file": "long_term_facts.json", "user_id": mem.user_id},
-            )
-
-    def _facts_result(mem: ScopedMemory) -> FactsResult:
-        return FactsResult(facts=_facts(mem), version=mem.long_term_facts.version())
+    memory_admin = MemoryAdmin(memory, retriever=retriever, archive=archive)
 
     bearer = HTTPBearer(auto_error=False)
 
@@ -574,14 +549,14 @@ def create_admin_app(
     )
     def list_users() -> UserList:
         users: list[UserSummary] = []
-        for user_id in memory.list_users():
-            mem = memory.scoped(user_id, _USER_SCOPE_SID)
+        for user_id in memory_admin.list_users():
+            profile = memory_admin.profile(user_id)
             users.append(
                 UserSummary(
                     user_id=user_id,
-                    fact_count=len(mem.long_term_facts.read()),
-                    episode_count=mem.episodes.count(),
-                    session_count=len(memory.list_sessions(user_id)),
+                    fact_count=len(profile.facts),
+                    episode_count=len(profile.episodes),
+                    session_count=len(memory_admin.list_sessions(user_id)),
                 )
             )
         return UserList(users=users)
@@ -592,12 +567,12 @@ def create_admin_app(
         dependencies=[Depends(require_auth)],
     )
     def get_profile(user_id: str) -> Profile:
-        mem = memory.scoped(user_id, _USER_SCOPE_SID)
+        profile = memory_admin.profile(user_id)
         return Profile(
-            facts=_facts(mem),
-            raw_long_term=mem.long_term.bodies(),
-            episodes=mem.episodes.bodies(),
-            version=mem.long_term_facts.version(),
+            facts=[Fact(id=f.id, text=f.text, ts=f.ts) for f in profile.facts],
+            raw_long_term=profile.raw_long_term,
+            episodes=profile.episodes,
+            version=profile.version,
         )
 
     @app.post(
@@ -606,11 +581,14 @@ def create_admin_app(
         dependencies=[Depends(require_auth)],
     )
     def add_fact(user_id: str, body: AddFact) -> FactsResult:
-        mem = memory.scoped(user_id, _USER_SCOPE_SID)
-        _check_version(mem, body.expected_version)
-        mem.long_term_facts.add(body.text.strip())
-        _reindex_facts(mem)
-        return _facts_result(mem)
+        try:
+            result = memory_admin.add_fact(user_id, body.text, body.expected_version)
+        except StaleVersionError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return FactsResult(
+            facts=[Fact(id=f.id, text=f.text, ts=f.ts) for f in result.facts],
+            version=result.version,
+        )
 
     @app.patch(
         "/admin/v1/memory/users/{user_id}/facts/{fact_id}",
@@ -618,12 +596,16 @@ def create_admin_app(
         dependencies=[Depends(require_auth)],
     )
     def update_fact(user_id: str, fact_id: str, body: UpdateFact) -> FactsResult:
-        mem = memory.scoped(user_id, _USER_SCOPE_SID)
-        _check_version(mem, body.expected_version)
-        if not mem.long_term_facts.update(fact_id, body.text.strip()):
+        try:
+            result = memory_admin.update_fact(user_id, fact_id, body.text, body.expected_version)
+        except StaleVersionError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if result is None:
             raise HTTPException(status_code=404, detail="fact not found")
-        _reindex_facts(mem)
-        return _facts_result(mem)
+        return FactsResult(
+            facts=[Fact(id=f.id, text=f.text, ts=f.ts) for f in result.facts],
+            version=result.version,
+        )
 
     @app.delete(
         "/admin/v1/memory/users/{user_id}/facts/{fact_id}",
@@ -635,12 +617,16 @@ def create_admin_app(
         fact_id: str,
         expected_version: Optional[str] = Query(default=None),
     ) -> FactsResult:
-        mem = memory.scoped(user_id, _USER_SCOPE_SID)
-        _check_version(mem, expected_version)
-        if not mem.long_term_facts.remove(fact_id):
+        try:
+            result = memory_admin.delete_fact(user_id, fact_id, expected_version)
+        except StaleVersionError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if result is None:
             raise HTTPException(status_code=404, detail="fact not found")
-        _reindex_facts(mem)
-        return _facts_result(mem)
+        return FactsResult(
+            facts=[Fact(id=f.id, text=f.text, ts=f.ts) for f in result.facts],
+            version=result.version,
+        )
 
     @app.get(
         "/admin/v1/memory/users/{user_id}/sessions",
@@ -648,7 +634,7 @@ def create_admin_app(
         dependencies=[Depends(require_auth)],
     )
     def list_user_sessions(user_id: str) -> SessionList:
-        return SessionList(sessions=memory.list_sessions(user_id))
+        return SessionList(sessions=memory_admin.list_sessions(user_id))
 
     @app.get(
         "/admin/v1/memory/users/{user_id}/sessions/{session_id}",
@@ -656,11 +642,11 @@ def create_admin_app(
         dependencies=[Depends(require_auth)],
     )
     def get_session(user_id: str, session_id: str) -> SessionDetail:
-        mem = memory.scoped(user_id, session_id)
+        snapshot = memory_admin.session(user_id, session_id)
         return SessionDetail(
-            turns=[Turn(**_turn(t)) for t in mem.live_turns.read()],
-            summary=mem.session_summary.read(),
-            pending=[Turn(**_turn(t)) for t in mem.pending.read()],
+            turns=[Turn(role=t.role, content=t.content, ts=t.ts) for t in snapshot.turns],
+            summary=snapshot.summary,
+            pending=[Turn(role=t.role, content=t.content, ts=t.ts) for t in snapshot.pending],
         )
 
     # --- operator-triggered memory passes ---------------------------------
@@ -668,36 +654,20 @@ def create_admin_app(
     # runs automatically, but on demand for a chosen session. The two model-backed
     # passes (summarize, curate) 503 when no brain is wired (standalone admin); the
     # flush is model-free and always available once a manager is present.
-    def _require_manager() -> MemoryManager:
-        if memory_manager is None:
-            raise HTTPException(
-                status_code=503,
-                detail="memory triggers unavailable: no memory manager wired into this admin app",
-            )
-        return memory_manager
-
     @app.post(
         "/admin/v1/memory/users/{user_id}/sessions/{session_id}/summarize",
         response_model=MemoryTriggerResult,
         dependencies=[Depends(require_auth)],
     )
     async def summarize_session(user_id: str, session_id: str) -> MemoryTriggerResult:
-        mgr = _require_manager()
-        if not mgr.session_summary_enabled:
-            raise HTTPException(
-                status_code=503,
-                detail="session summarization unavailable in this deployment (no model wired)",
-            )
-        mgr.set_scope(user_id, session_id)
-        summary = await mgr.summarize_session_now()
+        try:
+            result = await memory_admin.summarize_session(memory_manager, user_id, session_id)
+        except (MemoryManagerRequiredError, TriggerUnavailableError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         return MemoryTriggerResult(
-            action="summarize",
-            changed=summary is not None,
-            detail=(
-                "Folded the pending buffer into the rolling session summary."
-                if summary is not None
-                else "Nothing pending to summarize."
-            ),
+            action=result.action,
+            changed=result.changed,
+            detail=result.detail,
         )
 
     @app.post(
@@ -706,26 +676,14 @@ def create_admin_app(
         dependencies=[Depends(require_auth)],
     )
     async def curate_session(user_id: str, session_id: str) -> MemoryTriggerResult:
-        mgr = _require_manager()
-        if not mgr.curation_enabled:
-            raise HTTPException(
-                status_code=503,
-                detail="memory curation unavailable in this deployment (no model wired)",
-            )
-        mgr.set_scope(user_id, session_id)
-        applied = await mgr.curate_session_summary()
-        # A curator profile change lands on the user-level fact sheet; keep the
-        # admin's semantic slice + archive snapshot consistent, as fact edits do.
-        if applied and "profile" in applied:
-            _reindex_facts(memory.scoped(user_id, _USER_SCOPE_SID))
+        try:
+            result = await memory_admin.curate_session(memory_manager, user_id, session_id)
+        except (MemoryManagerRequiredError, TriggerUnavailableError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         return MemoryTriggerResult(
-            action="curate",
-            changed=bool(applied),
-            detail=(
-                f"Curated durable memory: {', '.join(applied)}."
-                if applied
-                else "No durable changes (empty session summary or nothing to keep)."
-            ),
+            action=result.action,
+            changed=result.changed,
+            detail=result.detail,
         )
 
     @app.post(
@@ -734,17 +692,14 @@ def create_admin_app(
         dependencies=[Depends(require_auth)],
     )
     async def flush_session(user_id: str, session_id: str) -> MemoryTriggerResult:
-        mgr = _require_manager()
-        mgr.set_scope(user_id, session_id)
-        dropped = mgr.flush_session()
+        try:
+            result = await memory_admin.flush_session(memory_manager, user_id, session_id)
+        except MemoryManagerRequiredError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         return MemoryTriggerResult(
-            action="flush",
-            changed=dropped > 0,
-            detail=(
-                f"Flushed {dropped} live turn(s); the rolling summary was carried into an episode."
-                if dropped
-                else "Nothing to flush (no live turns)."
-            ),
+            action=result.action,
+            changed=result.changed,
+            detail=result.detail,
         )
 
     @app.get(
@@ -884,26 +839,6 @@ def create_admin_app(
         )
         return _memory_settings_out()
 
-    # --- raw-file editor: full-CRUD power on the plumbing kinds ------------
-    def _raw_target(kind: str, user_id: Optional[str], session_id: Optional[str]):
-        """Resolve (path, is_json, reindex_kind) for an editable file kind, or raise
-        a 4xx. `reindex_kind` names the semantic slice to rebuild after a write
-        (None when the kind isn't mirrored)."""
-        if kind == "persona":
-            return memory.persona.path, False, None
-        if not user_id:
-            raise HTTPException(status_code=422, detail="user_id required for this kind")
-        mem = memory.scoped(user_id, session_id or _USER_SCOPE_SID)
-        if kind == "episodes":
-            return mem.episodes.path, False, "episode"
-        if kind == "raw_long_term":
-            return mem.long_term.path, False, None
-        if kind in ("session_window", "session_summary", "session_pending"):
-            if not session_id:
-                raise HTTPException(status_code=422, detail="session_id required for this kind")
-            return {
-                "session_window": (mem.live_turns.path, True, None),
-                "session_summary": (mem.session_summary.path, False, None),
                 "session_pending": (mem.pending.path, True, None),
             }[kind]
         raise HTTPException(status_code=404, detail=f"unknown file kind {kind!r}")
@@ -918,9 +853,15 @@ def create_admin_app(
         user_id: Optional[str] = Query(default=None),
         session_id: Optional[str] = Query(default=None),
     ) -> RawFile:
-        path, _is_json, _reindex = _raw_target(kind, user_id, session_id)
-        content = path.read_text(encoding="utf-8") if path.exists() else ""
-        return RawFile(kind=kind, content=content, version=_file_version(path))
+        try:
+            file = memory_admin.get_raw_file(kind, user_id=user_id, session_id=session_id)
+        except UserRequiredError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except SessionRequiredError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except UnknownMemoryFileKindError as exc:
+            raise HTTPException(status_code=404, detail=f"unknown file kind {kind!r}") from exc
+        return RawFile(kind=file.kind, content=file.content, version=file.version)
 
     @app.put(
         "/admin/v1/memory/files/{kind}",
@@ -933,56 +874,33 @@ def create_admin_app(
         user_id: Optional[str] = Query(default=None),
         session_id: Optional[str] = Query(default=None),
     ) -> RawFile:
-        path, is_json, reindex = _raw_target(kind, user_id, session_id)
-        if body.expected_version is not None and body.expected_version != _file_version(path):
-            raise HTTPException(status_code=409, detail="stale version; refetch the file")
-        if is_json:
-            # Validate-on-save: JSON kinds (turn windows) must parse to a list, so a
-            # bad paste can't park content the chat layer will choke on.
-            import json
-
-            try:
-                parsed = json.loads(body.content)
-            except json.JSONDecodeError as exc:
-                raise HTTPException(status_code=422, detail=f"invalid JSON: {exc}") from exc
-            if not isinstance(parsed, list):
-                raise HTTPException(status_code=422, detail="expected a JSON list of turns")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(body.content, encoding="utf-8")
-        if reindex == "episode" and retriever is not None and user_id:
-            mem = memory.scoped(user_id, session_id or _USER_SCOPE_SID)
-            retriever.reset(user_id, "episode")
-            for body_text in mem.episodes.bodies():
-                retriever.index(user_id, "episode", body_text)
-        return RawFile(kind=kind, content=body.content, version=_file_version(path))
+        try:
+            file = memory_admin.put_raw_file(
+                kind,
+                body.content,
+                body.expected_version,
+                user_id=user_id,
+                session_id=session_id,
+            )
+        except UserRequiredError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except StaleVersionError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except InvalidRawJsonError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except SessionRequiredError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except UnknownMemoryFileKindError as exc:
+            raise HTTPException(status_code=404, detail=f"unknown file kind {kind!r}") from exc
+        return RawFile(kind=file.kind, content=file.content, version=file.version)
 
     return app
-
-
-def _turn(t: dict) -> dict:
-    """A stored turn dict narrowed to the wire fields (tolerates missing keys)."""
-    return {
-        "role": str(t.get("role", "")),
-        "content": str(t.get("content", "")),
-        "ts": str(t.get("ts", "")),
-    }
-
-
 def _slug(title: str) -> str:
     """A filesystem/url-safe doc_id derived from a title (lowercased, hyphenated)."""
     import re
 
     s = re.sub(r"[^a-z0-9]+", "-", title.strip().lower()).strip("-")
     return s or "document"
-
-
-def _file_version(path) -> str:
-    """A content version token for any memory file — sha256 of its bytes (empty-file
-    token when absent). The optimistic-concurrency token for the raw editor."""
-    import hashlib
-
-    raw = path.read_bytes() if path.exists() else b""
-    return hashlib.sha256(raw).hexdigest()
 
 
 def build_admin_app(memory_manager: Optional[MemoryManager] = None) -> FastAPI:
