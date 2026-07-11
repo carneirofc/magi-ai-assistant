@@ -127,6 +127,28 @@ class Config:
     # the model); the model pulls it in on demand via its profile-picture tools
     # (view_profile_picture / send_profile_picture, magi/agent/tools/identity). ---
 
+    # --- Mood signal (see magi/agent/mood + docs; issue #25). A per-turn delivery
+    # mood for the reply, produced BEFORE the reply by a tiny extra model call on
+    # the same context, constrained (response_format json_schema enum — llama-server
+    # enforces it via grammar) to the vocabulary below, so the value is always a
+    # valid name — reliable enough to drive an avatar now and a TTS style later.
+    # Streams as an early `meta` SSE frame and rides `MessageReply.mood`. The
+    # vocabulary is name -> short description (the descriptions steer the pass);
+    # grow it by adding entries — the wire carries plain strings, so clients that
+    # don't know a mood fall back to their neutral art. The FIRST entry is the
+    # fallback when the pass fails or returns something unusable. Bump
+    # mood_vocab_version when the vocabulary changes so clients can re-sync. ---
+    mood_enabled: bool = False
+    mood_vocabulary: dict[str, str] = field(
+        default_factory=lambda: {
+            "neutral": "composed, matter-of-fact delivery — the resting default",
+            "warm": "friendly, encouraging, genuinely pleased to help",
+            "wry": "dry humor, amused skepticism, a raised eyebrow",
+            "focused": "serious, precise, heads-down on a hard problem",
+        }
+    )
+    mood_vocab_version: int = 1
+
     # --- Team behavior / robustness ---
     # Hard cap on tool calls per run (incl. member delegations) so a lead can't
     # loop forever delegating. None/0 = no limit.

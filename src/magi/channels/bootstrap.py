@@ -60,6 +60,18 @@ def build_conversation_service(
     else:
         log_info("memory: curation DISABLED")
 
+    # The pre-reply mood pass needs a model, so the agent layer builds it;
+    # magi/core/conversation stays model-free and receives it as an injected
+    # callable (see MoodFn). Gated by config.
+    mood_fn = None
+    if config.mood_enabled:
+        from magi.agent.mood import build_mood_pass
+
+        mood_fn = build_mood_pass()
+        log_info(f"mood: pre-reply pass ENABLED (vocabulary: {sorted(config.mood_vocabulary)})")
+    else:
+        log_info("mood: pre-reply pass DISABLED")
+
     memory = build_memory_from_config(
         summarize_session_fn=session_fn,
         curate_fn=curate_fn,
@@ -79,4 +91,5 @@ def build_conversation_service(
         # (no-op unless knowledge is on and knowledge_context_top_k > 0).
         knowledge=knowledge,
         knowledge_top_k=config.knowledge_context_top_k,
+        mood_fn=mood_fn,
     )

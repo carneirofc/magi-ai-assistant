@@ -9,7 +9,7 @@ plain inputs in and render the plain `ConversationReply` out.
 injected — nothing is constructed here.
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional, Protocol
 
@@ -45,6 +45,13 @@ class Runner(Protocol):
     def arun(
         self, *, input: str, user_id: str, session_id: str, **kwargs: Any
     ) -> Any: ...
+
+
+# The pre-reply mood pass (magi/agent/mood): assembled run input -> one name from
+# config.mood_vocabulary. Injected like the summarizers/curator so this module
+# stays model-free; contractually it never raises and never returns free text —
+# the service still guards, because a broken pass must not break a turn.
+MoodFn = Callable[[str], Awaitable[str]]
 
 def _inbound_media_urls(media: dict[str, Any]) -> list[str]:
     """The http(s) URLs of inbound media passed by reference (not inline bytes).
@@ -138,6 +145,10 @@ class ConversationReply:
     audio: tuple = ()
     files: tuple = ()
     usage: Optional[ConversationUsage] = None
+    # The turn's delivery mood (one config.mood_vocabulary name), predicted before
+    # the reply by the mood pass. None when the pass is off or the turn errored.
+    # Not display-only: this is the future TTS style input.
+    mood: Optional[str] = None
 
     @property
     def has_media(self) -> bool:
@@ -185,10 +196,26 @@ class ConversationToolResult:
     is_error: bool = False
 
 
+@dataclass(frozen=True)
+class ConversationMood:
+    """The turn's predicted delivery mood, yielded before the first delta.
+
+    Emitted only when the mood pass is wired (config.mood_enabled); arrives ahead
+    of the reply so a client can react (change the avatar's face) as the answer
+    starts streaming. The same value rides the final reply's `mood` field.
+    """
+
+    mood: str
+
+
 # The streamed items `handle_stream` yields before its terminal reply: text
-# deltas plus the live reasoning/tool observability events.
+# deltas plus the live mood/reasoning/tool observability events.
 ConversationStreamEvent = (
-    ConversationDelta | ConversationReasoning | ConversationToolCall | ConversationToolResult
+    ConversationDelta
+    | ConversationReasoning
+    | ConversationToolCall
+    | ConversationToolResult
+    | ConversationMood
 )
 
 
@@ -201,9 +228,13 @@ class ConversationService:
         context_window: Optional[int] = None,
         knowledge: Optional["KnowledgeSearcher"] = None,
         knowledge_top_k: int = 0,
+        mood_fn: Optional[MoodFn] = None,
     ):
         self.runner = runner
         self.memory = memory
+        # The pre-reply mood pass (see `MoodFn`). None = feature off: no mood
+        # events, `reply.mood` stays None.
+        self.mood_fn = mood_fn
         # Channel-specific output rules (e.g. Discord markdown). Appended to the
         # run context so the base prompt stays channel-agnostic.
         self.channel_guidance = channel_guidance
@@ -287,6 +318,21 @@ class ConversationService:
         self.memory.record_user_turn(text)
         return f"<context>\n{context}\n</context>\n\n{text}" if context else text
 
+    async def _turn_mood(self, run_input: str) -> Optional[str]:
+        """This turn's delivery mood via the injected pass, or None when off.
+
+        The pass contractually never raises, but a turn must survive a broken one:
+        any failure degrades to the vocabulary's first entry (the same fallback
+        the pass itself uses) rather than dropping the signal mid-conversation.
+        """
+        if self.mood_fn is None:
+            return None
+        try:
+            return await self.mood_fn(run_input)
+        except Exception as exc:  # noqa: BLE001 — mood must never break a turn.
+            log_warning(f"conversation: mood pass failed: {type(exc).__name__}: {exc}")
+            return next(iter(config.mood_vocabulary), None)
+
     async def _finish_turn(
         self,
         reply: str,
@@ -294,6 +340,7 @@ class ConversationService:
         media: Optional[dict] = None,
         user_text: str = "",
         usage: Optional[ConversationUsage] = None,
+        mood: Optional[str] = None,
     ) -> ConversationReply:
         """Record the reply + fold/curate memory; the one tail both run modes share."""
         media = media or {}
@@ -308,9 +355,9 @@ class ConversationService:
             # silent (commonly after a tool error). Return an honest fallback
             # instead of an empty string so the channel never has to invent one.
             log_warning("run completed with no content; returning fallback")
-            return ConversationReply(text=_EMPTY_REPLY, is_error=True)
+            return ConversationReply(text=_EMPTY_REPLY, is_error=True, mood=mood)
         return ConversationReply(
-            text=reply, reasoning=reasoning, is_error=False, usage=usage, **media
+            text=reply, reasoning=reasoning, is_error=False, usage=usage, mood=mood, **media
         )
 
     async def handle(
@@ -328,6 +375,9 @@ class ConversationService:
         log_info(f"conversation: handling (session={session_id}, user={user_id})")
 
         run_input = self._prepare_input(user_id, session_id, text, extra_context)
+        # Predict the delivery mood before the reply (see MoodFn); it rides the
+        # final reply so non-streaming clients (and later TTS) get it too.
+        mood = await self._turn_mood(run_input)
         allowed_urls_token = open_allowed_media_urls(text, _inbound_media_urls(media))
         outbox_token = open_media_outbox()
         try:
@@ -353,6 +403,7 @@ class ConversationService:
             collect_reply_media(response, outbox),
             user_text=text,
             usage=self._usage_from(response),
+            mood=mood,
         )
 
     async def handle_stream(
@@ -366,19 +417,26 @@ class ConversationService:
     ) -> AsyncIterator[ConversationStreamEvent | ConversationReply]:
         """Like `handle`, but yields the reply incrementally.
 
-        Yields, as the run unfolds: a `ConversationDelta` per text chunk, plus
-        live observability events — `ConversationReasoning` (thinking chunks),
-        `ConversationToolCall`/`ConversationToolResult` (the lead's tool activity)
-        — then exactly one final `ConversationReply` (the authoritative result —
-        channels should render it over the assembled deltas). Memory semantics are
-        identical to `handle`: the turn is recorded and folded once, from the final
-        text. A channel that only wants text can ignore the non-delta events.
+        Yields, as the run unfolds: a `ConversationMood` first (when the mood pass
+        is wired — before any delta, so a client can react as the answer starts),
+        then a `ConversationDelta` per text chunk, plus live observability events —
+        `ConversationReasoning` (thinking chunks), `ConversationToolCall`/
+        `ConversationToolResult` (the lead's tool activity) — then exactly one
+        final `ConversationReply` (the authoritative result — channels should
+        render it over the assembled deltas). Memory semantics are identical to
+        `handle`: the turn is recorded and folded once, from the final text. A
+        channel that only wants text can ignore the non-delta events.
         """
         media = media or {}
         user_id = str(user_id)
         log_info(f"conversation: streaming (session={session_id}, user={user_id})")
 
         run_input = self._prepare_input(user_id, session_id, text, extra_context)
+        # The pre-reply mood pass gates the stream start on purpose: the mood must
+        # arrive before the first content token (that's its whole point).
+        mood = await self._turn_mood(run_input)
+        if mood is not None:
+            yield ConversationMood(mood=mood)
         chunks: list[str] = []
         final = None
         allowed_urls_token = open_allowed_media_urls(text, _inbound_media_urls(media))
@@ -453,6 +511,7 @@ class ConversationService:
             collect_reply_media(final, outbox),
             user_text=text,
             usage=self._usage_from(final) if final is not None else None,
+            mood=mood,
         )
 
     # --- control commands (channel formats the reply text) ------------------

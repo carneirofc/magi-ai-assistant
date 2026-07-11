@@ -12,6 +12,7 @@ from magi.core.conversation import (
     _EMPTY_REPLY,
     _ERROR_REPLY,
     ConversationDelta,
+    ConversationMood,
     ConversationReasoning,
     ConversationReply,
     ConversationService,
@@ -496,3 +497,65 @@ async def test_stream_tool_error_event_is_flagged():
 
     assert items[0] == ConversationToolCall(call_id="c2", name="flaky", args={})
     assert items[1] == ConversationToolResult(call_id="c2", result="ERROR: boom", is_error=True)
+
+
+# --- mood pass (pre-reply; magi/agent/mood is injected as mood_fn) ------------
+async def _wry_mood(run_input: str) -> str:
+    return "wry"
+
+
+async def test_stream_mood_event_arrives_before_the_first_delta():
+    runner = _FakeStreamRunner([_delta("a"), _delta("b"), _final(content="ab")])
+    service = ConversationService(runner=runner, memory=_FakeMemory(), mood_fn=_wry_mood)
+
+    items = await _collect(service)
+
+    assert items[0] == ConversationMood(mood="wry")
+    assert items[1] == ConversationDelta(text="a")
+    assert items[-1].mood == "wry"  # the same value rides the final reply
+
+
+async def test_stream_without_mood_fn_emits_no_mood_event():
+    runner = _FakeStreamRunner([_delta("a"), _final(content="a")])
+    service = ConversationService(runner=runner, memory=_FakeMemory())
+
+    items = await _collect(service)
+
+    assert not any(isinstance(item, ConversationMood) for item in items)
+    assert items[-1].mood is None
+
+
+async def test_stream_mood_failure_falls_back_and_never_breaks_the_turn():
+    async def broken(run_input: str) -> str:
+        raise RuntimeError("pass down")
+
+    runner = _FakeStreamRunner([_delta("a"), _final(content="a")])
+    service = ConversationService(runner=runner, memory=_FakeMemory(), mood_fn=broken)
+
+    items = await _collect(service)
+
+    # Fallback = the vocabulary's first entry (the engine default starts neutral).
+    assert items[0] == ConversationMood(mood="neutral")
+    assert items[-1].text == "a"
+
+
+async def test_handle_reply_carries_mood():
+    response = SimpleNamespace(status="COMPLETED", content="the answer", reasoning_content=None)
+    mem = _FakeMemory()
+    service = ConversationService(
+        runner=_FakeRunner(response), memory=mem, mood_fn=_wry_mood
+    )
+
+    reply = await service.handle(user_id=1, session_id="s", text="hi")
+
+    assert reply.text == "the answer"
+    assert reply.mood == "wry"
+
+
+async def test_handle_without_mood_fn_leaves_mood_none():
+    response = SimpleNamespace(status="COMPLETED", content="ok", reasoning_content=None)
+    service, _ = _service(response)
+
+    reply = await service.handle(user_id=1, session_id="s", text="hi")
+
+    assert reply.mood is None
