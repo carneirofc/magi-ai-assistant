@@ -47,3 +47,13 @@ def test_build_mood_pass_requires_a_vocabulary():
             build_mood_pass()
     finally:
         configure(mood_vocabulary=old)
+
+
+def test_title_clean_rejects_rambles_and_strips_quotes():
+    from magi.agent.title import _clean
+
+    assert _clean('"Docker build questions"') == "Docker build questions"
+    assert _clean("a\nmulti-line\nramble") is None
+    assert _clean("x" * 200) is None
+    assert _clean("   ") is None
+    assert _clean("Short and sweet") == "Short and sweet"

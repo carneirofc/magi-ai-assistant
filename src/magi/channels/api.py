@@ -61,7 +61,7 @@ import hashlib
 import json
 import time
 import uuid
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional, Protocol, Union
@@ -124,6 +124,24 @@ class GreetRequest(BaseModel):
     """Ask the assistant to open the conversation (see the /greet route)."""
 
     user_id: str = Field(min_length=1, description="Stable id of the end user (scopes memory).")
+
+
+# The auto-title pass (magi/agent/title): opening text -> a short title or None.
+# Injected like the mood pass so this module stays model-free.
+TitleFn = Callable[[str], Awaitable[Optional[str]]]
+
+
+class TitleRequest(BaseModel):
+    """Text to title (a conversation's opening exchange)."""
+
+    text: str = Field(min_length=1)
+
+
+class TitleOut(BaseModel):
+    """A short model-made title; null when the pass produced nothing usable —
+    the client keeps its derived title."""
+
+    title: Optional[str] = None
 
 
 class MemoryFact(BaseModel):
@@ -565,6 +583,7 @@ def create_app(
     cors_origins: Optional[Sequence[str]] = None,
     mcp_toolkits: Optional[Sequence[MCPConnection]] = None,
     admin_app: Optional[FastAPI] = None,
+    title_fn: Optional[TitleFn] = None,
 ) -> FastAPI:
     """The FastAPI app over an already-built `ConversationService` (pure factory).
 
@@ -572,7 +591,8 @@ def create_app(
     no CORS headers). `mcp_toolkits`: agno MCP toolkits to connect at startup and
     close at shutdown (empty/None = none) — see `_mcp_lifespan`. `admin_app`, when
     given, is mounted onto this same app (see `config.admin_enabled` / ADR 0002)
-    so one process/port serves both the chat API and the admin surface.
+    so one process/port serves both the chat API and the admin surface. `title_fn`
+    (magi/agent/title, injected by serve()) powers /v1/title; None = 503 there.
     """
     app = FastAPI(title="chatbot", version="1", lifespan=_mcp_lifespan(mcp_toolkits or ()))
 
@@ -702,6 +722,20 @@ def create_app(
     @app.get("/v1/sessions/{session_id}/context", dependencies=[Depends(require_auth)])
     def get_context(session_id: str, user_id: str = Query(min_length=1)) -> dict:
         return conversation.context_stats(_scoped(user_id), session_id)
+
+    @app.post(
+        "/v1/title",
+        response_model=TitleOut,
+        dependencies=[Depends(require_auth)],
+    )
+    async def post_title(body: TitleRequest) -> TitleOut:
+        """A short model-made title for a conversation's opening exchange —
+        labeling only, nothing recorded. 503 when this deployment wired no title
+        pass; a null title means the pass produced nothing usable and the client
+        should keep its own derived title."""
+        if title_fn is None:
+            raise HTTPException(status_code=503, detail="no title pass wired")
+        return TitleOut(title=await title_fn(body.text))
 
     @app.get(
         "/v1/memory/facts",
@@ -928,6 +962,9 @@ def build_api_app(db: Optional[BaseDb] = None) -> FastAPI:
         # model-backed passes instead of 503-ing.
         admin_app = build_admin_app(memory_manager=conversation.memory)
 
+    # The auto-title pass (one cheap member-model call per new conversation).
+    from magi.agent.title import build_title_pass
+
     return create_app(
         conversation,
         auth_token=config.api_auth_token,
@@ -935,6 +972,7 @@ def build_api_app(db: Optional[BaseDb] = None) -> FastAPI:
         # Seanime-over-MCP is the only MCP member today; connect it at startup.
         mcp_toolkits=_collect_mcp_toolkits(conversation.runner),
         admin_app=admin_app,
+        title_fn=build_title_pass(),
     )
 
 

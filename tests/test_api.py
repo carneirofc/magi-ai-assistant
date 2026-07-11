@@ -947,3 +947,30 @@ def test_memory_facts_returns_the_users_durable_facts():
 def test_memory_facts_requires_bearer_token_when_configured():
     client, _ = _client(auth_token="secret")
     assert client.get("/v1/memory/facts?user_id=u1").status_code == 401
+
+
+# --- auto-title pass (issue #30) ------------------------------------------------
+def test_title_route_returns_the_pass_result():
+    async def fake_title(text: str):
+        assert "how do I" in text
+        return "Docker build questions"
+
+    conversation = _FakeConversation()
+    client = TestClient(create_app(conversation, title_fn=fake_title))
+
+    body = client.post("/v1/title", json={"text": "how do I fix my docker build"}).json()
+
+    assert body == {"title": "Docker build questions"}
+
+
+def test_title_route_null_when_pass_unusable():
+    async def fake_title(text: str):
+        return None
+
+    client = TestClient(create_app(_FakeConversation(), title_fn=fake_title))
+    assert client.post("/v1/title", json={"text": "hi"}).json() == {"title": None}
+
+
+def test_title_route_503_without_a_pass():
+    client, _ = _client()
+    assert client.post("/v1/title", json={"text": "hi"}).status_code == 503
