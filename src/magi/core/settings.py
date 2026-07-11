@@ -92,6 +92,15 @@ class OperatorSettingsStore:
             git_author_email=str(raw_email).strip() or None if isinstance(raw_email, str) else None,
         )
 
+    def read_mcp(self) -> list[dict]:
+        """The operator-added MCP server specs (see config.mcp_servers for the
+        shape), or [] when none are set. Entries merge over the code list by
+        name at team assembly (magi/agent/tools/mcp.py)."""
+        section = self._read_json().get("mcp")
+        if not isinstance(section, list):
+            return []
+        return [dict(e) for e in section if isinstance(e, dict) and str(e.get("name") or "").strip()]
+
     def version(self) -> str:
         """Optimistic-concurrency token over the raw file bytes (empty token when
         absent). The admin editor echoes it on a write and gets a 409 if it's stale,
@@ -120,6 +129,21 @@ class OperatorSettingsStore:
             data.pop("memory", None)
         self._write_json(data)
         return self.read_memory()
+
+    def set_mcp(self, servers: list[dict]) -> list[dict]:
+        """Persist the operator MCP server list, replacing that section (an
+        empty list clears it). The team reads the merge at startup — changes
+        apply on restart. Returns the stored list (as read back)."""
+        data = self._read_json()
+        cleaned = [
+            dict(e) for e in servers if isinstance(e, dict) and str(e.get("name") or "").strip()
+        ]
+        if cleaned:
+            data["mcp"] = cleaned
+        else:
+            data.pop("mcp", None)
+        self._write_json(data)
+        return self.read_mcp()
 
     def _write_json(self, data: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

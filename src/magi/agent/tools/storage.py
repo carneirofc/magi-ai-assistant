@@ -87,6 +87,13 @@ class FileSearchData(BaseModel):
     count: int = Field(description="How many matches were returned.")
 
 
+class ReadDocumentData(BaseModel):
+    reference: str = Field(description="Reference that was read.")
+    filename: str | None = Field(default=None, description="The document's filename, when known.")
+    text: str = Field(description="The extracted text (truncation is marked).")
+    truncated: bool = Field(default=False, description="Whether the text was cut at max_chars.")
+
+
 def _filename(url: str, content_type: str, explicit: Optional[str]) -> str:
     """A sensible filename: explicit > URL basename > a generic one."""
     if explicit:
@@ -395,7 +402,77 @@ def build_storage_tools(
         )
         return ok(msg, FileSearchData(matches=matches, count=len(matches)))
 
-    tools = [store_file, retrieve_file, list_files]
+    @tool(
+        description="Read an archived document's TEXT into your context so you can answer questions about it.",
+        instructions=(
+            "Use when the user asks about the CONTENT of a stored document (from "
+            "store_file / list_files / search_files) — summarize it, quote it, answer "
+            "from it. Works for text-like files (txt, md, code, json, csv) and PDFs. "
+            "This loads text into YOUR context; use retrieve_file instead when the "
+            "user wants the file itself back as an attachment."
+        ),
+        show_result=True,
+    )
+    async def read_document(
+        reference: Annotated[
+            str,
+            Field(min_length=1, description="Reference id returned by store_file or list_files."),
+        ],
+        max_chars: Annotated[
+            int,
+            Field(default=20_000, ge=1_000, le=100_000, description="Truncate the text beyond this."),
+        ] = 20_000,
+    ) -> ToolOutput[ReadDocumentData]:
+        """Extract an archived document's text (txt/md/code directly; PDF via
+        pypdf) for answering questions about it. Truncation is marked; a binary
+        or unreadable file is a failure, never invented content."""
+        ref = (reference or "").strip()
+        key = f"{_prefix()}{ref}"
+        try:
+            data, ctype, metadata = await asyncio.to_thread(store.get_bytes, key)
+        except StorageError as exc:
+            log_warning(f"read_document: {exc}")
+            return fail(f"No archived file found for reference {ref!r} (or it could not be read).")
+
+        name = metadata.get("filename") or ref
+        text: Optional[str] = None
+        if (ctype or "").lower() == "application/pdf" or name.lower().endswith(".pdf"):
+            try:
+                import io
+
+                from pypdf import PdfReader  # optional; part of the docs extra
+
+                reader = await asyncio.to_thread(PdfReader, io.BytesIO(data))
+                text = "\n\n".join((page.extract_text() or "") for page in reader.pages)
+            except ImportError:
+                return fail(
+                    "PDF reading needs the optional 'pypdf' dependency "
+                    "(`uv sync --extra docs`)."
+                )
+            except Exception as exc:  # noqa: BLE001 — a broken PDF is a tool failure.
+                return fail(f"Couldn't extract text from '{name}': {type(exc).__name__}.")
+        else:
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                return fail(
+                    f"'{name}' isn't a text-like document ({ctype or 'unknown type'}) — "
+                    "use retrieve_file to hand the file back instead."
+                )
+
+        text = (text or "").strip()
+        if not text:
+            return fail(f"'{name}' contained no extractable text.")
+        truncated = len(text) > max_chars
+        if truncated:
+            text = text[:max_chars] + f"\n…[truncated {len(text) - max_chars}+ chars]"
+        log_info(f"storage: read_document {ref} ('{name}', {len(data)} bytes, truncated={truncated})")
+        return ok(
+            f"Read '{name}' ({'truncated' if truncated else 'whole'}).",
+            ReadDocumentData(reference=ref, filename=name, text=text, truncated=truncated),
+        )
+
+    tools = [store_file, retrieve_file, list_files, read_document]
     # The semantic search tool only works with the item archive wired in.
     if archive is not None:
         tools.append(search_files)

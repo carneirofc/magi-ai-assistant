@@ -103,7 +103,9 @@ def _patch_client(monkeypatch, **client_kwargs):
 
 def _tools():
     store = _FakeStore()
-    store_file, retrieve_file, list_files = build_storage_tools(store, _Memory("u1"))
+    store_file, retrieve_file, list_files, _read_document = build_storage_tools(
+        store, _Memory("u1")
+    )
     return store, store_file, retrieve_file, list_files
 
 
@@ -170,15 +172,16 @@ async def test_store_file_refuses_unsourced_url(monkeypatch):
 
 # --- item archive integration -----------------------------------------------
 def test_no_search_tool_without_archive():
-    """The bare wiring has exactly the three classic tools (no semantic search)."""
+    """The bare wiring has the four base tools (no semantic search)."""
     tools = build_storage_tools(_FakeStore(), _Memory("u1"))
-    assert len(tools) == 3 and "search_files" not in {t.name for t in tools}
+    assert len(tools) == 4 and "search_files" not in {t.name for t in tools}
+    assert "read_document" in {t.name for t in tools}
 
 
 def test_search_tool_added_with_archive():
     _, _, tools = _tools_with_archive()
     names = {t.name for t in tools}
-    assert "search_files" in names and len(tools) == 4
+    assert "search_files" in names and len(tools) == 5
 
 
 async def test_store_file_indexes_into_archive(monkeypatch):

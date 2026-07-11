@@ -1,10 +1,11 @@
 // Team page: the live composition of the running assistant — lead model, specialist
-// members with their tools, and any MCP servers. Read-only. Unlike the other
-// dashboard pages this reads the CHAT-API (channels/api.py), the process that
-// actually assembles the team, not the admin-api.
+// members with their tools, and any MCP servers. The roster is read from the
+// CHAT-API (channels/api.py), the process that actually assembles the team; the
+// MCP registry editor below writes operator settings via the admin-api.
 
-import { PageHeader, StatusBadge, StatusMessage } from "@carneirofc/ui";
+import { PageHeader, StatusBadge, StatusMessage, SurfacePanel } from "@carneirofc/ui";
 
+import { McpServerManager } from "../components/McpServerManager";
 import { TeamView } from "../components/TeamView";
 import { getChatHealth, getIntrospection } from "../lib/chat-api";
 import type { TeamSnapshot } from "../lib/introspection-types";
@@ -69,6 +70,10 @@ export async function TeamPageView({ copy }: { copy?: PageCopy } = {}) {
       ) : snapshot ? (
         <TeamView snapshot={snapshot} />
       ) : null}
+
+      <SurfacePanel tone="subtle" padding="lg">
+        <McpServerManager />
+      </SurfacePanel>
     </div>
   );
 }

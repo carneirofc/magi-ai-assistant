@@ -26,8 +26,11 @@ from magi.agent.model import build_lead_model, build_member_model
 from magi.agent.tools.http import HTTP_TOOLS
 from magi.agent.tools.identity import build_identity_tools
 from magi.agent.tools.knowledge import build_knowledge_tools
+from magi.agent.tools.mcp import build_mcp_lead_toolkits, build_mcp_members
 from magi.agent.tools.media import MEDIA_TOOLS
 from magi.agent.tools.memory import build_memory_tools
+from magi.agent.tools.reminders import build_reminder_tools
+from magi.agent.tools.websearch import build_websearch_tools
 from magi.agent.tools.outputs import ToolOutput, ok
 from magi.agent.tools.storage import build_storage_tools
 from magi.agent.tools.thinking import build_thinking_tools
@@ -125,6 +128,11 @@ def build_team(
     member_model = build_member_model()
     builders = MEMBER_BUILDERS if member_builders is None else list(member_builders)
     members = [build(member_model) for build in builders]
+    # Config-declared MCP servers (config.mcp_servers + operator additions):
+    # each `attach: "member"` spec becomes a generated specialist alongside the
+    # hand-written ones. Empty when none are declared; a bad spec is skipped
+    # with a warning inside the builder.
+    members += build_mcp_members(member_model)
     # agno copies the team's tool_hooks onto the *team-level* tools only —
     # members never inherit them, so their tool calls (wiki lookups, http_get,
     # …) ran invisibly. Attach the same hook to every member: each call is
@@ -234,6 +242,13 @@ def build_team(
             *storage_tools,
             # Search the global knowledge corpus (empty unless the feature is on).
             *knowledge_tools,
+            # Web search (empty unless websearch_enabled + the ddgs extra).
+            *build_websearch_tools(),
+            # Reminders (empty unless reminders_enabled).
+            *build_reminder_tools(memory),
+            # Config-declared MCP servers attached at the lead level
+            # (attach: "lead"); member-attached ones join the roster above.
+            *build_mcp_lead_toolkits(),
             # Bound to the live model objects: members all share `member_model`,
             # so one mutation flips the whole team.
             *build_thinking_tools([lead, member_model]),

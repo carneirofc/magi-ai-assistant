@@ -476,14 +476,24 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _greeting_instruction(now: Optional[datetime] = None) -> str:
+def _greeting_instruction(
+    now: Optional[datetime] = None, due_reminders: str = ""
+) -> str:
     """The greeting turn's run input: the greet policy prompt (overlay-able per
     persona — prompts/greet.md) plus the local time of day, read per request so
-    every greeting gets the real clock."""
+    every greeting gets the real clock. Due reminders, when the deployment
+    tracks them, ride along so the greeting is where a reminder actually
+    fires — weave them in naturally, don't dump the list."""
     from magi.core.prompts import load_prompt
 
     stamp = (now or datetime.now()).strftime("%A %H:%M")
-    return f"{load_prompt('greet.md')}\n\nLocal time: {stamp}."
+    parts = [load_prompt("greet.md"), f"Local time: {stamp}."]
+    if due_reminders:
+        parts.append(
+            "Reminders now due for this user (mention them naturally in your greeting):\n"
+            + due_reminders
+        )
+    return "\n\n".join(parts)
 
 
 # --- OpenAI-compatible shim (so stock chat UIs work unchanged) ----------------
@@ -772,11 +782,21 @@ def create_app(
         included). No user message is recorded — session history gains only the
         greeting. The greeting policy is prompts/greet.md (overlay-able per
         persona), given the local time of day."""
+        due = ""
+        if config.reminders_enabled:
+            from magi.agent.tools.reminders import due_reminders_text
+
+            try:
+                due = due_reminders_text(
+                    conversation.memory.store.root, _scoped(body.user_id)
+                )
+            except Exception:  # noqa: BLE001 — reminders must never break a greeting.
+                due = ""
         return _stream_response(
             conversation.greet_stream(
                 user_id=_scoped(body.user_id),
                 session_id=session_id,
-                instruction=_greeting_instruction(),
+                instruction=_greeting_instruction(due_reminders=due),
             )
         )
 
@@ -896,6 +916,17 @@ def create_app(
         return TranscriptionOut(
             text=result.text, language=result.language, duration=result.duration
         )
+
+    @app.get("/v1/reminders", dependencies=[Depends(require_auth)])
+    def get_reminders(user_id: str = Query(min_length=1)) -> dict:
+        """The user's reminders (for a client panel). Empty list when the
+        feature is off — clients need no separate capability probe."""
+        if not config.reminders_enabled:
+            return {"reminders": []}
+        from magi.agent.tools.reminders import read_reminders
+
+        items = read_reminders(conversation.memory.store.root, _scoped(user_id))
+        return {"reminders": items}
 
     @app.get(
         "/v1/memory/facts",

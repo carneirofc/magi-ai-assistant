@@ -365,6 +365,24 @@ class FileVersionOut(BaseModel):
     content: str
 
 
+class McpSettingsOut(BaseModel):
+    """The MCP server registry as the operator sees it: the code-declared list
+    (context, edited in main.py) and the operator's own entries (editable here;
+    merged over the code list by name at team assembly). Restart to apply."""
+
+    code_servers: list[dict] = Field(default_factory=list)
+    operator_servers: list[dict] = Field(default_factory=list)
+    version: str = ""
+    restart_required: bool = False
+
+
+class UpdateMcpSettings(BaseModel):
+    """Replace the operator's MCP server list (empty = clear)."""
+
+    servers: list[dict] = Field(default_factory=list)
+    expected_version: Optional[str] = Field(default=None)
+
+
 # --- operator settings wire format -------------------------------------------
 class MemorySettingsOut(BaseModel):
     """The effective memory settings (operator overrides overlaid on code defaults)
@@ -1023,6 +1041,44 @@ def create_admin_app(
             )
         )
         return _memory_settings_out()
+
+    # --- operator settings: MCP servers (merge over config; apply on restart) ---
+    @app.get(
+        "/admin/v1/settings/mcp",
+        response_model=McpSettingsOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def get_mcp_settings() -> McpSettingsOut:
+        """The MCP server registry: code-declared entries (read-only context)
+        plus the operator's additions/overrides. The team assembles at startup,
+        so edits apply on restart — connection status lives on the chat-api's
+        /v1/introspection."""
+        return McpSettingsOut(
+            code_servers=[dict(s) for s in config.mcp_servers],
+            operator_servers=settings_store.read_mcp() if settings_store else [],
+            version=settings_store.version() if settings_store else "",
+        )
+
+    @app.put(
+        "/admin/v1/settings/mcp",
+        response_model=McpSettingsOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def put_mcp_settings(body: UpdateMcpSettings) -> McpSettingsOut:
+        if settings_store is None:
+            raise HTTPException(status_code=503, detail="operator settings not available")
+        if body.expected_version is not None and body.expected_version != settings_store.version():
+            raise HTTPException(status_code=409, detail="stale version; refetch the settings")
+        for entry in body.servers:
+            if not str(entry.get("name") or "").strip():
+                raise HTTPException(status_code=422, detail="every server needs a name")
+        settings_store.set_mcp(body.servers)
+        return McpSettingsOut(
+            code_servers=[dict(s) for s in config.mcp_servers],
+            operator_servers=settings_store.read_mcp(),
+            version=settings_store.version(),
+            restart_required=True,
+        )
 
     @app.get(
         "/admin/v1/memory/files/{kind}",

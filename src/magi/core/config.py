@@ -173,6 +173,34 @@ class Config:
     # One generous cap for both sidecars — local services, whole-clip calls.
     voice_timeout_seconds: float = 60.0
 
+    # --- Generic MCP registry (see magi/agent/tools/mcp.py). Each entry wires
+    # one Model Context Protocol server without hand-writing a member module:
+    #   {"name": "comfyui",                       # required, unique
+    #    "url": "http://localhost:39100/mcp",     # streamable-http/sse; stdio uses "command"
+    #    "transport": "streamable-http",          # default
+    #    "headers": {...}, "env": {...},          # auth / stdio environment
+    #    "timeout_seconds": 30,
+    #    "enabled": True,
+    #    "attach": "member",                      # "member" (own specialist) | "lead" (tools on the team)
+    #    "role": "...",                           # member role prompt (attach=member)
+    #    "tool_allowlist": [...],                 # only these tools are registered
+    #    "show_result_tools": [...]}              # results surfaced to the client
+    # Tools are discovered at connect time; a down/misconfigured server is
+    # skipped with a warning, never a boot failure. Operator-added servers from
+    # the admin settings file merge over this list by name (restart to apply).
+    # Needs the optional `mcp` extra. ---
+    mcp_servers: list[dict] = field(default_factory=list)
+
+    # --- Web search tool (ddgs-backed; optional `websearch` extra). Gives the
+    # lead `web_search` — result titles/urls/snippets it then reads via the
+    # HTTP tools. Off by default: a deployment opts into outbound search. ---
+    websearch_enabled: bool = False
+
+    # --- Reminders (see magi/agent/tools/reminders.py). Deliberate per-user
+    # reminder files under the memory tree; due ones surface in the greeting
+    # turn and at GET /v1/reminders. No push infra — surfacing is on-open. ---
+    reminders_enabled: bool = False
+
     # --- Team behavior / robustness ---
     # Hard cap on tool calls per run (incl. member delegations) so a lead can't
     # loop forever delegating. None/0 = no limit.

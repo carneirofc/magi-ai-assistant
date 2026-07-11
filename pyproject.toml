@@ -105,6 +105,18 @@ git = [
 desktop = [
     "PySide6>=6.8.0",
 ]
+# Web search tool (websearch_enabled=True). Optional: magi.agent.tools.websearch
+# lazy-imports ddgs and the builder no-ops when it's absent, so the base install
+# stays offline-by-default. Enable with: uv sync --extra websearch
+websearch = [
+    "ddgs>=9.0.0",
+]
+# Document text extraction (the read_document storage tool's PDF path). Text-like
+# files need nothing; PDFs lazy-import pypdf and the tool reports the missing
+# extra honestly. Enable with: uv sync --extra docs
+docs = [
+    "pypdf>=5.0.0",
+]
 
 [build-system]
 requires = ["hatchling"]
