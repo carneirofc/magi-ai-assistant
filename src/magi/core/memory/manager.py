@@ -262,6 +262,51 @@ class MemoryManager:
             return None
         return self._apply_curation(mem, result)
 
+    async def consolidate_facts(self) -> Optional[list[str]]:
+        """Maintenance curation over the WHOLE fact sheet: merge duplicates,
+        drop contradictions and stale entries.
+
+        The per-turn curator only touches what a turn changed, so near-duplicate
+        facts accumulate across weeks. This reuses the same curator (same
+        per-fact op contract) with an explicit maintenance framing — no new
+        conversation material, just the sheet against itself. Operator-triggered
+        (see the admin surface); returns the applied changes, or None when
+        curation is off, the sheet is empty, or nothing changed."""
+        if self._curate_fn is None:
+            return None
+        mem = self.mem
+        facts = self.long_term.render_for_curator(mem)
+        if not facts.strip():
+            return None
+        inp = CurationInput(
+            user_message=(
+                "(maintenance pass — there is no new conversation) Review the durable "
+                "facts against each other. MERGE duplicates: UPDATE one id with the "
+                "combined fact and DELETE the redundant ids. DELETE facts contradicted "
+                "by a newer one, and facts clearly stale or one-off. Keep every fact "
+                "that is current and distinct. When in doubt, keep it — return no "
+                "operations rather than guessing."
+            ),
+            assistant_reply="",
+            current_facts=facts,
+            persona=self.store.persona.read_clean(),
+        )
+        try:
+            result = await self._curate_fn(inp)
+        except Exception as exc:  # noqa: BLE001 — maintenance must never break anything.
+            log_warning(f"memory: consolidation failed: {type(exc).__name__}: {exc}")
+            return None
+        # Only fact ops apply here: a maintenance pass has no turn to log as an
+        # episode and nothing to teach the persona.
+        result = CurationResult(operations=result.operations)
+        return self._apply_curation(mem, result)
+
+    def recall_preview(self, query: Optional[str]) -> dict[str, str]:
+        """What `build_context` would inject for `query`, per section — the
+        operator's retrieval-quality lens (semantic memory on: shows exactly
+        which facts/episodes a query surfaces; off: the whole-file render)."""
+        return self._read_sections(query.strip() if query and query.strip() else None)
+
     def _apply_curation(self, mem: ScopedMemory, result: CurationResult) -> Optional[list[str]]:
         """Apply a curator result deterministically: per-fact ops (with an archive
         snapshot), an optional episode, an optional persona adjustment. Returns the

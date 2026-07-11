@@ -129,6 +129,25 @@ class KnowledgeTagger(Protocol):
     ) -> Optional[list[str]]: ...
 
 
+class KnowledgeIndexer(Protocol):
+    """The ingest surface the model's save tool needs — one whole document in
+    (chunk/embed/upsert happens inside). Separate protocol for the same reason
+    as `KnowledgeTagger`: a deployment can wire search without the write."""
+
+    def index_document(
+        self,
+        doc_id: str,
+        text: str,
+        *,
+        source: str,
+        title: Optional[str] = None,
+        subject: str = "",
+        tags: Optional[list[str]] = None,
+        scope: str = GLOBAL_SCOPE,
+        metadata: Optional[dict[str, str]] = None,
+    ) -> int: ...
+
+
 def blend_by_tags(
     hits: list[KnowledgeHit], query_tags: Sequence[str], weight: float
 ) -> list[KnowledgeHit]:

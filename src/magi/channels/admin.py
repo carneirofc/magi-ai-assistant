@@ -327,11 +327,42 @@ class PutRawFile(BaseModel):
 
 
 class MemoryTriggerResult(BaseModel):
-    """The outcome of an operator-triggered memory pass (summarize / curate / flush)."""
+    """The outcome of an operator-triggered memory pass (summarize / curate /
+    flush / consolidate)."""
 
-    action: str = Field(description="Which pass ran: 'summarize', 'curate', or 'flush'.")
+    action: str = Field(description="Which pass ran: 'summarize', 'curate', 'flush', or 'consolidate'.")
     changed: bool = Field(description="Whether the pass actually changed anything.")
     detail: str = Field(description="A human-readable one-line summary of what happened.")
+
+
+class RecallPreview(BaseModel):
+    """What `build_context` would inject for a query, per section — the
+    operator's retrieval-quality lens (semantic memory shows exactly which
+    facts/episodes the query surfaces)."""
+
+    query: str
+    sections: dict[str, str] = Field(default_factory=dict)
+
+
+class FileHistoryEntry(BaseModel):
+    sha: str
+    ts: str
+    message: str
+
+
+class FileHistory(BaseModel):
+    """Git history of one raw memory file (empty when memory versioning is off)."""
+
+    kind: str
+    entries: list[FileHistoryEntry] = Field(default_factory=list)
+
+
+class FileVersionOut(BaseModel):
+    """One raw memory file's content at a specific commit."""
+
+    kind: str
+    sha: str
+    content: str
 
 
 # --- operator settings wire format -------------------------------------------
@@ -717,6 +748,85 @@ def create_admin_app(
             changed=result.changed,
             detail=result.detail,
         )
+
+    @app.post(
+        "/admin/v1/memory/users/{user_id}/consolidate",
+        response_model=MemoryTriggerResult,
+        dependencies=[Depends(require_auth)],
+    )
+    async def consolidate_facts(user_id: str) -> MemoryTriggerResult:
+        """Maintenance curation over the whole fact sheet: merge duplicates,
+        drop contradictions/stale facts. The per-turn curator never looks at
+        the sheet as a whole, so this is the periodic cleanup lever."""
+        try:
+            result = await memory_admin.consolidate_facts(memory_manager, user_id)
+        except (MemoryManagerRequiredError, TriggerUnavailableError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return MemoryTriggerResult(
+            action=result.action, changed=result.changed, detail=result.detail
+        )
+
+    @app.get(
+        "/admin/v1/memory/users/{user_id}/recall-preview",
+        response_model=RecallPreview,
+        dependencies=[Depends(require_auth)],
+    )
+    def recall_preview(user_id: str, q: str = Query(min_length=1)) -> RecallPreview:
+        """Dry-run the context assembly for a query: exactly what each memory
+        section would inject. The trust lens for semantic retrieval."""
+        try:
+            sections = memory_admin.recall_preview(memory_manager, user_id, q)
+        except MemoryManagerRequiredError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return RecallPreview(query=q, sections=sections)
+
+    @app.get(
+        "/admin/v1/memory/files/{kind}/history",
+        response_model=FileHistory,
+        dependencies=[Depends(require_auth)],
+    )
+    def get_file_history(
+        kind: str,
+        user_id: Optional[str] = Query(default=None),
+        session_id: Optional[str] = Query(default=None),
+        limit: int = Query(default=20, ge=1, le=100),
+    ) -> FileHistory:
+        """The git history of one raw memory file (memory_git_enabled). Empty —
+        not an error — when versioning is off, so the UI can show or hide the
+        drawer off one call."""
+        try:
+            entries = memory_admin.file_history(
+                kind, user_id=user_id, session_id=session_id, limit=limit
+            )
+        except (UserRequiredError, SessionRequiredError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except UnknownMemoryFileKindError as exc:
+            raise HTTPException(status_code=404, detail=f"unknown file kind {kind!r}") from exc
+        return FileHistory(kind=kind, entries=[FileHistoryEntry(**e) for e in entries])
+
+    @app.get(
+        "/admin/v1/memory/files/{kind}/history/{sha}",
+        response_model=FileVersionOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def get_file_version(
+        kind: str,
+        sha: str,
+        user_id: Optional[str] = Query(default=None),
+        session_id: Optional[str] = Query(default=None),
+    ) -> FileVersionOut:
+        """The file's content at one commit — the history drawer's read view."""
+        try:
+            content = memory_admin.file_at_version(
+                kind, sha, user_id=user_id, session_id=session_id
+            )
+        except (UserRequiredError, SessionRequiredError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except UnknownMemoryFileKindError as exc:
+            raise HTTPException(status_code=404, detail=f"unknown file kind {kind!r}") from exc
+        if content is None:
+            raise HTTPException(status_code=404, detail="no such version (or versioning is off)")
+        return FileVersionOut(kind=kind, sha=sha, content=content)
 
     @app.get(
         "/admin/v1/memory/persona",

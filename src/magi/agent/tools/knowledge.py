@@ -12,6 +12,7 @@ the tool takes only a query; the searcher's `scopes=` seam is where per-user/
 session knowledge would later be added without changing this tool's contract.
 """
 
+import uuid
 from typing import Annotated, Optional
 
 from agno.tools import tool
@@ -20,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from magi.agent.tools.outputs import ToolOutput, fail, ok
 from magi.core.config import config
-from magi.core.knowledge import KnowledgeSearcher, KnowledgeTagger
+from magi.core.knowledge import KnowledgeIndexer, KnowledgeSearcher, KnowledgeTagger
 
 
 class KnowledgeSnippet(BaseModel):
@@ -44,14 +45,23 @@ class TagData(BaseModel):
     tags: list[str] = Field(description="The document's full tag list after the change.")
 
 
+class SavedKnowledgeData(BaseModel):
+    doc_id: str = Field(description="The saved document's id (usable in later searches).")
+    title: str = Field(description="The saved document's display title.")
+    chunks: int = Field(description="How many chunks were indexed.")
+
+
 def build_knowledge_tools(
-    searcher: KnowledgeSearcher, tagger: Optional[KnowledgeTagger] = None
+    searcher: KnowledgeSearcher,
+    tagger: Optional[KnowledgeTagger] = None,
+    indexer: Optional[KnowledgeIndexer] = None,
 ) -> list:
     """Return the knowledge tool set bound to the injected dependencies.
 
     `searcher` powers the read tool; when `tagger` is given (the store), the
-    tag-write tool is included too. The store satisfies both, so the composition
-    root passes it as both."""
+    tag-write tool is included too; when `indexer` is given, `save_knowledge`
+    lets the lead ingest chat-surfaced material into the corpus. The store
+    satisfies all three, so the composition root passes it for each."""
 
     @tool(
         description="Search the knowledge base for reference material relevant to a question.",
@@ -111,8 +121,74 @@ def build_knowledge_tools(
         )
         return ok(msg, KnowledgeSearchData(query=query.strip(), snippets=snippets, count=len(snippets)))
 
+    tools: list = [search_knowledge]
+
+    if indexer is not None:
+
+        @tool(
+            description=(
+                "Save reference material into the shared knowledge base so it can be "
+                "found in later conversations."
+            ),
+            instructions=(
+                "Use when the user shares (or asks you to keep) reference MATERIAL — a "
+                "how-to, a config recipe, meeting notes, an article excerpt — that "
+                "future conversations should be able to look up via search_knowledge. "
+                "NOT for facts about the user themselves (memory handles those "
+                "automatically). Pass the material verbatim as `text` with a short "
+                "`title`; `subject`/`tags` improve later retrieval. Saving is explicit "
+                "and user-visible: mention what you saved and its title."
+            ),
+            show_result=True,
+        )
+        def save_knowledge(
+            text: Annotated[
+                str,
+                Field(min_length=20, description="The reference material to save, verbatim."),
+            ],
+            title: Annotated[
+                str, Field(min_length=1, description="A short human title for the document.")
+            ],
+            subject: Annotated[
+                str,
+                Field(default="", description="Optional subject grouping (see search results for the vocabulary)."),
+            ] = "",
+            tags: Annotated[
+                list[str], Field(default_factory=list, description="Optional free-form labels.")
+            ] = [],  # noqa: B006 — agno reads the annotation default; never mutated.
+        ) -> ToolOutput[SavedKnowledgeData]:
+            """Ingest one document of reference material into the knowledge base.
+
+            For shareable topic material, not user facts. The text is chunked and
+            indexed verbatim, so save exactly what should be retrievable later. A
+            zero-chunk result means the save failed (empty text or the knowledge
+            backend is down) — report that, never claim it was saved.
+            """
+            doc_id = f"chat-{uuid.uuid4().hex[:12]}"
+            chunks = indexer.index_document(
+                doc_id,
+                text.strip(),
+                source="chat",
+                title=title.strip(),
+                subject=subject.strip(),
+                tags=[t for t in tags if t.strip()],
+            )
+            if chunks <= 0:
+                log_info(f"knowledge: save {title.strip()!r} failed (0 chunks)")
+                return fail(
+                    "Could not save to the knowledge base (nothing indexed — is the "
+                    "knowledge backend up?)."
+                )
+            log_info(f"knowledge: saved doc {doc_id!r} ({chunks} chunk(s)) title={title.strip()!r}")
+            return ok(
+                f"Saved '{title.strip()}' ({chunks} chunk(s)).",
+                SavedKnowledgeData(doc_id=doc_id, title=title.strip(), chunks=chunks),
+            )
+
+        tools.append(save_knowledge)
+
     if tagger is None:
-        return [search_knowledge]
+        return tools
 
     @tool(
         description="Adjust the tags on a knowledge document so it's easier to find later.",
@@ -155,4 +231,5 @@ def build_knowledge_tools(
         log_info(f"knowledge: tag {doc_id.strip()!r} -> {result}")
         return ok(f"Tags now: {', '.join(result) or '(none)'}.", TagData(doc_id=doc_id.strip(), tags=result))
 
-    return [search_knowledge, tag_knowledge]
+    tools.append(tag_knowledge)
+    return tools

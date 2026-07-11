@@ -5,6 +5,7 @@ import Link from "next/link";
 import { EmptyState, InfoChip, PageHeader, StatusMessage, SurfacePanel } from "@carneirofc/ui";
 
 import { FactEditor } from "../components/FactEditor";
+import { MemoryMaintenance } from "../components/MemoryMaintenance";
 import { MemoryTabs } from "../components/MemoryTabs";
 import { RawFileEditor } from "../components/RawFileEditor";
 import { getProfile, getRawFile, listSessions } from "../lib/admin-api";
@@ -85,6 +86,9 @@ export async function UserMemoryView({
                 initialFacts={profile.facts}
                 initialVersion={profile.version}
               />
+              <SurfacePanel tone="subtle" padding="lg">
+                <MemoryMaintenance userId={userId} />
+              </SurfacePanel>
               {profile.raw_long_term.length > 0 ? (
                 <SurfacePanel tone="subtle" padding="lg" className="flex flex-col gap-2">
                   <h2 className="ui-text-label-sm text-[color:var(--ui-ink-accent)]">

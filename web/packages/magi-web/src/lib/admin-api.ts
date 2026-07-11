@@ -418,3 +418,58 @@ export function triggerSessionMemory(
     { method: "POST" },
   );
 }
+
+// --- memory depth: consolidation / recall preview / file history --------------
+
+/** Maintenance curation over a user's whole fact sheet (merge duplicates, drop
+ * contradictions). 503 when no model is wired. */
+export function consolidateFacts(userId: string): Promise<Response> {
+  return adminRequest(
+    `/admin/v1/memory/users/${encodeURIComponent(userId)}/consolidate`,
+    { method: "POST" },
+  );
+}
+
+export interface RecallPreview {
+  query: string;
+  sections: Record<string, string>;
+}
+
+/** Dry-run the context assembly for a query — exactly what each memory section
+ * would inject (the retrieval-quality lens for semantic memory). */
+export async function getRecallPreview(userId: string, q: string): Promise<RecallPreview> {
+  return adminGet(
+    `/admin/v1/memory/users/${encodeURIComponent(userId)}/recall-preview?q=${encodeURIComponent(q)}`,
+  );
+}
+
+export interface FileHistoryEntry {
+  sha: string;
+  ts: string;
+  message: string;
+}
+
+/** The git history of one raw memory file. Empty entries — not an error — when
+ * memory versioning (memory_git_enabled) is off. */
+export async function getRawFileHistory(
+  kind: string,
+  opts: { userId?: string; sessionId?: string; limit?: number } = {},
+): Promise<{ kind: string; entries: FileHistoryEntry[] }> {
+  const query = rawFileQuery(opts.userId, opts.sessionId);
+  const sep = query ? "&" : "?";
+  const limit = opts.limit ? `${sep}limit=${opts.limit}` : "";
+  return adminGet(
+    `/admin/v1/memory/files/${encodeURIComponent(kind)}/history${query}${limit}`,
+  );
+}
+
+/** One raw memory file's content at a commit; relays 404 for unknown versions. */
+export function getRawFileVersion(
+  kind: string,
+  sha: string,
+  opts: { userId?: string; sessionId?: string } = {},
+): Promise<Response> {
+  return adminRequest(
+    `/admin/v1/memory/files/${encodeURIComponent(kind)}/history/${encodeURIComponent(sha)}${rawFileQuery(opts.userId, opts.sessionId)}`,
+  );
+}

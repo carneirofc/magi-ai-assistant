@@ -231,6 +231,102 @@ class MemoryAdmin:
             ),
         )
 
+    async def consolidate_facts(
+        self, manager: Optional[MemoryManager], user_id: str
+    ) -> TriggerSnapshot:
+        """Operator-triggered maintenance curation over the whole fact sheet
+        (merge duplicates, drop contradictions) — see MemoryManager.consolidate_facts."""
+        mgr = self._require_manager(manager)
+        if not mgr.curation_enabled:
+            raise TriggerUnavailableError(
+                "memory curation unavailable in this deployment (no model wired)"
+            )
+        mgr.set_scope(user_id, _USER_SCOPE_SID)
+        applied = await mgr.consolidate_facts()
+        if applied and "profile" in applied:
+            self._sync_long_term(self._user_mem(user_id))
+        return TriggerSnapshot(
+            action="consolidate",
+            changed=bool(applied),
+            detail=(
+                "Consolidated the fact sheet (duplicates merged / stale facts dropped)."
+                if applied
+                else "Nothing to consolidate (empty sheet, or the curator kept everything)."
+            ),
+        )
+
+    def recall_preview(
+        self, manager: Optional[MemoryManager], user_id: str, query: str
+    ) -> dict[str, str]:
+        """The per-section context bodies `build_context` would inject for
+        `query` — the retrieval-quality debugging lens (ADR 0002 spirit: trust
+        through inspectability). Uses a throwaway session scope, so short-term
+        is empty by construction; the interesting sections are the global ones."""
+        mgr = self._require_manager(manager)
+        mgr.set_scope(user_id, "_preview")
+        return mgr.recall_preview(query)
+
+    # --- file history (git-backed memory) -----------------------------------
+    def file_history(
+        self,
+        kind: str,
+        *,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """The git history of one raw memory file, newest first: `sha`
+        (short), `ts`, `message`. Empty when the memory root is not a git repo
+        (memory_git_enabled off) or GitPython is absent — history is an
+        enhancement, never a requirement."""
+        target = self.raw_target(kind, user_id=user_id, session_id=session_id)
+        repo, rel = self._repo_and_rel(target.path)
+        if repo is None:
+            return []
+        entries: list[dict] = []
+        for commit in repo.iter_commits(paths=rel, max_count=max(1, limit)):
+            entries.append(
+                {
+                    "sha": commit.hexsha[:12],
+                    "ts": commit.committed_datetime.isoformat(),
+                    "message": str(commit.message).strip(),
+                }
+            )
+        return entries
+
+    def file_at_version(
+        self,
+        kind: str,
+        sha: str,
+        *,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> Optional[str]:
+        """The file's content at commit `sha`, or None when unavailable (no
+        repo, unknown sha, or the file didn't exist at that commit)."""
+        target = self.raw_target(kind, user_id=user_id, session_id=session_id)
+        repo, rel = self._repo_and_rel(target.path)
+        if repo is None or not sha.isalnum():
+            return None
+        try:
+            return repo.git.show(f"{sha}:{rel}")
+        except Exception:  # noqa: BLE001 — an unknown sha is a 404, not a crash.
+            return None
+
+    def _repo_and_rel(self, path: Path):
+        """The memory root's git repo and `path` relative to it, or (None, "")."""
+        root = self.memory.root.resolve()
+        if not (root / ".git").exists():
+            return None, ""
+        try:
+            import git  # noqa: PLC0415 — optional dependency, imported on demand.
+
+            repo = git.Repo(root)
+            rel = path.resolve().relative_to(root).as_posix()
+            return repo, rel
+        except Exception:  # noqa: BLE001 — history is optional; degrade to none.
+            return None, ""
+
     def get_raw_file(
         self, kind: str, *, user_id: Optional[str] = None, session_id: Optional[str] = None
     ) -> RawFileSnapshot:
