@@ -33,9 +33,12 @@ import {
   type ReactNode,
 } from "react";
 import {
+  ActionBarPrimitive,
   AssistantRuntimeProvider,
   AttachmentPrimitive,
+  BranchPickerPrimitive,
   ComposerPrimitive,
+  ErrorPrimitive,
   MessagePrimitive,
   SelectionToolbarPrimitive,
   ThreadPrimitive,
@@ -64,15 +67,22 @@ import { ContextDisplay, type ThreadTokenUsage } from "./assistant-ui/context-di
 import { CodeHeader, CodeSyntaxHighlighter } from "./CodeBlock";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { clearSessionHistory, createSessionHistoryAdapter } from "../lib/chat-history";
+import { exportTranscript } from "../lib/chat-export";
 import {
+  DEFAULT_TITLE,
   activeSession,
+  archivedSessions,
   createSession,
+  deriveTitle,
   loadRegistry,
   removeSession,
   renameSession,
   saveRegistry,
   selectSession,
+  toggleArchiveSession,
+  togglePinSession,
   touchSession,
+  visibleSessions,
   type ChatSession,
   type SessionRegistry,
 } from "../lib/chat-sessions";
@@ -165,6 +175,39 @@ export function ChatConsole({
     setRegistry(next);
   }
 
+  // Auto-title: on a conversation's FIRST message the rail shows the derived
+  // title immediately, then a cheap model pass proposes a better one; the
+  // rename lands only if the title is still the derived one (a manual rename
+  // in between wins). Fire-and-forget — a failed pass keeps the derived title.
+  function maybeAutoTitle(id: string, firstUserText: string) {
+    const derived = deriveTitle(firstUserText);
+    fetch("/api/chat/title", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: firstUserText }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body: { title?: string | null } | null) => {
+        const title = body?.title;
+        if (!title || typeof title !== "string") return;
+        setRegistry((prev) => {
+          if (!prev) return prev;
+          const current = prev.sessions.find((s) => s.id === id);
+          if (!current || current.title !== derived) return prev;
+          const next = renameSession(prev, id, title);
+          saveRegistry(next);
+          return next;
+        });
+      })
+      .catch(() => {});
+  }
+
+  function onUserSend(id: string, text: string) {
+    const wasUntitled = registry?.sessions.find((s) => s.id === id)?.title === DEFAULT_TITLE;
+    commit(touchSession(registry!, id, text));
+    if (wasUntitled && text.trim()) maybeAutoTitle(id, text);
+  }
+
   if (!registry) return null;
 
   const active = activeSession(registry);
@@ -211,6 +254,11 @@ export function ChatConsole({
           onNew={() => commit(createSession(registry))}
           onSelect={(id) => commit(selectSession(registry, id))}
           onRename={(id, title) => commit(renameSession(registry, id, title))}
+          onTogglePin={(id) => commit(togglePinSession(registry, id))}
+          onToggleArchive={(id) => commit(toggleArchiveSession(registry, id))}
+          onExport={(session, format) =>
+            void exportTranscript(session.id, session.title, format, identity.name ?? "Assistant")
+          }
           onRemove={(id) => {
             clearSessionHistory(id);
             commit(removeSession(registry, id));
@@ -225,7 +273,7 @@ export function ChatConsole({
             key={greetKey}
             sessionId={sessionId}
             userId={userId}
-            onUserSend={(text) => commit(touchSession(registry, sessionId, text))}
+            onUserSend={(text) => onUserSend(sessionId, text)}
           />
         </div>
       </div>
@@ -300,6 +348,9 @@ function SessionRail({
   onNew,
   onSelect,
   onRename,
+  onTogglePin,
+  onToggleArchive,
+  onExport,
   onRemove,
 }: {
   registry: SessionRegistry;
@@ -308,10 +359,16 @@ function SessionRail({
   onNew: () => void;
   onSelect: (id: string) => void;
   onRename: (id: string, title: string) => void;
+  onTogglePin: (id: string) => void;
+  onToggleArchive: (id: string) => void;
+  onExport: (session: ChatSession, format: "markdown" | "json") => void;
   onRemove: (id: string) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
+  const visible = visibleSessions(registry);
+  const archived = archivedSessions(registry);
 
   function startRename(session: ChatSession) {
     setEditingId(session.id);
@@ -354,7 +411,7 @@ function SessionRail({
         </RailIconButton>
       </div>
       <ul className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
-        {registry.sessions.map((session) => {
+        {visible.map((session) => {
           const isActive = session.id === registry.activeId;
           return (
             <li key={session.id}>
@@ -379,6 +436,11 @@ function SessionRail({
                       : "border-transparent hover:border-ui hover:bg-[color:var(--ui-bg)]"
                   }`}
                 >
+                  {session.pinned ? (
+                    <span aria-hidden className="shrink-0 text-ui-2xs text-[color:var(--ui-ink-accent)]">
+                      ●
+                    </span>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => onSelect(session.id)}
@@ -388,31 +450,100 @@ function SessionRail({
                   >
                     {session.title}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => startRename(session)}
-                    className="shrink-0 text-ui-2xs text-[color:var(--ui-ink-subtle)] opacity-0 hover:text-[color:var(--ui-ink)] group-hover:opacity-100"
-                    title="Rename"
-                    aria-label="Rename conversation"
+                  <SessionRowAction
+                    onClick={() => onTogglePin(session.id)}
+                    title={session.pinned ? "Unpin" : "Pin to top"}
                   >
+                    {session.pinned ? "◉" : "○"}
+                  </SessionRowAction>
+                  <SessionRowAction onClick={() => startRename(session)} title="Rename">
                     ✎
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onRemove(session.id)}
-                    className="shrink-0 text-ui-2xs text-[color:var(--ui-ink-subtle)] opacity-0 hover:text-[color:var(--ui-ink-danger)] group-hover:opacity-100"
-                    title="Delete conversation"
-                    aria-label="Delete conversation"
+                  </SessionRowAction>
+                  <SessionRowAction
+                    onClick={() => onExport(session, "markdown")}
+                    title="Export as Markdown (Shift-click for JSON)"
+                    onShiftClick={() => onExport(session, "json")}
                   >
+                    ↓
+                  </SessionRowAction>
+                  <SessionRowAction onClick={() => onToggleArchive(session.id)} title="Archive">
+                    ▣
+                  </SessionRowAction>
+                  <SessionRowAction danger onClick={() => onRemove(session.id)} title="Delete conversation">
                     ✕
-                  </button>
+                  </SessionRowAction>
                 </div>
               )}
             </li>
           );
         })}
       </ul>
+
+      {archived.length > 0 ? (
+        <div className="flex flex-col gap-1 border-t border-ui pt-2">
+          <button
+            type="button"
+            onClick={() => setShowArchived((v) => !v)}
+            className="text-left text-ui-2xs font-semibold uppercase tracking-wide text-[color:var(--ui-ink-subtle)] hover:text-[color:var(--ui-ink)]"
+          >
+            Archived ({archived.length}) {showArchived ? "▾" : "▸"}
+          </button>
+          {showArchived ? (
+            <ul className="flex max-h-40 flex-col gap-1 overflow-y-auto">
+              {archived.map((session) => (
+                <li
+                  key={session.id}
+                  className="group flex items-center gap-1 rounded-lg border border-transparent px-2 py-1.5 hover:border-ui hover:bg-[color:var(--ui-bg)]"
+                >
+                  <span className="min-w-0 flex-1 truncate text-ui-xs text-[color:var(--ui-ink-muted)]">
+                    {session.title}
+                  </span>
+                  <SessionRowAction onClick={() => onToggleArchive(session.id)} title="Unarchive">
+                    ▢
+                  </SessionRowAction>
+                  <SessionRowAction danger onClick={() => onRemove(session.id)} title="Delete conversation">
+                    ✕
+                  </SessionRowAction>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
     </aside>
+  );
+}
+
+/** One glyph-sized hover control on a session row. `onShiftClick`, when given,
+ * routes a shift-click to the secondary action (the export row uses it for JSON). */
+function SessionRowAction({
+  children,
+  title,
+  onClick,
+  onShiftClick,
+  danger = false,
+}: {
+  children: ReactNode;
+  title: string;
+  onClick: () => void;
+  onShiftClick?: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        if (e.shiftKey && onShiftClick) onShiftClick();
+        else onClick();
+      }}
+      className={`shrink-0 text-ui-2xs text-[color:var(--ui-ink-subtle)] opacity-0 group-hover:opacity-100 ${
+        danger ? "hover:text-[color:var(--ui-ink-danger)]" : "hover:text-[color:var(--ui-ink)]"
+      }`}
+      title={title}
+      aria-label={title}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -504,11 +635,13 @@ function ChatThread({
               </div>
             </ThreadPrimitive.Empty>
 
-            <ThreadPrimitive.Messages>
-              {({ message }) =>
-                message.role === "user" ? <UserMessage /> : <AssistantMessage />
-              }
-            </ThreadPrimitive.Messages>
+            <ThreadPrimitive.Messages
+              components={{
+                UserMessage,
+                AssistantMessage,
+                EditComposer: UserEditComposer,
+              }}
+            />
           </ThreadPrimitive.Viewport>
 
           <div className="pointer-events-none absolute inset-0 z-10 hidden items-center justify-center rounded-lg bg-[color:var(--ui-bg)]/70 group-data-[dragging=true]:flex">
@@ -853,9 +986,63 @@ function QuotedContext() {
   );
 }
 
+/** A small hover control in a message's action bar (edit / regenerate / copy). */
+const MessageActionButton = forwardRef<
+  HTMLButtonElement,
+  ComponentPropsWithoutRef<"button">
+>(function MessageActionButton({ children, ...props }, ref) {
+  return (
+    <button
+      ref={ref}
+      type="button"
+      {...props}
+      className="flex h-6 w-6 items-center justify-center rounded-md border border-ui bg-[color:var(--ui-bg)] text-[color:var(--ui-ink-subtle)] transition-colors hover:text-[color:var(--ui-ink-accent)] disabled:opacity-40"
+    >
+      {children}
+    </button>
+  );
+});
+
+/** Prev/next through the branches an edit or regenerate created. Renders
+ * nothing while the message has a single branch. */
+function BranchPicker() {
+  return (
+    <BranchPickerPrimitive.Root
+      hideWhenSingleBranch
+      className="flex items-center gap-1 text-ui-2xs text-[color:var(--ui-ink-subtle)]"
+    >
+      <BranchPickerPrimitive.Previous asChild>
+        <MessageActionButton title="Previous version" aria-label="Previous version">
+          <ChevronLeftIcon />
+        </MessageActionButton>
+      </BranchPickerPrimitive.Previous>
+      <span className="font-mono">
+        <BranchPickerPrimitive.Number /> / <BranchPickerPrimitive.Count />
+      </span>
+      <BranchPickerPrimitive.Next asChild>
+        <MessageActionButton title="Next version" aria-label="Next version">
+          <ChevronRightIcon />
+        </MessageActionButton>
+      </BranchPickerPrimitive.Next>
+    </BranchPickerPrimitive.Root>
+  );
+}
+
 function UserMessage() {
   return (
-    <MessagePrimitive.Root className="flex items-start justify-end gap-2">
+    <MessagePrimitive.Root className="group/message flex items-start justify-end gap-2">
+      {/* Hover actions: edit this message (resends it — downstream turns move to
+          a new branch; the picker navigates back). */}
+      <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
+        <BranchPicker />
+        <ActionBarPrimitive.Root hideWhenRunning autohide="never" className="flex items-center gap-1">
+          <ActionBarPrimitive.Edit asChild>
+            <MessageActionButton title="Edit message" aria-label="Edit message">
+              <PencilIcon />
+            </MessageActionButton>
+          </ActionBarPrimitive.Edit>
+        </ActionBarPrimitive.Root>
+      </div>
       <div className="max-w-[85%] rounded-lg border border-accent-cyan/40 bg-[color:var(--ui-bg-info)] px-3 py-2">
         <RoleTag>You</RoleTag>
         <QuotedContext />
@@ -871,16 +1058,67 @@ function UserMessage() {
   );
 }
 
+/** The in-place editor an ActionBar edit opens on a user message: same bubble
+ * position, a textarea over the existing text, cancel/resend controls. Sending
+ * re-runs the conversation from here; prior replies stay on the old branch. */
+function UserEditComposer() {
+  return (
+    <MessagePrimitive.Root className="flex items-start justify-end gap-2">
+      <ComposerPrimitive.Root className="flex w-[85%] flex-col gap-2 rounded-lg border border-[color:var(--ui-border-active)] bg-[color:var(--ui-bg-info)] px-3 py-2">
+        <RoleTag>Edit message</RoleTag>
+        <ComposerPrimitive.Input
+          autoFocus
+          className="max-h-40 w-full resize-none bg-transparent text-ui-sm text-[color:var(--ui-ink)] outline-none"
+        />
+        <div className="flex items-center justify-end gap-2">
+          <ComposerPrimitive.Cancel asChild>
+            <OutlineButton controlSize="sm">Cancel</OutlineButton>
+          </ComposerPrimitive.Cancel>
+          <ComposerPrimitive.Send asChild>
+            <OutlineButton variant="accent" controlSize="sm">
+              Resend
+            </OutlineButton>
+          </ComposerPrimitive.Send>
+        </div>
+      </ComposerPrimitive.Root>
+      <Avatar kind="user" />
+    </MessagePrimitive.Root>
+  );
+}
+
 function AssistantMessage() {
   const identity = useContext(IdentityContext);
   return (
-    <MessagePrimitive.Root className="flex items-start justify-start gap-2">
+    <MessagePrimitive.Root className="group/message flex items-start justify-start gap-2">
       <Avatar kind="assistant" />
       <div className="max-w-[85%] rounded-lg border border-ui bg-[color:var(--ui-bg-soft)] px-3 py-2">
         <RoleTag>{identity.name || "MAGI"}</RoleTag>
         <div className="break-words text-ui-sm text-[color:var(--ui-ink)]">
           <MessagePrimitive.Parts components={ASSISTANT_PART_COMPONENTS} />
         </div>
+        {/* A failed run (network drop, backend down) surfaces here; the reload
+            action alongside is the retry. */}
+        <MessagePrimitive.Error>
+          <ErrorPrimitive.Root className="mt-1 text-ui-xs text-[color:var(--ui-ink-danger)]">
+            <ErrorPrimitive.Message />
+          </ErrorPrimitive.Root>
+        </MessagePrimitive.Error>
+      </div>
+      {/* Hover actions: regenerate (or retry after an error) + copy. */}
+      <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
+        <ActionBarPrimitive.Root hideWhenRunning autohide="never" className="flex items-center gap-1">
+          <ActionBarPrimitive.Reload asChild>
+            <MessageActionButton title="Regenerate reply" aria-label="Regenerate reply">
+              <RefreshIcon />
+            </MessageActionButton>
+          </ActionBarPrimitive.Reload>
+          <ActionBarPrimitive.Copy asChild>
+            <MessageActionButton title="Copy reply" aria-label="Copy reply">
+              <CopyIcon />
+            </MessageActionButton>
+          </ActionBarPrimitive.Copy>
+        </ActionBarPrimitive.Root>
+        <BranchPicker />
       </div>
     </MessagePrimitive.Root>
   );
@@ -900,6 +1138,29 @@ function QuoteIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" className={className} aria-hidden>
       <path d="M7.5 6C5.6 6 4 7.6 4 9.5S5.6 13 7.5 13c.2 0 .3 0 .5-.1-.3 1.4-1.4 2.5-2.8 2.9-.4.1-.6.5-.5.9.1.3.4.5.7.5h.2c2.6-.6 4.4-2.9 4.4-5.6V9.5C10 7.6 8.4 6 6.5 6h1zm9 0C14.6 6 13 7.6 13 9.5s1.6 3.5 3.5 3.5c.2 0 .3 0 .5-.1-.3 1.4-1.4 2.5-2.8 2.9-.4.1-.6.5-.5.9.1.3.4.5.7.5h.2c2.6-.6 4.4-2.9 4.4-5.6V9.5C19 7.6 17.4 6 15.5 6h1z" />
+    </svg>
+  );
+}
+function PencilIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z" />
+    </svg>
+  );
+}
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M21 12a9 9 0 1 1-2.6-6.4" />
+      <path d="M21 3v6h-6" />
+    </svg>
+  );
+}
+function CopyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="9" y="9" width="12" height="12" rx="2" />
+      <path d="M5 15V5a2 2 0 0 1 2-2h10" />
     </svg>
   );
 }

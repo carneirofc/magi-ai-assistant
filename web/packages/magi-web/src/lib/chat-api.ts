@@ -142,6 +142,25 @@ export async function fetchIdentityAvatar(mood?: string): Promise<Response> {
   });
 }
 
+/** A short model-made title for a conversation's opening exchange (chat-api
+ * /v1/title). Null when the pass is unavailable or produced nothing usable —
+ * the caller keeps its derived title. */
+export async function requestTitle(text: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${baseUrl()}/v1/title`, {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { title?: string | null };
+    return typeof body.title === "string" && body.title.trim() ? body.title : null;
+  } catch {
+    return null;
+  }
+}
+
 /** One durable fact the assistant keeps about a user (read-only). */
 export interface SelfMemoryFact {
   text: string;

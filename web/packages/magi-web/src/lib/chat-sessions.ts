@@ -13,6 +13,10 @@ export interface ChatSession {
   title: string;
   createdAt: number;
   updatedAt: number;
+  /** Sticks to the top of the rail. Optional: pre-polish registries load as-is. */
+  pinned?: boolean;
+  /** Hidden from the default rail (recoverable from its Archived section). */
+  archived?: boolean;
 }
 
 export interface SessionRegistry {
@@ -25,7 +29,7 @@ const KEY = "magi.chat.sessions.v1";
 // The pre-registry single-session key (see the old ChatConsole) — migrated once so
 // an in-flight conversation isn't orphaned by the upgrade.
 const LEGACY_SESSION_KEY = "magi.chat.sessionId";
-const DEFAULT_TITLE = "New chat";
+export const DEFAULT_TITLE = "New chat";
 const TITLE_MAX = 48;
 
 /** A timestamp; wrapped so the one impure call is easy to find. */
@@ -136,4 +140,44 @@ export function touchSession(
     ...reg,
     sessions: [updated, ...reg.sessions.filter((s) => s.id !== id)],
   };
+}
+
+// --- session polish: pin / archive / rail ordering ---------------------------
+// `pinned` and `archived` are optional so registries saved before this feature
+// load unchanged. Pinned sessions sort to the top of the rail; archived ones
+// leave the default list (recoverable from the rail's Archived section).
+
+export function togglePinSession(reg: SessionRegistry, id: string): SessionRegistry {
+  return {
+    ...reg,
+    sessions: reg.sessions.map((s) => (s.id === id ? { ...s, pinned: !s.pinned } : s)),
+  };
+}
+
+/** Archive/unarchive. Archiving the active session activates the most recent
+ * visible one (creating a fresh session when none is left). */
+export function toggleArchiveSession(reg: SessionRegistry, id: string): SessionRegistry {
+  const sessions = reg.sessions.map((s) =>
+    s.id === id ? { ...s, archived: !s.archived, pinned: false } : s,
+  );
+  let activeId = reg.activeId;
+  if (activeId === id && sessions.find((s) => s.id === id)?.archived) {
+    const visible = sessions.filter((s) => !s.archived);
+    if (visible.length === 0) {
+      const fresh = { id: newSessionId(), title: "New chat", createdAt: Date.now(), updatedAt: Date.now() };
+      return { activeId: fresh.id, sessions: [fresh, ...sessions] };
+    }
+    activeId = visible[0].id;
+  }
+  return { activeId, sessions };
+}
+
+/** The rail's default list: pinned first (each group most-recent first). */
+export function visibleSessions(reg: SessionRegistry): ChatSession[] {
+  const shown = reg.sessions.filter((s) => !s.archived);
+  return [...shown.filter((s) => s.pinned), ...shown.filter((s) => !s.pinned)];
+}
+
+export function archivedSessions(reg: SessionRegistry): ChatSession[] {
+  return reg.sessions.filter((s) => s.archived);
 }
