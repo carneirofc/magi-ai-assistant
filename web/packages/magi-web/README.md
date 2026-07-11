@@ -54,9 +54,36 @@ tokens. In `globals.css`:
 
 ## Use
 
-Import by subpath. The library ships the whole runnable surface — components, the
-BFF route handlers, the page views, and the auth middleware — so a consuming app
-is a thin `app/` tree that **mounts** them and supplies env + theme.
+Import by explicit slice entrypoint first. The library still ships components,
+route helpers, convenience screens, and the auth middleware, but the primary
+mental model is now:
+
+- **stable slice contract:** `types + hooks + components`
+- **advanced seams:** lower-level composition helpers and route helpers
+- **legacy compatibility:** old `pages/*` and `components/*` imports kept only where cheap
+
+### Slice entrypoints
+
+```ts
+import { ChatConsole } from "@carneirofc/magi-web/slices/chat/components";
+import { chatCopy } from "@carneirofc/magi-web/slices/chat/screens";
+import { getChatHealth } from "@carneirofc/magi-web/lib/chat-api";
+import { KnowledgeList } from "@carneirofc/magi-web/slices/knowledge/components";
+import { buildDefaultAppShellConfig, MagiAppShell } from "@carneirofc/magi-web/slices/shell";
+```
+
+### Stability tiers
+
+- **Stable** — developer-first imports we teach and intend to preserve across routine refactors
+- **Advanced** — lower-level supported seams for custom composition
+- **Internal/Experimental** — contributor-facing implementation details
+- **Legacy/Compatibility-only** — old paths kept as temporary re-exports
+
+### Convenience screens still exist
+
+You can still mount convenience screens from `pages/*`, but they are now the
+secondary story. The first story is app-owned composition built from slice
+entrypoints.
 
 ```ts
 // app/api/chat/route.ts — mount the BFF handler (logic in the lib)
@@ -66,9 +93,28 @@ export const dynamic = "force-dynamic";
 ```
 
 ```tsx
-// app/(app)/chat/page.tsx — mount the page view
-export { default } from "@carneirofc/magi-web/pages/chat";
+// app/(app)/chat/page.tsx — own the page, reuse the stable Chat slice
+import { PageHeader, StatusBadge, StatusMessage } from "@carneirofc/ui";
+import { ChatConsole } from "@carneirofc/magi-web/slices/chat/components";
+import { chatCopy } from "@carneirofc/magi-web/slices/chat/screens";
+import { getChatHealth } from "@carneirofc/magi-web/lib/chat-api";
+
 export const dynamic = "force-dynamic";
+
+export default async function ChatPage() {
+  const health = await getChatHealth();
+  return (
+    <>
+      <PageHeader
+        subtitle={chatCopy.subtitle}
+        title={chatCopy.title}
+        description="App-owned composition using stable Chat slice parts."
+        pills={<StatusBadge tone={health ? "success" : "error"}>{health ? "Chat API online" : "Chat API offline"}</StatusBadge>}
+      />
+      {health ? <ChatConsole /> : <StatusMessage tone="error">Chat API unavailable.</StatusMessage>}
+    </>
+  );
+}
 ```
 
 ```ts
@@ -98,12 +144,12 @@ are declared in your thin file.
 
 ## Extend
 
-You reskin and compose; you don't fork. The seams:
+You reskin and compose; you don't fork. Prefer slice imports first:
 
 | Want to change… | Where |
 |---|---|
 | Colors / fonts / accent | override `@carneirofc/ui` theme tokens in your `globals.css` |
-| Brand wordmark / logo / nav | `<AppShell brand tagline logo nav>` props (default to the reference values) |
+| Brand wordmark / logo / nav | app-owned nav config + `MagiAppShell` / `AppShell` |
 | Page copy (titles/descriptions) | the `…View` `copy` prop, or write a bespoke `app/` page |
 | Which routes/pages exist | your thin `app/` tree — mount only what you want |
 | Backend URL / auth / secrets | your `.env` (the lib clients read it) |
@@ -111,19 +157,29 @@ You reskin and compose; you don't fork. The seams:
 | The engine data contract | pin a `@carneirofc/magi-web` version built against that engine |
 
 ```tsx
-// your app/(app)/chat/page.tsx — reskin the header without forking
-import { ChatView } from "@carneirofc/magi-web/pages/chat";
-export const dynamic = "force-dynamic";
+// your app/(app)/chat/page.tsx — replace the screen composition without forking
+import { ChatConsole } from "@carneirofc/magi-web/slices/chat/components";
+import { chatCopy } from "@carneirofc/magi-web/slices/chat/screens";
+
 export default function ChatPage() {
-  return <ChatView copy={{ title: "Talk to Ada", subtitle: "ada // chat" }} />;
+  return (
+    <section>
+      <h1>{chatCopy.title}</h1>
+      <p>Custom header, custom layout, same stable chat building blocks.</p>
+      <ChatConsole />
+    </section>
+  );
 }
 ```
 
 ```tsx
-// your app/(app)/layout.tsx — reskin the shell
-import { AppShell } from "@carneirofc/magi-web/components/AppShell";
+// your app/(app)/layout.tsx — app-owned shell assembly
+import { buildDefaultAppShellConfig, MagiAppShell } from "@carneirofc/magi-web/slices/shell";
+
+const shell = buildDefaultAppShellConfig({ brand: "Ada", tagline: "Console" });
+
 export default function Layout({ children }: { children: React.ReactNode }) {
-  return <AppShell brand="Ada" tagline="Console">{children}</AppShell>;
+  return <MagiAppShell nav={shell.nav} brand={shell.brand} tagline={shell.tagline}>{children}</MagiAppShell>;
 }
 ```
 
@@ -163,4 +219,4 @@ ADMIN_API_URL=http://127.0.0.1:8100 npm run gen:api
    installs the workspace, typechecks, and runs `npm publish -w @carneirofc/magi-web`
    with the job's `GITHUB_TOKEN`. No external secrets.
 
-Full architecture + the persona-overlay walkthrough: [`docs/frontend-split.md`](../../../docs/frontend-split.md).
+Full architecture + migration context: [`docs/web-extensibility-plan.md`](../../../docs/web-extensibility-plan.md) and [`docs/frontend-split.md`](../../../docs/frontend-split.md).

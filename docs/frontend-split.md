@@ -1,5 +1,8 @@
 # Frontend split & distribution plan
 
+> Superseded as the primary teaching doc by [`web-extensibility-plan.md`](web-extensibility-plan.md).
+> This document remains useful as the historical extraction/distribution record.
+
 _Status: implemented. Created 2026-07-04; extended to ship routes + pages +
 middleware from the library (app is now thin re-exports)._
 
@@ -159,6 +162,7 @@ export const dynamic = "force-dynamic";
 // web-overlay/app/chat/page.tsx — mount the library's page view
 export { default } from "@carneirofc/magi-web/pages/chat";
 export const dynamic = "force-dynamic";
+// Legacy compatibility path: still works, but prefer slice-first imports.
 // To reskin the header, import { ChatView } and render <ChatView copy={{ title: … }} />.
 ```
 

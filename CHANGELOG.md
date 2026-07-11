@@ -8,6 +8,10 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Added
 
+- **Web slice entrypoints for extensibility.** `@carneirofc/magi-web` now exposes
+  explicit slice-first entrypoints for Chat, Knowledge, shell/nav assembly, and a
+  shared slice contract (`slices/chat/*`, `slices/knowledge/*`, `slices/shell`,
+  `slices/core`) so consumers can customize by composition instead of file-hunting.
 - **Bot identity.** A global, operator-set profile the assistant presents as
   itself — display name, description, and profile picture — stored beside the
   persona on the memory root. The name and description are injected into every
@@ -53,6 +57,9 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Changed
 
+- **Reference web app now demonstrates app-owned composition.** The in-repo Next
+  app keeps shell/nav assembly in the app and replaces the built-in Chat page with
+  an app-local composition built from stable Chat slice exports.
 - The admin app now shares the chat stack's live `MemoryManager` (and its on-disk
   view) instead of constructing a standalone store; standalone `main.py admin`
   still builds a model-free manager.
@@ -66,6 +73,10 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Docs
 
+- Web extensibility docs now teach building blocks first: the web extensibility
+  plan, issue breakdown, library README, app README, and frontend split docs now
+  lead with slice entrypoints and stability tiers, with convenience screens
+  treated as secondary compatibility/convenience layers.
 - Slimmed the root `README.md` to a feature- and screenshot-focused map, moving
   the verbose setup walkthroughs (Docker, Open WebUI, storage backends) into
   [`docs/`](docs/) and fixing stale references (`apply_deployment_config` →

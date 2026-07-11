@@ -1,9 +1,32 @@
 # MAGI Admin
 
-A web dashboard for operating the MAGI assistant — **inspect and edit everything
-it remembers**, and manage the knowledge it can search. It's the human-facing
-counterpart to MAGI's *deliberate memory*: durable facts, episodes, sessions,
-persona, and the document corpus, all browsable and editable in one place.
+A web dashboard for operating the MAGI assistant — and now also the **starter
+overlay** that demonstrates how to compose `@carneirofc/magi-web` by feature
+slice instead of treating the app as a pile of page mounts.
+
+The app still lets you inspect and edit everything MAGI remembers and manage the
+knowledge corpus, but architecturally its other job is to show:
+
+- app-owned route files,
+- app-owned shell/nav assembly,
+- custom Chat composition built from stable slice exports,
+- convenience screens as optional, not primary.
+
+## Extensibility model
+
+The frontend contract is now taught in this order:
+
+1. **slice entrypoints** (`slices/chat/*`, `slices/knowledge/*`, `slices/shell`)
+2. **building blocks first** (`types + hooks + components`)
+3. **convenience screens second** (`pages/*`)
+4. **legacy mounts last** only for compatibility
+
+### Customize Chat by composition
+
+The reference app's `/chat` route is no longer a pure re-export. It is an
+app-local page that reuses stable Chat slice pieces from the library. That is the
+golden-path example for overlays: keep route ownership in the app, swap the page
+composition locally, and reuse the stable library seams.
 
 Built with **Next.js** (App Router) on the [`@carneirofc/ui`](https://github.com/carneirofc/deedlit.dev)
 design system (Tailwind v4 + Radix), with light/dark themes.
