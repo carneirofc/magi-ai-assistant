@@ -882,3 +882,36 @@ def test_identity_lists_expressions_and_serves_by_mood():
     assert client.get("/v1/identity/avatar?mood=neutral").content == _PNG_1x1
     assert client.get("/v1/identity/avatar?mood=focused").status_code == 404
     assert client.get("/v1/identity/avatar?mood=..%2Fevil").status_code == 422
+
+
+# --- greeting turn (assistant-initiated; issue #31) ----------------------------
+class _GreetConversation(_FakeConversation):
+    async def greet_stream(self, *, user_id, session_id, instruction, extra_context=""):
+        self.calls.append(("greet_stream", user_id, session_id))
+        self.instruction = instruction
+        yield ConversationMood(mood="warm")
+        yield ConversationDelta(text="hey, you're back")
+        yield ConversationReply(text="hey, you're back", mood="warm")
+
+
+def test_greet_streams_with_mood_and_no_user_message():
+    conversation = _GreetConversation()
+    client = TestClient(create_app(conversation))
+
+    resp = client.post("/v1/sessions/s/greet", json={"user_id": "u1"})
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    frames = _parse_sse(resp.text)
+    assert frames[0][0] == "meta" and frames[0][1]["mood"] == "warm"
+    assert frames[-1][0] == "done" and frames[-1][1]["mood"] == "warm"
+    assert conversation.calls == [("greet_stream", "api:u1", "s")]
+    # The instruction carries the greet policy + the local clock.
+    assert "Local time:" in conversation.instruction
+
+
+def test_greet_requires_bearer_token_when_configured():
+    conversation = _GreetConversation()
+    client = TestClient(create_app(conversation, auth_token="secret"))
+
+    assert client.post("/v1/sessions/s/greet", json={"user_id": "u1"}).status_code == 401

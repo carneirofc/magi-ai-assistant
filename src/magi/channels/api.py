@@ -62,6 +62,7 @@ import json
 import time
 import uuid
 from collections.abc import AsyncIterator, Sequence
+from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional, Protocol, Union
 
@@ -83,6 +84,7 @@ from magi.core.conversation import (
     ConversationReasoning,
     ConversationReply,
     ConversationService,
+    ConversationStreamEvent,
     ConversationToolCall,
     ConversationToolResult,
 )
@@ -116,6 +118,12 @@ class InboundFile(BaseModel):
     filename: Optional[str] = None
     url: Optional[str] = None
     data_base64: Optional[str] = None
+
+
+class GreetRequest(BaseModel):
+    """Ask the assistant to open the conversation (see the /greet route)."""
+
+    user_id: str = Field(min_length=1, description="Stable id of the end user (scopes memory).")
 
 
 class MessageRequest(BaseModel):
@@ -369,6 +377,16 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _greeting_instruction(now: Optional[datetime] = None) -> str:
+    """The greeting turn's run input: the greet policy prompt (overlay-able per
+    persona — prompts/greet.md) plus the local time of day, read per request so
+    every greeting gets the real clock."""
+    from magi.core.prompts import load_prompt
+
+    stamp = (now or datetime.now()).strftime("%A %H:%M")
+    return f"{load_prompt('greet.md')}\n\nLocal time: {stamp}."
+
+
 # --- OpenAI-compatible shim (so stock chat UIs work unchanged) ----------------
 # The one model id this service advertises; OpenAI clients require a model to
 # select, but the brain is fixed so the request's `model` is otherwise ignored.
@@ -586,17 +604,14 @@ def create_app(
         # and produced an honest reply for the client to show — that's a 200.
         return _to_wire(reply)
 
-    @app.post(
-        "/v1/sessions/{session_id}/messages/stream",
-        dependencies=[Depends(require_auth)],
-    )
-    async def post_message_stream(session_id: str, body: MessageRequest) -> StreamingResponse:
-        media = _inbound_media(body.images, body.files)
+    def _stream_response(
+        items: AsyncIterator[ConversationStreamEvent | ConversationReply],
+    ) -> StreamingResponse:
+        """Map a conversation event stream onto the SSE wire (shared by the
+        message and greeting stream routes)."""
 
         async def events():
-            async for item in conversation.handle_stream(
-                user_id=_scoped(body.user_id), session_id=session_id, text=body.text, media=media
-            ):
+            async for item in items:
                 # Live observability frames (thinking + tool activity) ride
                 # alongside the text `delta`s; the terminal `done` frame stays
                 # authoritative — clients render it over the assembled deltas.
@@ -629,6 +644,37 @@ def create_app(
             media_type="text/event-stream",
             # SSE responses must never be buffered or cached along the way.
             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
+
+    @app.post(
+        "/v1/sessions/{session_id}/messages/stream",
+        dependencies=[Depends(require_auth)],
+    )
+    async def post_message_stream(session_id: str, body: MessageRequest) -> StreamingResponse:
+        media = _inbound_media(body.images, body.files)
+        return _stream_response(
+            conversation.handle_stream(
+                user_id=_scoped(body.user_id), session_id=session_id, text=body.text, media=media
+            )
+        )
+
+    @app.post(
+        "/v1/sessions/{session_id}/greet",
+        dependencies=[Depends(require_auth)],
+    )
+    async def post_greet_stream(session_id: str, body: GreetRequest) -> StreamingResponse:
+        """An assistant-initiated turn: the assistant opens the conversation.
+
+        Streams with the same SSE framing as a message turn (mood frame
+        included). No user message is recorded — session history gains only the
+        greeting. The greeting policy is prompts/greet.md (overlay-able per
+        persona), given the local time of day."""
+        return _stream_response(
+            conversation.greet_stream(
+                user_id=_scoped(body.user_id),
+                session_id=session_id,
+                instruction=_greeting_instruction(),
+            )
         )
 
     @app.post(

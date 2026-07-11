@@ -341,15 +341,22 @@ class ConversationService:
         user_text: str = "",
         usage: Optional[ConversationUsage] = None,
         mood: Optional[str] = None,
+        curate: bool = True,
     ) -> ConversationReply:
-        """Record the reply + fold/curate memory; the one tail both run modes share."""
+        """Record the reply + fold/curate memory; the one tail both run modes share.
+
+        `curate=False` skips the post-turn curator — used by assistant-initiated
+        turns (greetings), which have no user message to learn from and shouldn't
+        cost a curator call.
+        """
         media = media or {}
         if reply:
             self.memory.record_assistant_turn(reply)
             # Fold rolled-off turns (no-op unless enabled), then let the post-turn
             # curator revise durable memory from this turn (no-op unless enabled).
             await self.memory.maybe_summarize_session()
-            await self.memory.maybe_curate(user_text, reply)
+            if curate:
+                await self.memory.maybe_curate(user_text, reply)
         elif not reasoning and not any(media.values()):
             # Completed with neither answer, reasoning, nor media: the lead went
             # silent (commonly after a tool error). Return an honest fallback
@@ -432,6 +439,65 @@ class ConversationService:
         log_info(f"conversation: streaming (session={session_id}, user={user_id})")
 
         run_input = self._prepare_input(user_id, session_id, text, extra_context)
+        async for item in self._stream_run(
+            run_input, user_id=user_id, session_id=session_id, media=media, user_text=text
+        ):
+            yield item
+
+    async def greet_stream(
+        self,
+        *,
+        user_id: str | int,
+        session_id: str,
+        instruction: str,
+        extra_context: str = "",
+    ) -> AsyncIterator[ConversationStreamEvent | ConversationReply]:
+        """An assistant-initiated turn: the assistant opens the conversation.
+
+        Streams exactly like `handle_stream` (mood frame included), but there is
+        no user message: the `instruction` (the greeting policy + e.g. the time of
+        day, supplied by the channel) rides as the run input without being
+        recorded, so session history gains only the assistant's greeting. The
+        post-turn curator is skipped — there's nothing of the user's to learn.
+        """
+        user_id = str(user_id)
+        log_info(f"conversation: greeting (session={session_id}, user={user_id})")
+
+        self.memory.set_scope(user_id, session_id)
+        # Same context assembly as a normal turn minus the user message; the
+        # instruction doubles as the memory-retrieval query (with semantic memory
+        # off it's unused — durable memory is injected whole either way).
+        parts = [
+            self.memory.store.identity.context_text(),
+            extra_context,
+            self.memory.build_context(query=instruction),
+            self.channel_guidance,
+        ]
+        context = "\n\n".join(p for p in parts if p and p.strip())
+        run_input = (
+            f"<context>\n{context}\n</context>\n\n{instruction}" if context else instruction
+        )
+        async for item in self._stream_run(
+            run_input,
+            user_id=user_id,
+            session_id=session_id,
+            media={},
+            user_text="",
+            curate=False,
+        ):
+            yield item
+
+    async def _stream_run(
+        self,
+        run_input: str,
+        *,
+        user_id: str,
+        session_id: str,
+        media: dict,
+        user_text: str,
+        curate: bool = True,
+    ) -> AsyncIterator[ConversationStreamEvent | ConversationReply]:
+        """The shared streaming tail: mood pass, the run's event loop, finish."""
         # The pre-reply mood pass gates the stream start on purpose: the mood must
         # arrive before the first content token (that's its whole point).
         mood = await self._turn_mood(run_input)
@@ -439,7 +505,7 @@ class ConversationService:
             yield ConversationMood(mood=mood)
         chunks: list[str] = []
         final = None
-        allowed_urls_token = open_allowed_media_urls(text, _inbound_media_urls(media))
+        allowed_urls_token = open_allowed_media_urls(user_text, _inbound_media_urls(media))
         outbox_token = open_media_outbox()
         try:
             stream = self.runner.arun(
@@ -509,9 +575,10 @@ class ConversationService:
             reply,
             reasoning,
             collect_reply_media(final, outbox),
-            user_text=text,
+            user_text=user_text,
             usage=self._usage_from(final) if final is not None else None,
             mood=mood,
+            curate=curate,
         )
 
     # --- control commands (channel formats the reply text) ------------------

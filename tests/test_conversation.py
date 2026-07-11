@@ -559,3 +559,68 @@ async def test_handle_without_mood_fn_leaves_mood_none():
     reply = await service.handle(user_id=1, session_id="s", text="hi")
 
     assert reply.mood is None
+
+
+# --- greeting (assistant-initiated turn; greet_stream) ------------------------
+async def _collect_greeting(service, instruction="Say hello."):
+    return [
+        item
+        async for item in service.greet_stream(
+            user_id=1, session_id="s", instruction=instruction
+        )
+    ]
+
+
+async def test_greeting_streams_like_a_turn_and_records_only_the_assistant():
+    runner = _FakeStreamRunner([_delta("hey"), _final(content="hey")])
+    mem = _FakeMemory()
+    mem.user_turns = []
+    mem.record_user_turn = lambda text: mem.user_turns.append(text)
+    service = ConversationService(runner=runner, memory=mem, mood_fn=_wry_mood)
+
+    items = await _collect_greeting(service)
+
+    assert items[0] == ConversationMood(mood="wry")  # mood frame included
+    assert items[1] == ConversationDelta(text="hey")
+    assert items[-1].text == "hey" and items[-1].mood == "wry"
+    assert mem.user_turns == []  # no user message recorded
+    assert mem.assistant_turns == ["hey"]  # the greeting lands in history
+
+
+async def test_greeting_skips_the_curator():
+    runner = _FakeStreamRunner([_delta("hi"), _final(content="hi")])
+    mem = _FakeMemory()
+    service = ConversationService(runner=runner, memory=mem)
+
+    await _collect_greeting(service)
+
+    assert not hasattr(mem, "curated")  # maybe_curate never called
+
+
+async def test_greeting_instruction_rides_the_run_input_with_context():
+    class _RecordingStreamRunner(_FakeStreamRunner):
+        def arun(self, **kwargs):
+            self.kwargs = kwargs
+            return super().arun(**kwargs)
+
+    runner = _RecordingStreamRunner([_final(content="hello there")])
+    identity = SimpleNamespace(
+        context_text=lambda: "# Your identity\nYour name is Alyssa.",
+        avatar_bytes=lambda: None,
+    )
+    service = ConversationService(runner=runner, memory=_FakeMemory(identity=identity))
+
+    await _collect_greeting(service, instruction="Open the conversation warmly.")
+
+    run_input = runner.kwargs["input"]
+    assert "Open the conversation warmly." in run_input
+    assert "Your name is Alyssa." in run_input  # context assembled like a turn
+
+
+async def test_greeting_error_still_ends_with_a_reply():
+    runner = _FakeStreamRunner([_delta("a")], raise_after=0)
+    service = ConversationService(runner=runner, memory=_FakeMemory())
+
+    items = await _collect_greeting(service)
+
+    assert items[-1] == ConversationReply(text=_ERROR_REPLY, is_error=True)
