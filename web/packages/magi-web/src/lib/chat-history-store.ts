@@ -51,3 +51,89 @@ export async function deleteThread(sessionId: string): Promise<void> {
     /* already absent */
   }
 }
+
+// --- search -------------------------------------------------------------------
+export type TranscriptHit = {
+  sessionId: string;
+  /** The matched text with a little context either side. */
+  snippet: string;
+  /** Who said the matched line. */
+  role: "user" | "assistant";
+  /** File mtime (ms) — a good-enough "when" for ordering results. */
+  ts: number;
+};
+
+type SearchableMessage = { role?: string; content?: unknown };
+type SearchableItem = { message?: SearchableMessage };
+
+function textParts(content: unknown): string[] {
+  if (!Array.isArray(content)) return [];
+  const out: string[] = [];
+  for (const part of content) {
+    if (part && typeof part === "object") {
+      const p = part as { type?: string; text?: string };
+      if (p.type === "text" && typeof p.text === "string" && p.text) out.push(p.text);
+    }
+  }
+  return out;
+}
+
+function snippetAround(text: string, index: number, needle: string): string {
+  const radius = 60;
+  const start = Math.max(0, index - radius);
+  const end = Math.min(text.length, index + needle.length + radius);
+  return `${start > 0 ? "…" : ""}${text.slice(start, end).replace(/\s+/g, " ").trim()}${end < text.length ? "…" : ""}`;
+}
+
+/** Case-insensitive substring search across every stored transcript. Returns at
+ * most one hit per session (its first match), newest sessions first, capped at
+ * `limit`. Deliberately simple — the store is a per-operator scratch archive,
+ * dozens of files, not a corpus. */
+export async function searchThreads(query: string, limit = 20): Promise<TranscriptHit[]> {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  let names: string[];
+  try {
+    names = (await fs.readdir(DIR)).filter((n) => n.endsWith(".json"));
+  } catch {
+    return []; // store not created yet
+  }
+
+  const hits: TranscriptHit[] = [];
+  for (const name of names) {
+    const file = path.join(DIR, name);
+    let raw: string;
+    let mtime = 0;
+    try {
+      raw = await fs.readFile(file, "utf8");
+      mtime = (await fs.stat(file)).mtimeMs;
+    } catch {
+      continue;
+    }
+    let thread: { items?: SearchableItem[] };
+    try {
+      thread = JSON.parse(raw) as { items?: SearchableItem[] };
+    } catch {
+      continue;
+    }
+    for (const item of thread.items ?? []) {
+      const role = item.message?.role === "user" ? "user" : "assistant";
+      let found = false;
+      for (const text of textParts(item.message?.content)) {
+        const index = text.toLowerCase().indexOf(needle);
+        if (index === -1) continue;
+        hits.push({
+          sessionId: name.slice(0, -".json".length),
+          snippet: snippetAround(text, index, needle),
+          role,
+          ts: mtime,
+        });
+        found = true;
+        break;
+      }
+      if (found) break; // one hit per session
+    }
+  }
+  hits.sort((a, b) => b.ts - a.ts);
+  return hits.slice(0, limit);
+}

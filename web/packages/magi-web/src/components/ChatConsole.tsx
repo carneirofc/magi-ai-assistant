@@ -370,6 +370,30 @@ function SessionRail({
   const visible = visibleSessions(registry);
   const archived = archivedSessions(registry);
 
+  // Transcript search: debounce the query against the BFF's archive search;
+  // hits map back to registry sessions (the store may hold transcripts for
+  // sessions deleted from this browser's registry — those are dropped).
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<{ sessionId: string; snippet: string }[] | null>(null);
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setHits(null);
+      return;
+    }
+    const known = new Set(registry.sessions.map((s) => s.id));
+    const timer = setTimeout(() => {
+      fetch(`/api/chat/search?q=${encodeURIComponent(q)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((body: { hits?: { sessionId: string; snippet: string }[] } | null) => {
+          setHits((body?.hits ?? []).filter((h) => known.has(h.sessionId)));
+        })
+        .catch(() => setHits([]));
+    }, 250);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by the query text
+  }, [query]);
+
   function startRename(session: ChatSession) {
     setEditingId(session.id);
     setDraft(session.title);
@@ -410,6 +434,49 @@ function SessionRail({
           <ChevronLeftIcon />
         </RailIconButton>
       </div>
+
+      <TextInput
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search chats…"
+        className="w-full text-ui-xs"
+        aria-label="Search conversations"
+      />
+
+      {hits !== null ? (
+        // Search results replace the list while a query is active; picking one
+        // jumps to that conversation and clears the search.
+        <ul className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+          {hits.length === 0 ? (
+            <li className="px-2 py-1.5 text-ui-2xs text-[color:var(--ui-ink-subtle)]">
+              No matches.
+            </li>
+          ) : (
+            hits.map((hit) => {
+              const session = registry.sessions.find((s) => s.id === hit.sessionId);
+              return (
+                <li key={hit.sessionId}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSelect(hit.sessionId);
+                      setQuery("");
+                    }}
+                    className="flex w-full flex-col gap-0.5 rounded-lg border border-transparent px-2 py-1.5 text-left hover:border-ui hover:bg-[color:var(--ui-bg)]"
+                  >
+                    <span className="truncate text-ui-xs text-[color:var(--ui-ink)]">
+                      {session?.title ?? hit.sessionId}
+                    </span>
+                    <span className="line-clamp-2 text-ui-2xs text-[color:var(--ui-ink-subtle)]">
+                      {hit.snippet}
+                    </span>
+                  </button>
+                </li>
+              );
+            })
+          )}
+        </ul>
+      ) : (
       <ul className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
         {visible.map((session) => {
           const isActive = session.id === registry.activeId;
@@ -478,6 +545,7 @@ function SessionRail({
           );
         })}
       </ul>
+      )}
 
       {archived.length > 0 ? (
         <div className="flex flex-col gap-1 border-t border-ui pt-2">
