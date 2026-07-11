@@ -126,6 +126,20 @@ class GreetRequest(BaseModel):
     user_id: str = Field(min_length=1, description="Stable id of the end user (scopes memory).")
 
 
+class MemoryFact(BaseModel):
+    """One durable fact the assistant keeps about a user (read-only here)."""
+
+    text: str
+    ts: str = ""
+
+
+class SelfMemoryOut(BaseModel):
+    """What the assistant durably remembers about one user — the companion's
+    ambient memory panel. Edits stay on the admin surface."""
+
+    facts: list[MemoryFact] = Field(default_factory=list)
+
+
 class MessageRequest(BaseModel):
     user_id: str = Field(min_length=1, description="Stable id of the end user (scopes memory).")
     text: str = Field(
@@ -688,6 +702,25 @@ def create_app(
     @app.get("/v1/sessions/{session_id}/context", dependencies=[Depends(require_auth)])
     def get_context(session_id: str, user_id: str = Query(min_length=1)) -> dict:
         return conversation.context_stats(_scoped(user_id), session_id)
+
+    @app.get(
+        "/v1/memory/facts",
+        response_model=SelfMemoryOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def get_memory_facts(user_id: str = Query(min_length=1)) -> SelfMemoryOut:
+        """The durable facts the assistant keeps about this user — read-only, for
+        the companion's ambient memory panel. Same trust model as chat: the
+        bearer stays in the BFF, which supplies the (pinned) user id; edits stay
+        on the admin surface. A session id is irrelevant — facts are user-level."""
+        mem = conversation.memory.store.scoped(_scoped(user_id), "_self")
+        return SelfMemoryOut(
+            facts=[
+                MemoryFact(text=str(f.get("text", "")), ts=str(f.get("ts", "")))
+                for f in mem.long_term_facts.read()
+                if str(f.get("text", "")).strip()
+            ]
+        )
 
     @app.get(
         "/v1/introspection",

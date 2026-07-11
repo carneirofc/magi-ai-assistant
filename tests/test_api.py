@@ -915,3 +915,35 @@ def test_greet_requires_bearer_token_when_configured():
     client = TestClient(create_app(conversation, auth_token="secret"))
 
     assert client.post("/v1/sessions/s/greet", json={"user_id": "u1"}).status_code == 401
+
+
+# --- self-scoped memory read (issue #27) ---------------------------------------
+def test_memory_facts_returns_the_users_durable_facts():
+    from types import SimpleNamespace
+
+    conversation = _FakeConversation()
+    seen: list[tuple] = []
+
+    def scoped(user_id, session_id):
+        seen.append((user_id, session_id))
+        return SimpleNamespace(
+            long_term_facts=SimpleNamespace(
+                read=lambda: [
+                    {"id": "f1", "text": "Prefers dark roast", "ts": "2026-07-01"},
+                    {"id": "f2", "text": "", "ts": ""},  # blank facts are dropped
+                ]
+            )
+        )
+
+    conversation.memory = SimpleNamespace(store=SimpleNamespace(scoped=scoped))
+    client = TestClient(create_app(conversation))
+
+    body = client.get("/v1/memory/facts?user_id=u1").json()
+
+    assert body == {"facts": [{"text": "Prefers dark roast", "ts": "2026-07-01"}]}
+    assert seen == [("api:u1", "_self")]  # scoped to the requesting user only
+
+
+def test_memory_facts_requires_bearer_token_when_configured():
+    client, _ = _client(auth_token="secret")
+    assert client.get("/v1/memory/facts?user_id=u1").status_code == 401
