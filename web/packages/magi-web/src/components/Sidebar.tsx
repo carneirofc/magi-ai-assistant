@@ -40,6 +40,17 @@ export const DEFAULT_NAV: NavItem[] = [
     ),
   },
   {
+    href: "/companion",
+    label: "Companion",
+    match: (p) => p.startsWith("/companion"),
+    icon: (
+      <Icon>
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 20a8 8 0 0 1 16 0" />
+      </Icon>
+    ),
+  },
+  {
     href: "/chat",
     label: "Chat",
     match: (p) => p.startsWith("/chat"),

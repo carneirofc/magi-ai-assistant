@@ -55,6 +55,7 @@ import remarkGfm from "remark-gfm";
 import { OutlineButton, TextInput } from "@carneirofc/ui";
 
 import { createChatModelAdapter, type ChatUsage } from "../lib/chat-adapter";
+import { MoodScope, useMood, useMoodAdapterEvents } from "../lib/chat-mood";
 import { createChatAttachmentAdapter } from "../lib/chat-attachments";
 import { createDictationAdapter, dictationSupported } from "../lib/chat-dictation";
 import { ContextDisplay, type ThreadTokenUsage } from "./assistant-ui/context-display";
@@ -87,8 +88,15 @@ const UserIdContext = createContext<string>(DEFAULT_USER);
 type ChatIdentity = { avatarUrl: string | null; name: string | null };
 const IdentityContext = createContext<ChatIdentity>({ avatarUrl: null, name: null });
 
-export function ChatConsole() {
-  const [userId, setUserId] = useState(DEFAULT_USER);
+export type ChatConsoleProps = {
+  /** Pin every turn to this user id: the id input disappears and localStorage is
+   * ignored — the companion surface chats as one configured person, while the
+   * operator console (no prop) keeps its free switcher for testing. */
+  pinnedUserId?: string | null;
+};
+
+export function ChatConsole({ pinnedUserId = null }: ChatConsoleProps = {}) {
+  const [userId, setUserId] = useState(pinnedUserId || DEFAULT_USER);
   // Null until mounted so the first client render matches the server (no crypto /
   // localStorage during SSR → no hydration mismatch).
   const [registry, setRegistry] = useState<SessionRegistry | null>(null);
@@ -98,10 +106,10 @@ export function ChatConsole() {
   const [railCollapsed, setRailCollapsed] = useState(false);
 
   useEffect(() => {
-    setUserId(localStorage.getItem(USER_KEY) || DEFAULT_USER);
+    if (!pinnedUserId) setUserId(localStorage.getItem(USER_KEY) || DEFAULT_USER);
     setRegistry(loadRegistry());
     setRailCollapsed(localStorage.getItem(RAIL_KEY) === "1");
-  }, []);
+  }, [pinnedUserId]);
 
   function toggleRail() {
     setRailCollapsed((prev) => {
@@ -150,20 +158,28 @@ export function ChatConsole() {
 
   return (
     <IdentityContext.Provider value={identity}>
+    {/* Mood signal: join the page's MoodProvider when one is mounted (the
+        companion layout shares it with its stage), else scope our own so the
+        composer's mood badge still works standalone. */}
+    <MoodScope>
     <div className="flex min-h-[520px] flex-1 flex-col gap-3">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <label className="flex flex-col gap-1">
-          <span className="text-ui-2xs font-semibold uppercase tracking-wide text-[color:var(--ui-ink-subtle)]">
-            Chat as user id
-          </span>
-          <TextInput
-            value={userId}
-            onChange={(e) => changeUser(e.target.value)}
-            spellCheck={false}
-            className="w-56 font-mono text-ui-xs"
-            aria-label="User id to chat as"
-          />
-        </label>
+        {pinnedUserId ? (
+          <span />
+        ) : (
+          <label className="flex flex-col gap-1">
+            <span className="text-ui-2xs font-semibold uppercase tracking-wide text-[color:var(--ui-ink-subtle)]">
+              Chat as user id
+            </span>
+            <TextInput
+              value={userId}
+              onChange={(e) => changeUser(e.target.value)}
+              spellCheck={false}
+              className="w-56 font-mono text-ui-xs"
+              aria-label="User id to chat as"
+            />
+          </label>
+        )}
         <span
           className="font-mono text-ui-2xs text-[color:var(--ui-ink-subtle)]"
           title="Conversation id (scopes session memory)"
@@ -196,6 +212,7 @@ export function ChatConsole() {
         </div>
       </div>
     </div>
+    </MoodScope>
     </IdentityContext.Provider>
   );
 }
@@ -383,14 +400,21 @@ function ChatThread({
   const [dictationError, setDictationError] = useState<string | null>(null);
   useEffect(() => setMicSupported(dictationSupported()), []);
 
+  // The turn's mood + lifecycle, streamed into the ambient MoodScope so the
+  // composer badge (and a surrounding persona stage) react as the reply starts.
+  const mood = useMood();
+  const { onMood, onLifecycle } = useMoodAdapterEvents(mood);
+
   const adapter = useMemo(
     () =>
       createChatModelAdapter(
         () => ({ sessionId, userId: userIdRef.current }),
         (text) => onSendRef.current(text),
         (next) => setUsage(next),
+        onMood,
+        onLifecycle,
       ),
-    [sessionId],
+    [sessionId, onMood, onLifecycle],
   );
   const attachments = useMemo(() => createChatAttachmentAdapter(), []);
   // Voice → text via the browser's Web Speech API (no server round-trip). The
@@ -995,9 +1019,9 @@ function Composer({
         </div>
       </div>
 
-      {/* Footer: a dictation error (dismissible) on the left, the live
-          context-window fill for the last turn on the right. Hidden until either
-          has something to show, so a fresh thread stays clean. */}
+      {/* Footer: a dictation error (dismissible) on the left, the turn's mood +
+          the live context-window fill for the last turn on the right. Hidden
+          until either has something to show, so a fresh thread stays clean. */}
       <div className="flex min-h-[1rem] items-center justify-between gap-3 empty:hidden">
         {dictationError ? (
           <button
@@ -1013,23 +1037,44 @@ function Composer({
         ) : (
           <span />
         )}
-        {/* assistant-ui's ContextDisplay, fed our streamed usage (bar tracks
-            total/context window; hover breaks the turn down). Shown only once a
-            reply reports a context window, so a fresh thread stays clean. */}
-        {usage && usage.contextWindow ? (
-          <div className="flex items-center gap-2 text-ui-2xs text-[color:var(--ui-ink-subtle)]">
-            <span className="font-medium uppercase tracking-wide">Context</span>
-            <ContextDisplay.Bar
-              modelContextWindow={usage.contextWindow}
-              usage={toTokenUsage(usage)}
-              side="top"
-            />
-          </div>
-        ) : (
-          <span />
-        )}
+        <div className="flex items-center gap-3">
+          <MoodBadge />
+          {/* assistant-ui's ContextDisplay, fed our streamed usage (bar tracks
+              total/context window; hover breaks the turn down). Shown only once a
+              reply reports a context window, so a fresh thread stays clean. */}
+          {usage && usage.contextWindow ? (
+            <div className="flex items-center gap-2 text-ui-2xs text-[color:var(--ui-ink-subtle)]">
+              <span className="font-medium uppercase tracking-wide">Context</span>
+              <ContextDisplay.Bar
+                modelContextWindow={usage.contextWindow}
+                usage={toTokenUsage(usage)}
+                side="top"
+              />
+            </div>
+          ) : null}
+        </div>
       </div>
     </ComposerPrimitive.Root>
+  );
+}
+
+/** The turn's streamed mood (the engine's pre-reply pass), as a tiny footer
+ * badge — the console's always-on view of the signal the companion stage
+ * animates. Hidden until the first moody turn, so plain engines stay clean;
+ * while a turn is in flight the lifecycle phase rides along. */
+function MoodBadge() {
+  const { mood, lifecycle } = useMood();
+  if (!mood) return null;
+  const busy = lifecycle !== "idle" && lifecycle !== "error";
+  return (
+    <span
+      className="flex items-center gap-1.5 text-ui-2xs text-[color:var(--ui-ink-subtle)]"
+      title="The reply's delivery mood, predicted by the engine before it answers"
+    >
+      <span className="font-medium uppercase tracking-wide">Mood</span>
+      <span className="font-mono text-[color:var(--ui-ink-accent)]">{mood}</span>
+      {busy ? <span className="opacity-60">· {lifecycle}</span> : null}
+    </span>
   );
 }
 

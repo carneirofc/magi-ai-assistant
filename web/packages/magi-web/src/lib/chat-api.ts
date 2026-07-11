@@ -74,15 +74,29 @@ export async function openMessageStream(
   );
 }
 
+/** One mood's portrait in the identity's expression pack. `version` is a
+ * per-expression content hash for cache busting. */
+export interface BotExpression {
+  mime: string;
+  version: string;
+}
+
 /** The bot's presented identity (name, description, whether a picture is set),
  * mirroring the chat-api `IdentityOut`. The chat UI renders this as the assistant's
- * face + name. `version` moves on every edit so the avatar cache can be busted. */
+ * face + name. `version` moves on every edit so the avatar cache can be busted.
+ * `moods` is the deployment's streamed mood vocabulary (empty = mood pass off);
+ * `expressions` the uploaded mood-keyed portrait pack (`neutral` = the avatar
+ * slot) — moods without an entry fall back to the app's bundled art. Older
+ * engines omit these fields, so read them defensively. */
 export interface BotIdentity {
   display_name: string;
   description: string;
   has_avatar: boolean;
   avatar_mime: string | null;
   version: string;
+  moods?: string[];
+  mood_vocab_version?: number;
+  expressions?: Record<string, BotExpression>;
 }
 
 /** Read the bot identity, or null when the chat-api is unreachable — the chat UI
@@ -101,9 +115,12 @@ export async function getIdentity(): Promise<BotIdentity | null> {
 }
 
 /** Open the bot's profile-picture bytes from the chat-api, returning the raw
- * upstream Response so the BFF can relay it (404 when no picture is set). */
-export async function fetchIdentityAvatar(): Promise<Response> {
-  return fetch(`${baseUrl()}/v1/identity/avatar`, {
+ * upstream Response so the BFF can relay it (404 when no picture is set). With
+ * `mood`, serves that mood's expression portrait instead (`neutral` aliases the
+ * avatar; 404 = no such portrait, the client falls back to bundled art). */
+export async function fetchIdentityAvatar(mood?: string): Promise<Response> {
+  const query = mood ? `?mood=${encodeURIComponent(mood)}` : "";
+  return fetch(`${baseUrl()}/v1/identity/avatar${query}`, {
     headers: authHeaders(),
     cache: "no-store",
   });

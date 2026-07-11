@@ -3,6 +3,13 @@ export {
   type ChatConfig,
   type ChatUsage,
 } from "../../lib/chat-adapter";
+export {
+  useMood,
+  useMoodAdapterEvents,
+  type ChatLifecycle,
+  type MoodState,
+  type MoodContextValue,
+} from "../../lib/chat-mood";
 export { createSessionHistoryAdapter, clearSessionHistory } from "../../lib/chat-history";
 export {
   activeSession,

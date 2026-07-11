@@ -4,10 +4,13 @@
 // newest user turn (its text + attachments); the local runtime keeps the visible
 // transcript.
 //
-// The stream is rich: `delta` frames grow the assistant text, `reasoning` frames
-// grow a collapsible thinking block, `tool_call`/`tool_result` frames build live
-// tool cards, and the terminal `done` frame carries the authoritative final text
-// plus any produced media (images inline, other files as links).
+// The stream is rich: an early `meta` frame carries the turn's mood (the
+// engine's pre-reply pass — before the first content token, so the UI can react
+// as the answer starts), `delta` frames grow the assistant text, `reasoning`
+// frames grow a collapsible thinking block, `tool_call`/`tool_result` frames
+// build live tool cards, and the terminal `done` frame carries the
+// authoritative final text plus any produced media (images inline, other files
+// as links) and echoes the mood.
 
 import type {
   ChatModelAdapter,
@@ -19,6 +22,7 @@ import type {
 } from "@assistant-ui/react";
 
 import type { InboundAttachment } from "./chat-api";
+import type { ChatLifecycle } from "./chat-mood";
 
 /** Where the console draws its session/user scoping from at send time. Read
  * lazily so edits to the user id (or a "New chat") take effect on the next run
@@ -279,11 +283,16 @@ function safeJson(value: unknown): string {
 
 /** Build an adapter bound to a live `getConfig`, so the current session/user id
  * are resolved at the moment of each run. `onSend`, when given, is called with the
- * outgoing user text on each run (the console uses it to title/reorder sessions). */
+ * outgoing user text on each run (the console uses it to title/reorder sessions).
+ * `onMood` fires with the turn's mood as the `meta` frame lands (before the first
+ * delta) and again off the `done` frame; `onLifecycle` tracks the turn's phase
+ * (thinking → streaming ⇄ tool → idle, or error) — see chat-mood.tsx. */
 export function createChatModelAdapter(
   getConfig: () => ChatConfig,
   onSend?: (text: string) => void,
   onUsage?: (usage: ChatUsage) => void,
+  onMood?: (mood: string) => void,
+  onLifecycle?: (lifecycle: ChatLifecycle) => void,
 ): ChatModelAdapter {
   return {
     async *run({ messages, abortSignal }) {
@@ -292,74 +301,94 @@ export function createChatModelAdapter(
       const { images, files } = outboundAttachments(message);
       const { sessionId, userId } = getConfig();
       onSend?.(text);
+      onLifecycle?.("thinking");
 
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, userId, text, images, files }),
-        signal: abortSignal,
-      });
-      if (!res.ok || !res.body) {
-        let detail = `chat request failed (${res.status})`;
-        try {
-          const body = (await res.json()) as { error?: string };
-          if (body.error) detail = body.error;
-        } catch {
-          /* keep the status-code fallback */
-        }
-        throw new Error(detail);
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      const asm = new StreamAssembly();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        let sep = buffer.indexOf("\n\n");
-        while (sep !== -1) {
-          const frame = parseFrame(buffer.slice(0, sep));
-          buffer = buffer.slice(sep + 2);
-          sep = buffer.indexOf("\n\n");
-          if (!frame) continue;
-
-          if (frame.event === "delta") {
-            if (typeof frame.data.text === "string") asm.addDelta(frame.data.text);
-          } else if (frame.event === "reasoning") {
-            if (typeof frame.data.text === "string") asm.addReasoning(frame.data.text);
-          } else if (frame.event === "tool_call") {
-            const id = typeof frame.data.id === "string" ? frame.data.id : "";
-            const name = typeof frame.data.name === "string" ? frame.data.name : "tool";
-            const args =
-              frame.data.args && typeof frame.data.args === "object"
-                ? (frame.data.args as object)
-                : {};
-            asm.startTool(id, name, args);
-          } else if (frame.event === "tool_result") {
-            const id = typeof frame.data.id === "string" ? frame.data.id : "";
-            const result = typeof frame.data.result === "string" ? frame.data.result : "";
-            asm.finishTool(id, result, frame.data.is_error === true);
-          } else if (frame.event === "done") {
-            const finalText = frame.data.text;
-            if (typeof finalText === "string" && finalText.length > 0) asm.setAnswer(finalText);
-            asm.setMedia(frame.data.media);
-            if (frame.data.is_error === true && !finalText) {
-              asm.setAnswer("The assistant reported an error.");
-            }
-            const usage = parseUsage(frame.data.usage);
-            if (usage) onUsage?.(usage);
-          } else {
-            continue;
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, userId, text, images, files }),
+          signal: abortSignal,
+        });
+        if (!res.ok || !res.body) {
+          let detail = `chat request failed (${res.status})`;
+          try {
+            const body = (await res.json()) as { error?: string };
+            if (body.error) detail = body.error;
+          } catch {
+            /* keep the status-code fallback */
           }
-          yield { content: asm.parts() };
+          throw new Error(detail);
         }
-      }
 
-      yield { content: asm.parts() };
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        const asm = new StreamAssembly();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          let sep = buffer.indexOf("\n\n");
+          while (sep !== -1) {
+            const frame = parseFrame(buffer.slice(0, sep));
+            buffer = buffer.slice(sep + 2);
+            sep = buffer.indexOf("\n\n");
+            if (!frame) continue;
+
+            if (frame.event === "delta") {
+              if (typeof frame.data.text === "string") asm.addDelta(frame.data.text);
+              onLifecycle?.("streaming");
+            } else if (frame.event === "meta") {
+              // The pre-reply mood pass; no transcript content of its own.
+              if (typeof frame.data.mood === "string" && frame.data.mood) {
+                onMood?.(frame.data.mood);
+              }
+              continue;
+            } else if (frame.event === "reasoning") {
+              if (typeof frame.data.text === "string") asm.addReasoning(frame.data.text);
+            } else if (frame.event === "tool_call") {
+              const id = typeof frame.data.id === "string" ? frame.data.id : "";
+              const name = typeof frame.data.name === "string" ? frame.data.name : "tool";
+              const args =
+                frame.data.args && typeof frame.data.args === "object"
+                  ? (frame.data.args as object)
+                  : {};
+              asm.startTool(id, name, args);
+              onLifecycle?.("tool");
+            } else if (frame.event === "tool_result") {
+              const id = typeof frame.data.id === "string" ? frame.data.id : "";
+              const result = typeof frame.data.result === "string" ? frame.data.result : "";
+              asm.finishTool(id, result, frame.data.is_error === true);
+            } else if (frame.event === "done") {
+              const finalText = frame.data.text;
+              if (typeof finalText === "string" && finalText.length > 0) asm.setAnswer(finalText);
+              asm.setMedia(frame.data.media);
+              if (frame.data.is_error === true && !finalText) {
+                asm.setAnswer("The assistant reported an error.");
+              }
+              // The done frame echoes the mood (authoritative; also covers a
+              // server that skipped the early meta frame).
+              if (typeof frame.data.mood === "string" && frame.data.mood) {
+                onMood?.(frame.data.mood);
+              }
+              const usage = parseUsage(frame.data.usage);
+              if (usage) onUsage?.(usage);
+            } else {
+              continue;
+            }
+            yield { content: asm.parts() };
+          }
+        }
+
+        yield { content: asm.parts() };
+        onLifecycle?.("idle");
+      } catch (err) {
+        onLifecycle?.("error");
+        throw err;
+      }
     },
   };
 }

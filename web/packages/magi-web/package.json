@@ -1,6 +1,6 @@
 {
   "name": "@carneirofc/magi-web",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "MAGI frontend library — presentational React components and the SSE chat runtime for building magi-engine admin/chat UIs. Consumed from source via Next.js transpilePackages.",
   "license": "UNLICENSED",
   "type": "module",
@@ -21,6 +21,7 @@
   "exports": {
     "./package.json": "./package.json",
     "./components/*": "./src/components/*.tsx",
+    "./lib/chat-mood": "./src/lib/chat-mood.tsx",
     "./lib/*": "./src/lib/*.ts",
     "./slices/core": "./src/slices/core.ts",
     "./slices/shell": "./src/slices/shell.tsx",
@@ -30,6 +31,8 @@
     "./slices/chat/components": "./src/slices/chat/components.ts",
     "./slices/chat/screens": "./src/slices/chat/screens.ts",
     "./slices/chat/routes": "./src/slices/chat/routes.ts",
+    "./slices/companion": "./src/slices/companion/index.ts",
+    "./slices/companion/components": "./src/slices/companion/components.ts",
     "./slices/knowledge": "./src/slices/knowledge/index.ts",
     "./slices/knowledge/types": "./src/slices/knowledge/types.ts",
     "./slices/knowledge/hooks": "./src/slices/knowledge/hooks.ts",
