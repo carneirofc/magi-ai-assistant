@@ -114,3 +114,89 @@ def test_corrupt_metadata_reads_as_blank():
     store.meta_path.parent.mkdir(parents=True, exist_ok=True)
     store.meta_path.write_text("{not json", encoding="utf-8")
     assert store.read().is_empty
+
+
+# --- expression pack (mood-keyed portraits; issue #26) ------------------------
+_JPG = _PNG  # any bytes will do; the store trusts the declared mime
+
+
+def test_expressions_empty_on_a_blank_store():
+    store = _store()
+    assert store.expressions() == {}
+    assert store.expression_bytes("wry") is None
+
+
+def test_set_expression_round_trips_bytes_and_mime():
+    store = _store()
+    store.set_expression("wry", _PNG, "image/png", "wry.png")
+
+    got = store.expression_bytes("wry")
+    assert got == (_PNG, "image/png")
+    pack = store.expressions()
+    assert pack["wry"]["mime"] == "image/png"
+    assert pack["wry"]["filename"] == "wry.png"
+    assert pack["wry"]["version"]
+
+
+def test_neutral_expression_is_the_avatar_slot():
+    store = _store()
+    # Uploading via the legacy avatar path surfaces as the neutral expression…
+    store.set_avatar(_PNG, "image/png", "face.png")
+    assert store.expression_bytes("neutral") == (_PNG, "image/png")
+    assert "neutral" in store.expressions()
+
+    # …and uploading the neutral expression IS an avatar upload.
+    store.clear_avatar()
+    store.set_expression("neutral", _JPG, "image/jpeg")
+    assert store.avatar_bytes() == (_JPG, "image/jpeg")
+    assert store.read().has_avatar
+
+    # Clearing neutral clears the avatar.
+    store.clear_expression("neutral")
+    assert store.avatar_bytes() is None
+    assert store.expressions() == {}
+
+
+def test_replacing_an_expression_drops_the_old_extension():
+    store = _store()
+    store.set_expression("warm", _PNG, "image/png")
+    store.set_expression("warm", _JPG, "image/jpeg")
+
+    files = list(store.avatar_dir.glob("expression-warm.*"))
+    assert [f.suffix for f in files] == [".jpg"]
+    assert store.expression_bytes("warm") == (_JPG, "image/jpeg")
+
+
+def test_clear_expression_removes_file_and_metadata():
+    store = _store()
+    store.set_expression("focused", _PNG, "image/png")
+    store.clear_expression("focused")
+
+    assert store.expression_bytes("focused") is None
+    assert store.expressions() == {}
+    assert list(store.avatar_dir.glob("expression-focused.*")) == []
+
+
+def test_expression_rejects_bad_mood_keys_and_mimes():
+    store = _store()
+    with pytest.raises(ValueError):
+        store.set_expression("Wry Face", _PNG, "image/png")  # spaces/case
+    with pytest.raises(ValueError):
+        store.set_expression("../evil", _PNG, "image/png")  # path-ish
+    with pytest.raises(ValueError):
+        store.set_expression("wry", _PNG, "text/html")  # not an image
+
+
+def test_version_moves_on_expression_edits():
+    store = _store()
+    v0 = store.version()
+    store.set_expression("wry", _PNG, "image/png")
+    v1 = store.version()
+    assert v1 != v0
+    # Re-uploading the same mood with different bytes must move the token even
+    # though the stored filename stays identical.
+    store.set_expression("wry", _PNG + b"x", "image/png")
+    v2 = store.version()
+    assert v2 != v1
+    store.clear_expression("wry")
+    assert store.version() != v2

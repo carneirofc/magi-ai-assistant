@@ -11,8 +11,10 @@ import json
 from fastapi.testclient import TestClient
 
 from magi.channels.api import create_app
+from magi.core.config import config, configure
 from magi.core.conversation import (
     ConversationDelta,
+    ConversationMood,
     ConversationReasoning,
     ConversationReply,
     ConversationToolCall,
@@ -69,7 +71,7 @@ def test_post_message_runs_a_turn_and_returns_the_reply():
     assert resp.status_code == 200
     assert resp.json() == {
         "text": "the answer", "reasoning": None, "is_error": False, "media": [],
-        "usage": None,
+        "usage": None, "mood": None,
     }
     assert conversation.calls == [("handle", "api:u1", "win-1", "hi")]
 
@@ -221,7 +223,7 @@ def test_stream_emits_deltas_then_done():
     assert _parse_sse(resp.text) == [
         ("delta", {"text": "the "}),
         ("delta", {"text": "answer"}),
-        ("done", {"text": "the answer", "reasoning": None, "is_error": False, "media": [], "usage": None}),
+        ("done", {"text": "the answer", "reasoning": None, "is_error": False, "media": [], "usage": None, "mood": None}),
     ]
     assert conversation.calls == [("handle_stream", "api:u1", "win-1", "hi")]
 
@@ -253,7 +255,7 @@ def test_stream_emits_reasoning_and_tool_frames():
         ("tool_call", {"id": "c1", "name": "web_search", "args": {"q": "x"}}),
         ("tool_result", {"id": "c1", "result": "hit", "is_error": False}),
         ("delta", {"text": "the answer"}),
-        ("done", {"text": "the answer", "reasoning": None, "is_error": False, "media": [], "usage": None}),
+        ("done", {"text": "the answer", "reasoning": None, "is_error": False, "media": [], "usage": None, "mood": None}),
     ]
 
 
@@ -801,3 +803,82 @@ def test_chat_completions_allows_image_only_message():
     assert resp.status_code == 200
     assert conversation.calls[0][3] == ""
     assert len(conversation.last_media["images"]) == 1
+
+
+# --- mood (pre-reply pass; issue #25) -----------------------------------------
+class _MoodStreamConversation(_FakeConversation):
+    """Stream that leads with the turn's mood, the way the real service does."""
+
+    async def handle_stream(self, *, user_id, session_id, text, media=None, extra_context=""):
+        self.calls.append(("handle_stream", user_id, session_id, text))
+        yield ConversationMood(mood="wry")
+        yield ConversationDelta(text="the answer")
+        yield ConversationReply(text="the answer", mood="wry")
+
+
+def test_stream_mood_rides_an_early_meta_frame_and_the_done_frame():
+    conversation = _MoodStreamConversation()
+    client = TestClient(create_app(conversation))
+
+    resp = client.post(
+        "/v1/sessions/s/messages/stream", json={"user_id": "u1", "text": "hi"}
+    )
+
+    assert resp.status_code == 200
+    frames = _parse_sse(resp.text)
+    assert frames[0] == ("meta", {"mood": "wry", "vocab_version": config.mood_vocab_version})
+    assert frames[1] == ("delta", {"text": "the answer"})
+    assert frames[-1][0] == "done" and frames[-1][1]["mood"] == "wry"
+
+
+def test_post_message_reply_carries_mood_on_the_wire():
+    client, _ = _client(reply=ConversationReply(text="ok", mood="warm"))
+
+    body = client.post(
+        "/v1/sessions/s/messages", json={"user_id": "u1", "text": "hi"}
+    ).json()
+
+    assert body["mood"] == "warm"
+
+
+def test_identity_advertises_the_mood_vocabulary_when_enabled():
+    client, _ = _identity_client()
+    old_enabled, old_vocab = config.mood_enabled, config.mood_vocabulary
+    configure(mood_enabled=True, mood_vocabulary={"neutral": "flat", "wry": "dry"})
+    try:
+        body = client.get("/v1/identity").json()
+    finally:
+        configure(mood_enabled=old_enabled, mood_vocabulary=old_vocab)
+
+    assert body["moods"] == ["neutral", "wry"]
+    assert body["mood_vocab_version"] == config.mood_vocab_version
+
+
+def test_identity_moods_empty_when_the_pass_is_off():
+    client, _ = _identity_client()
+
+    body = client.get("/v1/identity").json()
+
+    assert body["moods"] == []
+
+
+# --- expression pack on the chat surface (issue #26) ---------------------------
+def test_identity_lists_expressions_and_serves_by_mood():
+    client, store = _identity_client()
+    store.set_avatar(_PNG_1x1, "image/png", "face.png")
+    store.set_expression("wry", _PNG_1x1, "image/png", "wry.png")
+
+    body = client.get("/v1/identity").json()
+    assert set(body["expressions"]) == {"neutral", "wry"}
+    assert body["expressions"]["wry"]["mime"] == "image/png"
+    assert body["expressions"]["wry"]["version"]
+
+    by_mood = client.get("/v1/identity/avatar?mood=wry")
+    assert by_mood.status_code == 200
+    assert by_mood.headers["content-type"].startswith("image/png")
+
+    # neutral aliases the avatar slot; a missing mood is a 404 (client falls
+    # back to its bundled art); a malformed key is a 422.
+    assert client.get("/v1/identity/avatar?mood=neutral").content == _PNG_1x1
+    assert client.get("/v1/identity/avatar?mood=focused").status_code == 404
+    assert client.get("/v1/identity/avatar?mood=..%2Fevil").status_code == 422

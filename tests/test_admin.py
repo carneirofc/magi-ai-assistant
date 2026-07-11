@@ -1000,3 +1000,64 @@ def test_memory_settings_requires_bearer_when_token_set(tmp_path):
     assert client.get("/admin/v1/settings/memory").status_code == 401
     ok = client.get("/admin/v1/settings/memory", headers={"Authorization": "Bearer secret"})
     assert ok.status_code == 200
+
+
+# --- expression pack (mood-keyed portraits; issue #26) ------------------------
+def test_expression_upload_serve_list_and_delete(tmp_path):
+    client = _client(memory=FileMemoryStore(tmp_path))
+    version = client.get("/admin/v1/identity").json()["version"]
+
+    up = client.put(
+        "/admin/v1/identity/expressions/wry",
+        json={"data_base64": _PNG_1x1, "mime_type": "image/png", "filename": "wry.png",
+              "expected_version": version},
+    )
+    assert up.status_code == 200
+    body = up.json()
+    assert body["expressions"]["wry"]["mime"] == "image/png"
+    assert body["expressions"]["wry"]["filename"] == "wry.png"
+    assert body["expressions"]["wry"]["version"]
+    assert body["version"] != version  # global token moved
+
+    served = client.get("/admin/v1/identity/expressions/wry")
+    assert served.status_code == 200 and served.headers["content-type"].startswith("image/png")
+
+    gone = client.delete(
+        f"/admin/v1/identity/expressions/wry?expected_version={body['version']}"
+    )
+    assert gone.status_code == 200 and gone.json()["expressions"] == {}
+    assert client.get("/admin/v1/identity/expressions/wry").status_code == 404
+
+
+def test_neutral_expression_upload_is_the_avatar(tmp_path):
+    client = _client(memory=FileMemoryStore(tmp_path))
+    version = client.get("/admin/v1/identity").json()["version"]
+
+    up = client.put(
+        "/admin/v1/identity/expressions/neutral",
+        json={"data_base64": _PNG_1x1, "mime_type": "image/png",
+              "expected_version": version},
+    )
+    assert up.status_code == 200
+    body = up.json()
+    assert body["has_avatar"] is True  # neutral IS the avatar slot
+    assert "neutral" in body["expressions"]
+    assert client.get("/admin/v1/identity/avatar").status_code == 200
+
+
+def test_expression_bad_mood_key_is_422(tmp_path):
+    client = _client(memory=FileMemoryStore(tmp_path))
+    resp = client.put(
+        "/admin/v1/identity/expressions/Not%20A%20Mood",
+        json={"data_base64": _PNG_1x1, "mime_type": "image/png"},
+    )
+    assert resp.status_code == 422
+
+
+def test_expression_stale_version_is_409(tmp_path):
+    client = _client(memory=FileMemoryStore(tmp_path))
+    resp = client.put(
+        "/admin/v1/identity/expressions/wry",
+        json={"data_base64": _PNG_1x1, "mime_type": "image/png", "expected_version": "stale"},
+    )
+    assert resp.status_code == 409

@@ -76,8 +76,10 @@ from pydantic import BaseModel, Field, model_validator
 
 from magi.agent.introspect import TeamSnapshot, build_snapshot
 from magi.channels.gateway import scoped_user_id
+from magi.core.config import config
 from magi.core.conversation import (
     ConversationDelta,
+    ConversationMood,
     ConversationReasoning,
     ConversationReply,
     ConversationService,
@@ -163,18 +165,37 @@ class MessageReply(BaseModel):
     is_error: bool = False
     media: list[MediaItem] = Field(default_factory=list)
     usage: Optional[Usage] = None
+    # The turn's delivery mood — one of the names IdentityOut.moods advertises.
+    # None when the mood pass is off or the turn errored.
+    mood: Optional[str] = None
+
+
+class ExpressionOut(BaseModel):
+    """One mood's portrait in the expression pack (bytes served at
+    `/v1/identity/avatar?mood=…`). `version` is a per-expression content hash —
+    bust one cached portrait without refetching the pack."""
+
+    mime: str
+    version: str
 
 
 class IdentityOut(BaseModel):
     """The bot's presented identity, read-only for the UI (the picture is served
     separately at `/v1/identity/avatar`). `version` moves whenever the operator
-    edits it, so a client can bust its avatar cache."""
+    edits it, so a client can bust its avatar cache. `moods` is the mood
+    vocabulary this deployment streams (empty = mood pass off); clients map each
+    name to expression art and treat unknown names as their neutral.
+    `expressions` is the uploaded portrait pack, keyed by mood (`neutral` is the
+    avatar slot); moods without an entry fall back to the client's bundled art."""
 
     display_name: str = ""
     description: str = ""
     has_avatar: bool = False
     avatar_mime: Optional[str] = None
     version: str = ""
+    moods: list[str] = Field(default_factory=list)
+    mood_vocab_version: int = 1
+    expressions: dict[str, ExpressionOut] = Field(default_factory=dict)
 
 
 def _media_items(reply: ConversationReply) -> list[MediaItem]:
@@ -229,6 +250,7 @@ def _to_wire(reply: ConversationReply) -> MessageReply:
         is_error=reply.is_error,
         media=_media_items(reply),
         usage=_usage_wire(reply),
+        mood=reply.mood,
     )
 
 
@@ -580,6 +602,13 @@ def create_app(
                 # authoritative — clients render it over the assembled deltas.
                 if isinstance(item, ConversationDelta):
                     yield _sse("delta", {"text": item.text})
+                elif isinstance(item, ConversationMood):
+                    # Arrives before the first delta (the mood pass runs pre-reply)
+                    # so the client can react as the answer starts streaming.
+                    yield _sse(
+                        "meta",
+                        {"mood": item.mood, "vocab_version": config.mood_vocab_version},
+                    )
                 elif isinstance(item, ConversationReasoning):
                     yield _sse("reasoning", {"text": item.text})
                 elif isinstance(item, ConversationToolCall):
@@ -644,15 +673,34 @@ def create_app(
             has_avatar=ident.has_avatar,
             avatar_mime=ident.avatar_mime,
             version=store.version(),
+            # The mood vocabulary rides the identity payload so one fetch tells a
+            # client both who the bot is and which moods it may stream.
+            moods=list(config.mood_vocabulary) if config.mood_enabled else [],
+            mood_vocab_version=config.mood_vocab_version,
+            expressions={
+                mood: ExpressionOut(mime=entry["mime"], version=entry["version"])
+                for mood, entry in store.expressions().items()
+            },
         )
 
     @app.get("/v1/identity/avatar", dependencies=[Depends(require_auth)])
-    def get_identity_avatar() -> Response:
-        """The bot's profile-picture bytes (404 when none is set)."""
-        avatar = conversation.memory.store.identity.avatar_bytes()
-        if avatar is None:
-            raise HTTPException(status_code=404, detail="no avatar set")
-        data, mime = avatar
+    def get_identity_avatar(mood: Optional[str] = Query(default=None)) -> Response:
+        """The bot's profile-picture bytes (404 when none is set).
+
+        With `?mood=…` this serves that mood's expression portrait instead
+        (`neutral` is the avatar itself); 404 when the pack has no such portrait —
+        the client falls back to its bundled art."""
+        store = conversation.memory.store.identity
+        if mood is None:
+            got = store.avatar_bytes()
+        else:
+            try:
+                got = store.expression_bytes(mood)
+            except ValueError as exc:  # a malformed mood key, not a missing portrait
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if got is None:
+            raise HTTPException(status_code=404, detail="no such portrait")
+        data, mime = got
         # Content changes in place on edit, so don't let a cache pin the old one;
         # the UI busts by version query anyway.
         return Response(content=data, media_type=mime, headers={"Cache-Control": "no-cache"})

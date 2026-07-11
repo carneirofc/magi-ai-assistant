@@ -9,8 +9,17 @@ avatar as an image), and shown in the frontend as the assistant's face.
 
 On-disk layout (under the memory root, next to `persona.md`):
 
-    identity.json                # {display_name, description, avatar: {...}}
-    identity/avatar.<ext>        # the raw profile-picture bytes
+    identity.json                    # {display_name, description, avatar: {...},
+                                     #  expressions: {mood: {...}}}
+    identity/avatar.<ext>            # the raw profile-picture bytes
+    identity/expression-<mood>.<ext> # one portrait per additional mood
+
+The profile picture doubles as the **expression pack**: mood-keyed portraits a
+companion UI swaps between as the bot's streamed mood changes (see
+config.mood_vocabulary). The `neutral` expression IS the avatar slot — one
+storage location, so the legacy single-avatar routes and the pack never drift;
+every other mood stores its own file. Mood keys are free strings (the vocabulary
+grows), constrained only to filesystem-safe names.
 
 Pure IO, model-free: it reads/writes the files, renders the context text, and
 hands back the avatar bytes. `ConversationService` injects it into a run; the
@@ -19,6 +28,7 @@ admin API edits it; the chat API serves the picture to the UI.
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -45,6 +55,23 @@ _MIME_EXT = {
     "image/bmp": "bmp",
     "image/avif": "avif",
 }
+
+# The expression alias of the avatar slot: uploading/serving the `neutral`
+# expression IS the avatar (one storage location; see module docstring).
+NEUTRAL_MOOD = "neutral"
+
+# Mood keys land in filenames, so keep them boring: lowercase slug, no dots, no
+# separators an OS could reinterpret. The vocabulary itself lives in config.
+_MOOD_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+
+def _require_mood(mood: str) -> str:
+    mood = (mood or "").strip().lower()
+    if not _MOOD_RE.match(mood):
+        raise ValueError(
+            f"invalid mood key {mood!r}: use 1-64 chars of [a-z0-9_-], starting alphanumeric"
+        )
+    return mood
 
 
 @dataclass(frozen=True)
@@ -123,15 +150,134 @@ class IdentityStore:
     def version(self) -> str:
         """Optimistic-concurrency token over the identity's full state.
 
-        Hashes the metadata bytes plus the avatar bytes, so any edit — a renamed
-        field or a swapped picture — moves the token (the admin editor rejects a
-        stale write with a 409, matching the facts/raw-file endpoints)."""
+        Hashes the metadata bytes plus the avatar and every expression's bytes, so
+        any edit — a renamed field, a swapped picture, a re-uploaded expression —
+        moves the token (the admin editor rejects a stale write with a 409,
+        matching the facts/raw-file endpoints)."""
         h = hashlib.sha256()
         h.update(self.meta_path.read_bytes() if self.meta_path.exists() else b"")
         avatar = self.avatar_bytes()
         if avatar is not None:
             h.update(avatar[0])
+        for mood in sorted(self._expression_meta()):
+            got = self.expression_bytes(mood)
+            if got is not None:
+                h.update(mood.encode("utf-8"))
+                h.update(got[0])
         return h.hexdigest()
+
+    # --- expressions (the mood-keyed portrait pack) ---------------------------
+    def _expression_meta(self) -> dict[str, dict]:
+        """The stored (non-neutral) expression entries from the metadata sidecar."""
+        raw = self._read_json().get("expressions")
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            str(mood): entry
+            for mood, entry in raw.items()
+            if isinstance(entry, dict) and entry.get("stored") and entry.get("mime")
+        }
+
+    def expressions(self) -> dict[str, dict]:
+        """The full expression pack: `{mood: {mime, filename, version}}`.
+
+        Includes `neutral` (the avatar slot) when a picture is set. `version` is a
+        short per-expression content hash so a client can cache-bust one portrait
+        without refetching the pack."""
+        pack: dict[str, dict] = {}
+        ident = self.read()
+        avatar = self.avatar_bytes()
+        if avatar is not None:
+            pack[NEUTRAL_MOOD] = {
+                "mime": avatar[1],
+                "filename": ident.avatar_filename,
+                "version": hashlib.sha256(avatar[0]).hexdigest()[:16],
+            }
+        for mood, entry in self._expression_meta().items():
+            got = self.expression_bytes(mood)
+            if got is None:
+                continue
+            pack[mood] = {
+                "mime": got[1],
+                "filename": entry.get("filename") or None,
+                "version": hashlib.sha256(got[0]).hexdigest()[:16],
+            }
+        return pack
+
+    def expression_bytes(self, mood: str) -> Optional[tuple[bytes, str]]:
+        """One expression's `(bytes, mime)`, or None when that mood has no portrait.
+
+        `neutral` reads the avatar slot (they are the same storage)."""
+        mood = _require_mood(mood)
+        if mood == NEUTRAL_MOOD:
+            return self.avatar_bytes()
+        entry = self._expression_meta().get(mood)
+        if entry is None:
+            return None
+        path = self.avatar_dir / str(entry["stored"])
+        if not path.exists():
+            return None
+        try:
+            return path.read_bytes(), str(entry["mime"])
+        except OSError:
+            return None
+
+    def set_expression(
+        self, mood: str, data: bytes, mime: str, filename: Optional[str] = None
+    ) -> BotIdentity:
+        """Set one mood's portrait. Raises ValueError on a bad mood/mime.
+
+        `neutral` writes the avatar slot, so the legacy single-avatar routes and
+        the pack can never disagree about the resting face."""
+        mood = _require_mood(mood)
+        if mood == NEUTRAL_MOOD:
+            return self.set_avatar(data, mime, filename)
+        mime = (mime or "").strip().lower()
+        ext = _MIME_EXT.get(mime)
+        if ext is None:
+            raise ValueError(f"unsupported image mime type {mime!r}")
+        self.avatar_dir.mkdir(parents=True, exist_ok=True)
+        # Drop this mood's prior file first — a re-upload may change extension.
+        self._remove_expression_files(mood)
+        stored = f"expression-{mood}.{ext}"
+        (self.avatar_dir / stored).write_bytes(data)
+        _emit_write(self.avatar_dir)
+        meta = self._read_json()
+        expressions = meta.get("expressions")
+        if not isinstance(expressions, dict):
+            expressions = {}
+        expressions[mood] = {
+            "mime": mime,
+            "stored": stored,
+            "filename": (filename or "").strip() or None,
+        }
+        meta["expressions"] = expressions
+        self._write_json(meta)
+        return self.read()
+
+    def clear_expression(self, mood: str) -> BotIdentity:
+        """Remove one mood's portrait (`neutral` clears the avatar slot)."""
+        mood = _require_mood(mood)
+        if mood == NEUTRAL_MOOD:
+            return self.clear_avatar()
+        self._remove_expression_files(mood)
+        _emit_write(self.avatar_dir)
+        meta = self._read_json()
+        expressions = meta.get("expressions")
+        if isinstance(expressions, dict):
+            expressions.pop(mood, None)
+            meta["expressions"] = expressions
+        self._write_json(meta)
+        return self.read()
+
+    def _remove_expression_files(self, mood: str) -> None:
+        if not self.avatar_dir.is_dir():
+            return
+        for path in self.avatar_dir.glob(f"expression-{mood}.*"):
+            try:
+                path.unlink()
+            except OSError:
+                pass
 
     # --- writes -------------------------------------------------------------
     def set_fields(self, *, display_name: str, description: str) -> BotIdentity:

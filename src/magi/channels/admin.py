@@ -263,10 +263,21 @@ class Persona(BaseModel):
 
 
 # --- bot identity wire format ------------------------------------------------
+class ExpressionOut(BaseModel):
+    """One mood's portrait in the expression pack. `version` is a per-expression
+    content hash for cache busting; the bytes are served/uploaded on the
+    expression routes, never inlined here."""
+
+    mime: str
+    filename: Optional[str] = None
+    version: str
+
+
 class IdentityOut(BaseModel):
     """The bot's presented identity. `version` is the optimistic-concurrency token
-    (over fields + picture bytes) — echo it on a write or risk a 409. The picture
-    itself is served/uploaded separately, never inlined here."""
+    (over fields + picture and expression bytes) — echo it on a write or risk a
+    409. The pictures are served/uploaded separately, never inlined here.
+    `expressions` is the mood-keyed portrait pack; `neutral` is the avatar slot."""
 
     display_name: str = ""
     description: str = ""
@@ -274,6 +285,7 @@ class IdentityOut(BaseModel):
     avatar_mime: Optional[str] = None
     avatar_filename: Optional[str] = None
     version: str = ""
+    expressions: dict[str, ExpressionOut] = Field(default_factory=dict)
 
 
 class UpdateIdentity(BaseModel):
@@ -721,6 +733,14 @@ def create_admin_app(
             avatar_mime=ident.avatar_mime,
             avatar_filename=ident.avatar_filename,
             version=store.version(),
+            expressions={
+                mood: ExpressionOut(
+                    mime=entry["mime"],
+                    filename=entry.get("filename"),
+                    version=entry["version"],
+                )
+                for mood, entry in store.expressions().items()
+            },
         )
 
     def _check_identity_version(expected: Optional[str]) -> None:
@@ -747,13 +767,8 @@ def create_admin_app(
         )
         return _identity_out()
 
-    @app.put(
-        "/admin/v1/identity/avatar",
-        response_model=IdentityOut,
-        dependencies=[Depends(require_auth)],
-    )
-    def put_identity_avatar(body: SetAvatar) -> IdentityOut:
-        _check_identity_version(body.expected_version)
+    def _decode_image(body: SetAvatar) -> bytes:
+        """The upload's raw image bytes, or a 422 (shared by avatar + expressions)."""
         payload = body.data_base64
         if payload.startswith("data:"):  # tolerate a full data: URI
             payload = payload.partition(",")[2]
@@ -763,6 +778,16 @@ def create_admin_app(
             raise HTTPException(status_code=422, detail="invalid base64 image data") from exc
         if not data:
             raise HTTPException(status_code=422, detail="empty image data")
+        return data
+
+    @app.put(
+        "/admin/v1/identity/avatar",
+        response_model=IdentityOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def put_identity_avatar(body: SetAvatar) -> IdentityOut:
+        _check_identity_version(body.expected_version)
+        data = _decode_image(body)
         try:
             memory.identity.set_avatar(data, body.mime_type, body.filename)
         except ValueError as exc:  # unsupported mime type
@@ -787,6 +812,51 @@ def create_admin_app(
         if avatar is None:
             raise HTTPException(status_code=404, detail="no avatar set")
         data, mime = avatar
+        return Response(content=data, media_type=mime, headers={"Cache-Control": "no-cache"})
+
+    # --- expression pack (mood-keyed portraits; `neutral` = the avatar slot) --
+    @app.put(
+        "/admin/v1/identity/expressions/{mood}",
+        response_model=IdentityOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def put_identity_expression(mood: str, body: SetAvatar) -> IdentityOut:
+        """Upload one mood's portrait (same body as the avatar upload)."""
+        _check_identity_version(body.expected_version)
+        data = _decode_image(body)
+        try:
+            memory.identity.set_expression(mood, data, body.mime_type, body.filename)
+        except ValueError as exc:  # bad mood key or unsupported mime type
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return _identity_out()
+
+    @app.delete(
+        "/admin/v1/identity/expressions/{mood}",
+        response_model=IdentityOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def delete_identity_expression(
+        mood: str, expected_version: Optional[str] = Query(default=None)
+    ) -> IdentityOut:
+        _check_identity_version(expected_version)
+        try:
+            memory.identity.clear_expression(mood)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return _identity_out()
+
+    @app.get(
+        "/admin/v1/identity/expressions/{mood}", dependencies=[Depends(require_auth)]
+    )
+    def get_identity_expression(mood: str) -> Response:
+        """One mood's portrait bytes (404 when the pack has no such portrait)."""
+        try:
+            got = memory.identity.expression_bytes(mood)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if got is None:
+            raise HTTPException(status_code=404, detail="no such portrait")
+        data, mime = got
         return Response(content=data, media_type=mime, headers={"Cache-Control": "no-cache"})
 
     # --- operator settings: memory location + git-versioning (apply on restart) ---
