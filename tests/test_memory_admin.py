@@ -13,7 +13,6 @@ from magi.core.memory.admin import (
     SessionRequiredError,
     StaleVersionError,
     TriggerUnavailableError,
-    UnknownMemoryFileKindError,
     UserRequiredError,
 )
 from magi.core.memory import build_memory
@@ -103,7 +102,8 @@ def test_session_snapshot_returns_turns_summary_and_pending(tmp_path):
     snapshot = MemoryAdmin(store).session("u1", "s1")
 
     assert [(t.role, t.content) for t in snapshot.turns] == [("user", "hi"), ("assistant", "hello")]
-    assert snapshot.summary == "earlier summary"
+    # Blob.read() strips frontmatter but keeps the `# header`, so the body is the tail.
+    assert snapshot.summary.endswith("earlier summary")
     assert snapshot.pending[0].content == "older"
 
 
@@ -135,7 +135,8 @@ async def test_curate_session_reconciles_profile_changes(tmp_path):
 
     assert result.action == "curate"
     assert result.changed is True
-    assert seen["user_message"] == "rolled summary"
+    # The curator receives the session summary as read (frontmatter stripped, `# header` kept).
+    assert seen["user_message"].endswith("rolled summary")
     assert retriever.reset_calls == [("u1", "long_term")]
     assert retriever.index_calls == [("u1", "long_term", "prefers dark mode")]
 

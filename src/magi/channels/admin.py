@@ -839,10 +839,6 @@ def create_admin_app(
         )
         return _memory_settings_out()
 
-                "session_pending": (mem.pending.path, True, None),
-            }[kind]
-        raise HTTPException(status_code=404, detail=f"unknown file kind {kind!r}")
-
     @app.get(
         "/admin/v1/memory/files/{kind}",
         response_model=RawFile,
