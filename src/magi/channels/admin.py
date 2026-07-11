@@ -33,6 +33,7 @@ from fastapi.responses import Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
+from magi.core.config import config
 from magi.core.items import ItemArchive
 from magi.core.knowledge import (
     DocumentDetail,
@@ -286,6 +287,9 @@ class IdentityOut(BaseModel):
     avatar_filename: Optional[str] = None
     version: str = ""
     expressions: dict[str, ExpressionOut] = Field(default_factory=dict)
+    # The configured mood vocabulary (regardless of whether the mood pass is on),
+    # so the Identity editor can offer one upload slot per mood.
+    moods: list[str] = Field(default_factory=list)
 
 
 class UpdateIdentity(BaseModel):
@@ -741,6 +745,7 @@ def create_admin_app(
                 )
                 for mood, entry in store.expressions().items()
             },
+            moods=list(config.mood_vocabulary),
         )
 
     def _check_identity_version(expected: Optional[str]) -> None:

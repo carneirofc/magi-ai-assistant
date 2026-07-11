@@ -1061,3 +1061,11 @@ def test_expression_stale_version_is_409(tmp_path):
         json={"data_base64": _PNG_1x1, "mime_type": "image/png", "expected_version": "stale"},
     )
     assert resp.status_code == 409
+
+
+def test_identity_advertises_the_mood_vocabulary(tmp_path):
+    from magi.core.config import config
+
+    client = _client(memory=FileMemoryStore(tmp_path))
+    body = client.get("/admin/v1/identity").json()
+    assert body["moods"] == list(config.mood_vocabulary)

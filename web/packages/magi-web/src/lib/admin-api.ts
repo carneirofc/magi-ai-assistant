@@ -117,6 +117,12 @@ export async function getPersona(): Promise<Body<"/admin/v1/memory/persona">> {
 // --- bot identity -----------------------------------------------------------
 // Hand-typed (like introspection-types) rather than derived from the generated
 // OpenAPI `paths`, so these helpers don't require regenerating api-types.ts.
+export interface AdminExpression {
+  mime: string;
+  filename: string | null;
+  version: string;
+}
+
 export interface AdminIdentity {
   display_name: string;
   description: string;
@@ -124,6 +130,11 @@ export interface AdminIdentity {
   avatar_mime: string | null;
   avatar_filename: string | null;
   version: string;
+  /** The mood-keyed portrait pack (`neutral` = the avatar slot). Older engines
+   * omit this — read defensively. */
+  expressions?: Record<string, AdminExpression>;
+  /** The deployment's mood vocabulary (one upload slot each in the editor). */
+  moods?: string[];
 }
 
 export async function getIdentity(): Promise<AdminIdentity> {
@@ -175,6 +186,45 @@ export function deleteIdentityAvatar(expectedVersion?: string): Promise<Response
  * the settings page can preview without depending on the chat-api being up. */
 export function fetchIdentityAvatar(): Promise<Response> {
   return adminRequest("/admin/v1/identity/avatar");
+}
+
+// --- expression pack (mood-keyed portraits; `neutral` = the avatar slot) -----
+/** Upload one mood's portrait (same payload as the avatar upload). */
+export function putIdentityExpression(
+  mood: string,
+  body: {
+    dataBase64: string;
+    mimeType: string;
+    filename?: string;
+    expectedVersion?: string;
+  },
+): Promise<Response> {
+  return adminRequest(`/admin/v1/identity/expressions/${encodeURIComponent(mood)}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      data_base64: body.dataBase64,
+      mime_type: body.mimeType,
+      filename: body.filename,
+      expected_version: body.expectedVersion,
+    }),
+  });
+}
+
+/** Remove one mood's portrait. */
+export function deleteIdentityExpression(
+  mood: string,
+  expectedVersion?: string,
+): Promise<Response> {
+  const q = expectedVersion ? `?expected_version=${encodeURIComponent(expectedVersion)}` : "";
+  return adminRequest(
+    `/admin/v1/identity/expressions/${encodeURIComponent(mood)}${q}`,
+    { method: "DELETE" },
+  );
+}
+
+/** Open one mood's portrait bytes (404 when the pack has no such portrait). */
+export function fetchIdentityExpression(mood: string): Promise<Response> {
+  return adminRequest(`/admin/v1/identity/expressions/${encodeURIComponent(mood)}`);
 }
 
 // --- operator settings: memory location + git-versioning --------------------
