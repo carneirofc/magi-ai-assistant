@@ -25,8 +25,10 @@ from magi.agent.members import MEMBER_BUILDERS
 from magi.agent.model import build_lead_model, build_member_model
 from magi.agent.tools.http import HTTP_TOOLS
 from magi.agent.tools.identity import build_identity_tools
+from magi.agent.tools.evolution import build_evolution_tools
 from magi.agent.tools.knowledge import build_knowledge_tools
 from magi.agent.tools.mcp import build_mcp_lead_toolkits, build_mcp_members
+from magi.agent.tools.recipes import build_recipe_tools
 from magi.agent.tools.media import MEDIA_TOOLS
 from magi.agent.tools.memory import build_memory_tools
 from magi.agent.tools.reminders import build_reminder_tools
@@ -174,6 +176,21 @@ def build_team(
             f"collection={config.knowledge_collection})"
         )
 
+    # Self-evolution (config-gated): the propose tools (queue-only — the
+    # operator approves) and any operator-APPROVED http-tool recipes from the
+    # runtime dir. Both empty when the feature is off.
+    evolution_tools: list = []
+    recipe_tools: list = []
+    if config.evolution_enabled:
+        from magi.core.evolution import EvolutionStore
+
+        evolution_tools = build_evolution_tools(EvolutionStore(memory.store.root))
+        recipe_tools = build_recipe_tools(memory.store.root)
+        log_info(
+            f"evolution: ENABLED (proposable={config.evolution_proposable}, "
+            f"{len(recipe_tools)} approved recipe tool(s))"
+        )
+
     # The lead's prompt is its soul (who Alyssa is) followed by the operational
     # router (how she delegates and wields tools). SOUL.md establishes identity
     # first so persona stays primary; lead.md supplies the hard rules and routing.
@@ -249,6 +266,10 @@ def build_team(
             # Config-declared MCP servers attached at the lead level
             # (attach: "lead"); member-attached ones join the roster above.
             *build_mcp_lead_toolkits(),
+            # Self-evolution: propose tools + approved recipe tools (empty
+            # unless evolution_enabled).
+            *evolution_tools,
+            *recipe_tools,
             # Bound to the live model objects: members all share `member_model`,
             # so one mutation flips the whole team.
             *build_thinking_tools([lead, member_model]),

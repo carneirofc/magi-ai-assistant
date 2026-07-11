@@ -201,6 +201,20 @@ class Config:
     # turn and at GET /v1/reminders. No push infra — surfacing is on-open. ---
     reminders_enabled: bool = False
 
+    # --- Self-evolution with a human in the loop (see magi/core/evolution).
+    # The assistant may PROPOSE changes to allowlisted prompts and new
+    # declarative HTTP tools; nothing applies until the operator approves it in
+    # the admin queue. Approved changes land in <memory_dir>/prompts-runtime
+    # (register it FIRST in set_prompt_overlay at the entrypoint) and
+    # <memory_dir>/tools-runtime, and take effect on restart. SOUL/lead-class
+    # identity prompts do not belong in the allowlist — tone bends, identity
+    # doesn't. ---
+    evolution_enabled: bool = False
+    evolution_proposable: list[str] = field(
+        default_factory=lambda: ["curation.md", "greet.md"]
+    )
+    evolution_queue_max: int = 20
+
     # --- Team behavior / robustness ---
     # Hard cap on tool calls per run (incl. member delegations) so a lead can't
     # loop forever delegating. None/0 = no limit.

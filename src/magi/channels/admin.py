@@ -365,6 +365,29 @@ class FileVersionOut(BaseModel):
     content: str
 
 
+class ProposalOut(BaseModel):
+    """One self-evolution proposal (see magi/core/evolution.py)."""
+
+    id: str
+    kind: str
+    target: str
+    current_text: str = ""
+    proposed_text: str = ""
+    rationale: str = ""
+    source: str = ""
+    status: str = "pending"
+    created: str = ""
+    decided: str = ""
+    applied_path: str = ""
+
+
+class ProposalsOut(BaseModel):
+    proposals: list[ProposalOut] = Field(default_factory=list)
+    proposable: list[str] = Field(default_factory=list)
+    # Approvals apply on restart (prompts bake into agents at team build).
+    restart_to_apply: bool = True
+
+
 class McpSettingsOut(BaseModel):
     """The MCP server registry as the operator sees it: the code-declared list
     (context, edited in main.py) and the operator's own entries (editable here;
@@ -1041,6 +1064,65 @@ def create_admin_app(
             )
         )
         return _memory_settings_out()
+
+    # --- self-evolution proposals (approve/reject; apply on restart) --------
+    def _evolution_store():
+        from magi.core.evolution import build_evolution_store
+
+        store = build_evolution_store(memory.root)
+        if store is None:
+            raise HTTPException(
+                status_code=503, detail="self-evolution is not enabled in this deployment"
+            )
+        return store
+
+    @app.get(
+        "/admin/v1/proposals",
+        response_model=ProposalsOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def list_proposals(status: Optional[str] = Query(default=None)) -> ProposalsOut:
+        """The self-evolution queue: what the assistant asked to change about
+        itself, pending the operator's decision."""
+        store = _evolution_store()
+        from dataclasses import asdict
+
+        return ProposalsOut(
+            proposals=[ProposalOut(**asdict(p)) for p in store.list(status=status)],
+            proposable=list(store.proposable),
+        )
+
+    @app.post(
+        "/admin/v1/proposals/{proposal_id}/approve",
+        response_model=ProposalOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def approve_proposal(proposal_id: str) -> ProposalOut:
+        """Apply one pending proposal into the runtime overlay (git-versioned
+        when memory versioning is on). Takes effect on restart."""
+        return _decide(proposal_id, approve=True)
+
+    @app.post(
+        "/admin/v1/proposals/{proposal_id}/reject",
+        response_model=ProposalOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def reject_proposal(proposal_id: str) -> ProposalOut:
+        return _decide(proposal_id, approve=False)
+
+    def _decide(proposal_id: str, approve: bool) -> ProposalOut:
+        from dataclasses import asdict
+
+        from magi.core.evolution import ProposalError
+
+        store = _evolution_store()
+        try:
+            decided = store.decide(proposal_id, approve)
+        except ProposalError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if decided is None:
+            raise HTTPException(status_code=404, detail=f"no proposal {proposal_id!r}")
+        return ProposalOut(**asdict(decided))
 
     # --- operator settings: MCP servers (merge over config; apply on restart) ---
     @app.get(
