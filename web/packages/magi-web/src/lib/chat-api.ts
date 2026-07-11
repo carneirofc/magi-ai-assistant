@@ -74,6 +74,22 @@ export async function openMessageStream(
   );
 }
 
+/** Open the chat-api's greeting stream (an assistant-initiated turn: the
+ * assistant speaks first, drawn from memory + the time of day) and return the
+ * raw upstream Response for the BFF to relay. Same SSE framing as a message
+ * stream, mood frame included. */
+export async function openGreetingStream(
+  sessionId: string,
+  userId: string,
+): Promise<Response> {
+  return fetch(`${baseUrl()}/v1/sessions/${encodeURIComponent(sessionId)}/greet`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId }),
+    cache: "no-store",
+  });
+}
+
 /** One mood's portrait in the identity's expression pack. `version` is a
  * per-expression content hash for cache busting. */
 export interface BotExpression {
@@ -124,6 +140,29 @@ export async function fetchIdentityAvatar(mood?: string): Promise<Response> {
     headers: authHeaders(),
     cache: "no-store",
   });
+}
+
+/** One durable fact the assistant keeps about a user (read-only). */
+export interface SelfMemoryFact {
+  text: string;
+  ts: string;
+}
+
+/** What the assistant durably remembers about one user, for the companion's
+ * ambient memory panel (chat-api /v1/memory/facts). Null when the chat-api is
+ * unreachable or predates the endpoint — the panel just stays quiet. */
+export async function getSelfMemory(userId: string): Promise<SelfMemoryFact[] | null> {
+  try {
+    const res = await fetch(
+      `${baseUrl()}/v1/memory/facts?user_id=${encodeURIComponent(userId)}`,
+      { headers: authHeaders(), cache: "no-store" },
+    );
+    if (!res.ok) return null;
+    const body = (await res.json()) as { facts?: SelfMemoryFact[] };
+    return Array.isArray(body.facts) ? body.facts : [];
+  } catch {
+    return null;
+  }
 }
 
 /** Chat-api liveness. Returns its /healthz body, or null when unreachable — the

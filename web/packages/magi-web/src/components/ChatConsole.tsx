@@ -23,6 +23,7 @@
 import {
   createContext,
   forwardRef,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -55,6 +56,7 @@ import remarkGfm from "remark-gfm";
 import { OutlineButton, TextInput } from "@carneirofc/ui";
 
 import { createChatModelAdapter, type ChatUsage } from "../lib/chat-adapter";
+import { greetIfFresh } from "../lib/chat-greeting";
 import { MoodScope, useMood, useMoodAdapterEvents } from "../lib/chat-mood";
 import { createChatAttachmentAdapter } from "../lib/chat-attachments";
 import { createDictationAdapter, dictationSupported } from "../lib/chat-dictation";
@@ -93,9 +95,17 @@ export type ChatConsoleProps = {
    * ignored — the companion surface chats as one configured person, while the
    * operator console (no prop) keeps its free switcher for testing. */
   pinnedUserId?: string | null;
+  /** Greet-on-open: when the active conversation is brand new (empty
+   * transcript — including "New chat"), the assistant speaks first via the
+   * engine's greeting turn. Resuming an ongoing conversation never greets.
+   * See lib/chat-greeting.ts. */
+  greetOnOpen?: boolean;
 };
 
-export function ChatConsole({ pinnedUserId = null }: ChatConsoleProps = {}) {
+export function ChatConsole({
+  pinnedUserId = null,
+  greetOnOpen = false,
+}: ChatConsoleProps = {}) {
   const [userId, setUserId] = useState(pinnedUserId || DEFAULT_USER);
   // Null until mounted so the first client render matches the server (no crypto /
   // localStorage during SSR → no hydration mismatch).
@@ -104,6 +114,10 @@ export function ChatConsole({ pinnedUserId = null }: ChatConsoleProps = {}) {
   // Whether the conversation rail is collapsed to a slim strip. Persisted so the
   // operator's preference survives reloads.
   const [railCollapsed, setRailCollapsed] = useState(false);
+  // Bumped when a greeting lands, so the thread remounts and its history
+  // adapter restores the seeded greeting (see GreetOnOpen below).
+  const [greetEpoch, setGreetEpoch] = useState(0);
+  const onGreeted = useCallback(() => setGreetEpoch((e) => e + 1), []);
 
   useEffect(() => {
     if (!pinnedUserId) setUserId(localStorage.getItem(USER_KEY) || DEFAULT_USER);
@@ -155,6 +169,7 @@ export function ChatConsole({ pinnedUserId = null }: ChatConsoleProps = {}) {
 
   const active = activeSession(registry);
   const sessionId = active?.id ?? "";
+  const greetKey = `${sessionId}:${greetEpoch}`;
 
   return (
     <IdentityContext.Provider value={identity}>
@@ -203,8 +218,11 @@ export function ChatConsole({ pinnedUserId = null }: ChatConsoleProps = {}) {
         />
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-ui bg-[color:var(--ui-bg)]">
+          {greetOnOpen ? (
+            <GreetOnOpen sessionId={sessionId} userId={userId} onGreeted={onGreeted} />
+          ) : null}
           <ChatThread
-            key={sessionId}
+            key={greetKey}
             sessionId={sessionId}
             userId={userId}
             onUserSend={(text) => commit(touchSession(registry, sessionId, text))}
@@ -215,6 +233,32 @@ export function ChatConsole({ pinnedUserId = null }: ChatConsoleProps = {}) {
     </MoodScope>
     </IdentityContext.Provider>
   );
+}
+
+/** Runs the greet-on-open flow for the active session (renders nothing). Lives
+ * inside the MoodScope so the greeting drives the same mood/lifecycle signal
+ * the stage and badge react to. Each session id is attempted once per mount —
+ * the transcript-empty check in greetIfFresh is the real policy gate. */
+function GreetOnOpen({
+  sessionId,
+  userId,
+  onGreeted,
+}: {
+  sessionId: string;
+  userId: string;
+  onGreeted: () => void;
+}) {
+  const mood = useMood();
+  const { onMood, onLifecycle } = useMoodAdapterEvents(mood);
+  const attempted = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!sessionId || !userId || attempted.current.has(sessionId)) return;
+    attempted.current.add(sessionId);
+    void greetIfFresh(sessionId, userId, { onMood, onLifecycle }).then((greeted) => {
+      if (greeted) onGreeted();
+    });
+  }, [sessionId, userId, onMood, onLifecycle, onGreeted]);
+  return null;
 }
 
 // --- session rail ------------------------------------------------------------

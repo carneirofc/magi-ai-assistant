@@ -8,7 +8,7 @@
 
 import { PageHeader, StatusBadge, StatusMessage } from "@carneirofc/ui";
 
-import { CompanionSurface } from "@carneirofc/magi-web/slices/companion/components";
+import { CompanionSurface, MemoryPanel } from "@carneirofc/magi-web/slices/companion/components";
 import { ChatConsole } from "@carneirofc/magi-web/slices/chat/components";
 import { getChatHealth, getIdentity } from "@carneirofc/magi-web/lib/chat-api";
 
@@ -46,8 +46,9 @@ export default async function CompanionPage() {
         <CompanionSurface
           expressions={expressions}
           name={identity?.display_name || null}
+          aside={<MemoryPanel userId="console" />}
         >
-          <ChatConsole />
+          <ChatConsole greetOnOpen />
         </CompanionSurface>
       ) : (
         <StatusMessage role="alert" tone="error">

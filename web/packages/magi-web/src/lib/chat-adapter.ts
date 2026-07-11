@@ -58,10 +58,11 @@ function parseUsage(raw: unknown): ChatUsage | null {
   };
 }
 
-type SseFrame = { event: string; data: Record<string, unknown> };
+export type SseFrame = { event: string; data: Record<string, unknown> };
 
-/** Parse one `event:`/`data:` SSE frame; null when it carries no JSON payload. */
-function parseFrame(frame: string): SseFrame | null {
+/** Parse one `event:`/`data:` SSE frame; null when it carries no JSON payload.
+ * Exported for the other stream consumers (the greeting flow). */
+export function parseFrame(frame: string): SseFrame | null {
   let event = "message";
   const dataLines: string[] = [];
   for (const line of frame.split("\n")) {

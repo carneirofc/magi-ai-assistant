@@ -1,7 +1,9 @@
 export {
   createChatModelAdapter,
+  parseFrame,
   type ChatConfig,
   type ChatUsage,
+  type SseFrame,
 } from "../../lib/chat-adapter";
 export {
   useMood,
@@ -10,6 +12,7 @@ export {
   type MoodState,
   type MoodContextValue,
 } from "../../lib/chat-mood";
+export { greetIfFresh, sessionTranscriptEmpty } from "../../lib/chat-greeting";
 export { createSessionHistoryAdapter, clearSessionHistory } from "../../lib/chat-history";
 export {
   activeSession,
