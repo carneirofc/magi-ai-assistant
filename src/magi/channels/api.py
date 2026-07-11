@@ -146,6 +146,49 @@ class TitleOut(BaseModel):
     title: Optional[str] = None
 
 
+class SessionInfo(BaseModel):
+    """One stored conversation in the server-side session archive."""
+
+    id: str
+    turns: int
+    has_summary: bool = False
+    last_ts: Optional[str] = None
+    preview: str = ""
+
+
+class SessionsOut(BaseModel):
+    sessions: list[SessionInfo] = Field(default_factory=list)
+
+
+class TranscriptTurn(BaseModel):
+    role: str = "?"
+    content: str = ""
+    ts: Optional[str] = None
+
+
+class TranscriptOut(BaseModel):
+    """A stored session's live window + rolling summary. The window is capped
+    (short_term_max), so older turns survive only through the summary."""
+
+    turns: list[TranscriptTurn] = Field(default_factory=list)
+    summary: Optional[str] = None
+
+
+class HistoryHit(BaseModel):
+    """One match from the server-side history search (see FileMemoryStore
+    .search_history): a transcript turn, a session summary, or an episode."""
+
+    kind: str
+    session_id: Optional[str] = None
+    role: Optional[str] = None
+    ts: Optional[str] = None
+    snippet: str = ""
+
+
+class HistorySearchOut(BaseModel):
+    hits: list[HistoryHit] = Field(default_factory=list)
+
+
 class TtsRequest(BaseModel):
     """Text to speak (see the /v1/tts route). `mood` picks the per-mood style
     override (tts_mood_styles) — clients pass the mood the reply rode in on."""
@@ -748,6 +791,54 @@ def create_app(
     @app.get("/v1/sessions/{session_id}/context", dependencies=[Depends(require_auth)])
     def get_context(session_id: str, user_id: str = Query(min_length=1)) -> dict:
         return conversation.context_stats(_scoped(user_id), session_id)
+
+    # --- session archive (previous-chat reference) ------------------------
+    @app.get("/v1/sessions", response_model=SessionsOut, dependencies=[Depends(require_auth)])
+    def list_sessions(user_id: str = Query(min_length=1)) -> SessionsOut:
+        """The server-side session archive for one user, newest activity first.
+        The web client keeps its own registry (titles, pins); this is the
+        engine's truth about what was actually said."""
+        overview = conversation.memory.store.session_overview(_scoped(user_id))
+        return SessionsOut(sessions=[SessionInfo(**s) for s in overview])
+
+    @app.get(
+        "/v1/sessions/search",
+        response_model=HistorySearchOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def search_sessions(
+        q: str = Query(min_length=1),
+        user_id: str = Query(min_length=1),
+        limit: int = Query(default=8, ge=1, le=50),
+    ) -> HistorySearchOut:
+        """Search one user's past conversations server-side — transcripts,
+        session summaries, and episodes. Backs "reference a previous chat"."""
+        hits = conversation.memory.store.search_history(_scoped(user_id), q, limit)
+        return HistorySearchOut(hits=[HistoryHit(**h) for h in hits])
+
+    @app.get(
+        "/v1/sessions/{session_id}/transcript",
+        response_model=TranscriptOut,
+        dependencies=[Depends(require_auth)],
+    )
+    def get_transcript(session_id: str, user_id: str = Query(min_length=1)) -> TranscriptOut:
+        """One stored session's turns + rolling summary (the capped live window
+        — older turns live on only in the summary/episodes)."""
+        from magi.core.memory.kinds import strip_header
+
+        mem = conversation.memory.store.scoped(_scoped(user_id), session_id)
+        summary = strip_header(mem.session_summary.read())
+        return TranscriptOut(
+            turns=[
+                TranscriptTurn(
+                    role=str(t.get("role", "?")),
+                    content=str(t.get("content", "")),
+                    ts=t.get("ts"),
+                )
+                for t in mem.live_turns.read()
+            ],
+            summary=summary or None,
+        )
 
     @app.post(
         "/v1/title",

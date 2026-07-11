@@ -289,6 +289,14 @@ class ConversationService:
             label = h.source or h.doc_id or "source"
             lines.append(f"- ({label}) {h.text}")
         block = "\n".join(lines)
+        # Same seatbelt the memory sections get (config.context_section_budgets):
+        # retrieval size is query-dependent, so a cap keeps one broad match from
+        # eating the window.
+        budget = config.context_section_budgets.get("knowledge", 0)
+        if budget > 0:
+            from magi.core.memory.kinds import clamp
+
+            block = clamp(block, budget, "knowledge section")
         # Surface the knowledge contribution alongside the memory layer's own
         # context-size log (magi/core/memory), so the per-turn accounting is complete.
         log_info(f"conversation: knowledge context ~{_est_tokens_from_chars(len(block))} tok ({len(hits)} hit(s))")

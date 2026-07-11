@@ -1,7 +1,10 @@
 // Server-only disk store for chat transcripts. Transcripts (which can carry inline
 // image bytes) are too big for the browser's localStorage quota, so they live on the
-// server's disk instead — one JSON file per session under the OS temp dir. This is
-// deliberately ephemeral (temp dir): a scratch playground store, not durable history.
+// server's disk instead — one JSON file per session.
+//
+// Where: `CHAT_HISTORY_DIR` when set (a durable path — history and transcript
+// search then survive reboots; the companion deployments want this), else the
+// OS temp dir (deliberately ephemeral: a scratch playground store).
 //
 // Import this ONLY from route handlers / server components — it touches the filesystem.
 
@@ -11,7 +14,9 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 
-const DIR = path.join(os.tmpdir(), "magi-chat-history");
+const DIR = process.env.CHAT_HISTORY_DIR
+  ? path.resolve(process.env.CHAT_HISTORY_DIR)
+  : path.join(os.tmpdir(), "magi-chat-history");
 
 /** A safe filename for a session id, or null if the id looks unsafe. Session ids
  * are `web-<uuid>` / `oai-<hex>` — a conservative charset with no path separators,

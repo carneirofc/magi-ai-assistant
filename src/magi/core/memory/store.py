@@ -110,6 +110,99 @@ class FileMemoryStore:
         ]
         return sorted(sids)
 
+    def session_overview(self, user_id: object) -> list[dict]:
+        """Metadata for every stored session of `user_id`, newest-activity first.
+
+        One dict per session: `id`, `turns` (live-window count), `has_summary`,
+        `last_ts` (the newest turn's timestamp, None for an empty window) and
+        `preview` (the first user turn, trimmed). Pure IO for the session-archive
+        endpoints; the client-side registry keeps its own titles."""
+        out: list[dict] = []
+        for sid in self.list_sessions(user_id):
+            mem = self.scoped(user_id, sid)
+            turns = mem.live_turns.read()
+            preview = next(
+                (str(t.get("content", "")) for t in turns if t.get("role") == "user"), ""
+            )
+            out.append(
+                {
+                    "id": sid,
+                    "turns": len(turns),
+                    "has_summary": bool(mem.session_summary.read().strip()),
+                    "last_ts": turns[-1].get("ts") if turns else None,
+                    "preview": preview[:160],
+                }
+            )
+        out.sort(key=lambda s: s["last_ts"] or "", reverse=True)
+        return out
+
+    def search_history(self, user_id: object, query: str, limit: int = 8) -> list[dict]:
+        """Case-insensitive substring search across a user's stored conversations:
+        live transcripts, rolling session summaries, and episodes.
+
+        Returns up to `limit` hit dicts — `kind` ("transcript" | "summary" |
+        "episode"), `session_id` (None for episodes), `role`/`ts` (transcript
+        hits only), and a `snippet` around the match. Plain file scan on purpose:
+        the corpus is one user's history, and a scan needs no index to stay
+        truthful. (Semantic recall, when enabled, rides the memory retriever —
+        this is the always-available floor.)"""
+        q = query.strip().lower()
+        if not q or limit <= 0:
+            return []
+
+        def snippet(text: str, at: int, radius: int = 90) -> str:
+            lo, hi = max(0, at - radius), min(len(text), at + len(q) + radius)
+            piece = " ".join(text[lo:hi].split())
+            prefix = "…" if lo > 0 else ""
+            suffix = "…" if hi < len(text) else ""
+            return f"{prefix}{piece}{suffix}"
+
+        hits: list[dict] = []
+        for sid in self.list_sessions(user_id):
+            mem = self.scoped(user_id, sid)
+            for turn in mem.live_turns.read():
+                content = str(turn.get("content", ""))
+                at = content.lower().find(q)
+                if at >= 0:
+                    hits.append(
+                        {
+                            "kind": "transcript",
+                            "session_id": sid,
+                            "role": turn.get("role"),
+                            "ts": turn.get("ts"),
+                            "snippet": snippet(content, at),
+                        }
+                    )
+            summary = mem.session_summary.read()
+            at = summary.lower().find(q)
+            if at >= 0:
+                hits.append(
+                    {
+                        "kind": "summary",
+                        "session_id": sid,
+                        "role": None,
+                        "ts": None,
+                        "snippet": snippet(summary, at),
+                    }
+                )
+        # Episodes are per-user (the session id in the scope is irrelevant).
+        episodes = self.scoped(user_id, "-").episodes
+        for body in episodes.recent(0):
+            at = body.lower().find(q)
+            if at >= 0:
+                hits.append(
+                    {
+                        "kind": "episode",
+                        "session_id": None,
+                        "role": None,
+                        "ts": None,
+                        "snippet": snippet(body, at),
+                    }
+                )
+        # Newest transcript activity first; summaries/episodes (no ts) trail.
+        hits.sort(key=lambda h: h["ts"] or "", reverse=True)
+        return hits[:limit]
+
     def seed_persona(self, text: str) -> None:
         """Write the base persona once, if no persona file exists yet."""
         self.persona.seed(

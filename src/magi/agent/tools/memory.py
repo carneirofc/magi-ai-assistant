@@ -30,6 +30,11 @@ class EpisodicMemoryData(BaseModel):
     limit: int = Field(description="Maximum number of summaries requested.")
 
 
+class ConversationSearchData(BaseModel):
+    query: str = Field(description="What was searched for.")
+    results: str = Field(description="Matching lines from past conversations, with their source.")
+
+
 def build_memory_tools(memory: MemoryManager) -> list:
     """Return the (read-only) memory tool set bound to `memory` (dependency-injected)."""
 
@@ -63,4 +68,35 @@ def build_memory_tools(memory: MemoryManager) -> list:
         text = memory.recall_episodes(limit)
         return ok("Recalled episodic memory.", EpisodicMemoryData(episodes=text, limit=limit))
 
-    return [recall_memory, recall_episodes]
+    @tool(
+        description=(
+            "Search the current user's PAST conversations (old session transcripts, "
+            "session summaries, episodes) for something said before."
+        ),
+        instructions=(
+            "Use when the user refers to an earlier conversation ('like I said the "
+            "other day', 'that link you sent me', 'what did we decide about X'). "
+            "Pass the key phrase to look for; results cite where each line came "
+            "from. The current conversation is already in your context — this is "
+            "for previous ones."
+        ),
+        show_result=True,
+    )
+    def recall_conversation(
+        query: Annotated[
+            str,
+            Field(min_length=2, description="The phrase or topic to look for in past conversations."),
+        ],
+        limit: Annotated[
+            int,
+            Field(default=8, ge=1, le=20, description="Maximum matches to return."),
+        ] = 8,
+    ) -> ToolOutput[ConversationSearchData]:
+        """Find what was said in previous conversations with the current user."""
+        results = memory.search_history(query, limit)
+        return ok(
+            "Searched past conversations.",
+            ConversationSearchData(query=query, results=results),
+        )
+
+    return [recall_memory, recall_episodes, recall_conversation]

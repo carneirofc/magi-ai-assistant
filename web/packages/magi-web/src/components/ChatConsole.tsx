@@ -66,6 +66,8 @@ import { createChatAttachmentAdapter } from "../lib/chat-attachments";
 import { createDictationAdapter, dictationSupported } from "../lib/chat-dictation";
 import { createRecordingDictationAdapter, recordingSupported } from "../lib/chat-recording";
 import { ContextDisplay, type ThreadTokenUsage } from "./assistant-ui/context-display";
+import { ContextInspector } from "./ContextInspector";
+import { ArchiveReference } from "./ArchiveReference";
 import { CodeHeader, CodeSyntaxHighlighter } from "./CodeBlock";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { clearSessionHistory, createSessionHistoryAdapter } from "../lib/chat-history";
@@ -292,6 +294,7 @@ export function ChatConsole({
             sessionId={sessionId}
             userId={userId}
             onUserSend={(text) => onUserSend(sessionId, text)}
+            onFreshSession={() => commit(createSession(registry))}
           />
         </div>
       </div>
@@ -679,10 +682,12 @@ function ChatThread({
   sessionId,
   userId,
   onUserSend,
+  onFreshSession,
 }: {
   sessionId: string;
   userId: string;
   onUserSend: (text: string) => void;
+  onFreshSession?: () => void;
 }) {
   // Mirror the current user id + send callback into refs so the adapter (built
   // once per session) reads the latest values without rebuilding the runtime.
@@ -828,6 +833,9 @@ function ChatThread({
             micSupported={micSupported}
             dictationError={dictationError}
             onDismissDictationError={() => setDictationError(null)}
+            sessionId={sessionId}
+            userId={userId}
+            onFreshSession={onFreshSession}
           />
         </ComposerPrimitive.AttachmentDropzone>
       </ThreadPrimitive.Root>
@@ -1436,11 +1444,17 @@ function Composer({
   micSupported,
   dictationError,
   onDismissDictationError,
+  sessionId,
+  userId,
+  onFreshSession,
 }: {
   usage: ChatUsage | null;
   micSupported: boolean;
   dictationError: string | null;
   onDismissDictationError: () => void;
+  sessionId: string;
+  userId: string;
+  onFreshSession?: () => void;
 }) {
   const isRunning = useThread((t) => t.isRunning);
 
@@ -1522,6 +1536,9 @@ function Composer({
             </IconButton>
           )}
 
+          {/* Cite something said in a previous conversation (engine archive). */}
+          <ArchiveReference userId={userId} />
+
           <div className="ml-auto flex items-center gap-2">
             {isRunning ? (
               <ComposerPrimitive.Cancel asChild>
@@ -1573,6 +1590,12 @@ function Composer({
               />
             </div>
           ) : null}
+          {/* The engine-truth inspector: per-section sizes + the flush valve. */}
+          <ContextInspector
+            sessionId={sessionId}
+            userId={userId}
+            onFreshSession={onFreshSession}
+          />
         </div>
       </div>
     </ComposerPrimitive.Root>

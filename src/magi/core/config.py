@@ -186,8 +186,25 @@ class Config:
 
     # --- Context-size monitoring. We can't perfectly count provider tokens, so
     # estimate (~4 chars/token) and warn when the assembled context crosses this
-    # fraction of the lead's window. Purely a guardrail/log — never truncates. ---
+    # fraction of the lead's window. Purely a guardrail/log — never truncates.
+    # (The stats endpoint upgrades to REAL counts via llama-server /tokenize
+    # when the provider is llamacpp — see magi/core/tokens.) ---
     ctx_warn_ratio: float = 0.75
+
+    # --- Context section budgets (chars). When a section is listed here, its
+    # rendered body is hard-clamped to that many characters at assembly time
+    # (truncation marked, so the model can see content was dropped). Keys:
+    # "long_term", "episodes", "short_term", "knowledge". Empty = the historic
+    # warn-only behavior (nothing truncates). Persona is never clamped — it IS
+    # the assistant. Trim generously: these are a seatbelt against one runaway
+    # section eating the window, not a tuning knob. ---
+    context_section_budgets: dict[str, int] = field(default_factory=dict)
+
+    # --- Pressure-triggered session fold. The turn-count fold (summarize_every)
+    # can lag a session full of LONG turns; with this > 0 the per-turn fold also
+    # fires whenever the rendered short-term section alone exceeds this fraction
+    # of the lead's window (est. tokens) and turns are pending. 0 = off. ---
+    session_fold_pressure_ratio: float = 0.0
 
     # --- Short-term session summarization. When turns roll out of the live
     # window, batch them and fold a rolling "session so far" summary that's kept

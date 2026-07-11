@@ -165,6 +165,94 @@ export async function requestTitle(text: string): Promise<string | null> {
   }
 }
 
+/** The engine's context accounting for one session (GET /v1/sessions/{id}/context):
+ * assembled size vs the window, per-section token counts, configured budgets.
+ * `token_source` says whether the numbers are real (llama-server /tokenize) or
+ * the ~4-chars/token estimate. */
+export interface ContextStats {
+  total_chars: number;
+  est_tokens: number;
+  token_source?: string;
+  budget_tokens: number;
+  warn_ratio?: number;
+  ratio: number;
+  sections: Record<string, number>;
+  section_budgets?: Record<string, number>;
+  short_term_turns: number;
+  knowledge?: { auto_inject: boolean; top_k: number; est_max_tokens: number };
+}
+
+/** Read the context stats, or null when unreachable — the inspector stays quiet. */
+export async function getContextStats(
+  sessionId: string,
+  userId: string,
+): Promise<ContextStats | null> {
+  try {
+    const res = await fetch(
+      `${baseUrl()}/v1/sessions/${encodeURIComponent(sessionId)}/context?user_id=${encodeURIComponent(userId)}`,
+      { headers: authHeaders(), cache: "no-store" },
+    );
+    if (!res.ok) return null;
+    return (await res.json()) as ContextStats;
+  } catch {
+    return null;
+  }
+}
+
+/** Close a session server-side (fold summary → episode, wipe live turns) —
+ * the "fresh session, carry the gist" action. Returns dropped turns, or null
+ * when the engine was unreachable. */
+export async function flushChatSession(
+  sessionId: string,
+  userId: string,
+): Promise<number | null> {
+  try {
+    const res = await fetch(
+      `${baseUrl()}/v1/sessions/${encodeURIComponent(sessionId)}/flush`,
+      {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId }),
+        cache: "no-store",
+      },
+    );
+    if (!res.ok) return null;
+    const body = (await res.json()) as { dropped_turns?: number };
+    return typeof body.dropped_turns === "number" ? body.dropped_turns : 0;
+  } catch {
+    return null;
+  }
+}
+
+/** One hit from the engine's server-side history search (transcripts, session
+ * summaries, episodes) — the "reference a previous chat" source. */
+export interface ArchiveHit {
+  kind: string;
+  session_id: string | null;
+  role: string | null;
+  ts: string | null;
+  snippet: string;
+}
+
+/** Search one user's past conversations server-side; null when unreachable. */
+export async function searchChatArchive(
+  q: string,
+  userId: string,
+  limit = 8,
+): Promise<ArchiveHit[] | null> {
+  try {
+    const res = await fetch(
+      `${baseUrl()}/v1/sessions/search?q=${encodeURIComponent(q)}&user_id=${encodeURIComponent(userId)}&limit=${limit}`,
+      { headers: authHeaders(), cache: "no-store" },
+    );
+    if (!res.ok) return null;
+    const body = (await res.json()) as { hits?: ArchiveHit[] };
+    return Array.isArray(body.hits) ? body.hits : [];
+  } catch {
+    return null;
+  }
+}
+
 /** Open the chat-api's TTS synthesis (POST /v1/tts) and return the raw upstream
  * Response — audio bytes with their real mime — for the BFF to relay. A non-2xx
  * (503 no sidecar, 502 sidecar error) is returned as-is for the caller to

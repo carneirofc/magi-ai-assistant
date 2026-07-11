@@ -33,9 +33,10 @@ from magi.core.config import config
 from magi.core.items import ItemArchive
 from magi.core.memory.adapters import slug
 from magi.core.memory.curation import CurateFn, CurationInput, CurationResult
-from magi.core.memory.kinds import Episodes, LongTerm, Session, SummarizeFn
+from magi.core.memory.kinds import Episodes, LongTerm, Session, SummarizeFn, clamp
 from magi.core.memory.semantic import MemoryRetriever
 from magi.core.memory.store import FileMemoryStore, ScopedMemory
+from magi.core.tokens import count_tokens
 
 # Re-exported for the agent layer (magi/agent/summarizer.py, magi/agent/curator.py) and
 # __init__; the canonical definitions live next to the code that consumes them.
@@ -170,9 +171,29 @@ class MemoryManager:
         """Fold buffered evicted turns into the rolling session summary.
 
         Channel awaits this after each turn; no-op unless the session summarizer is
-        set and the pending buffer has reached its threshold. (Delegates to `Session`.)
+        set and the pending buffer has reached its threshold — OR the rendered
+        short-term section is under token pressure (session_fold_pressure_ratio),
+        which forces a fold of whatever is pending so long turns can't outgrow
+        the turn-count trigger. (Delegates to `Session`.)
         """
-        return await self.session.maybe_fold(self.mem)
+        return await self.session.maybe_fold(self.mem, force=self._under_fold_pressure())
+
+    def _under_fold_pressure(self) -> bool:
+        """Whether short-term alone is big enough to warrant folding early."""
+        ratio = config.session_fold_pressure_ratio
+        if ratio <= 0 or config.lead_num_ctx <= 0:
+            return False
+        mem = self.mem
+        if mem.pending.count() == 0:
+            return False  # nothing to fold — force would still no-op, skip the render
+        short_term = self.session.render(mem)
+        pressured = _est_tokens(short_term) >= ratio * config.lead_num_ctx
+        if pressured:
+            log_info(
+                f"memory: short-term under pressure (>{ratio:.0%} of {config.lead_num_ctx} tok) "
+                f"— folding early for session {mem.session_id}"
+            )
+        return pressured
 
     async def summarize_session_now(self) -> Optional[str]:
         """Operator-triggered fold: summarize the current scope's pending buffer
@@ -348,12 +369,19 @@ class MemoryManager:
         themselves against the current `mem` bundle.
         """
         mem = self.mem
-        return {
+        parts = {
             "persona": self.store.persona.read_clean(),
             "long_term": self.long_term.render(mem, query),
             "episodes": self.episodes.render(mem, query),
             "short_term": self.session.render(mem, query),
         }
+        # Section budgets (config.context_section_budgets): a seatbelt against
+        # one runaway section eating the window. Persona is never clamped.
+        for name in ("long_term", "episodes", "short_term"):
+            budget = config.context_section_budgets.get(name, 0)
+            if budget > 0:
+                parts[name] = clamp(parts[name], budget, f"{name} section")
+        return parts
 
     def build_context(self, query: str | None = None) -> str:
         """The memory block shown to the model this run. Empty sections omitted.
@@ -407,16 +435,52 @@ class MemoryManager:
             )
 
     def context_stats(self) -> dict:
-        """Per-section + total size for the current scope (the `!ctx` command)."""
+        """Per-section + total size for the current scope (the `!ctx` command /
+        the context inspector). Off the reply path, so it can afford REAL token
+        counts via llama-server /tokenize (magi/core/tokens) when the provider
+        is llamacpp; `token_source` says which numbers you're looking at."""
         parts = self._read_sections()
         context = self.build_context()
-        tokens = _est_tokens(context)
+        tokens = count_tokens(context)
+        source = "llamacpp" if tokens is not None else "estimate"
+        if tokens is None:
+            tokens = _est_tokens(context)
+
+        def section_tokens(text: str) -> int:
+            if source == "llamacpp":
+                real = count_tokens(text)
+                if real is not None:
+                    return real
+            return _est_tokens(text)
+
         budget = config.lead_num_ctx
         return {
             "total_chars": len(context),
             "est_tokens": tokens,
+            "token_source": source,
             "budget_tokens": budget,
+            "warn_ratio": config.ctx_warn_ratio,
             "ratio": (tokens / budget) if budget else 0.0,
-            "sections": {k: _est_tokens(v) for k, v in parts.items()},
+            "sections": {k: section_tokens(v) for k, v in parts.items()},
+            "section_budgets": dict(config.context_section_budgets),
             "short_term_turns": self.mem.live_turns.count(),
         }
+
+    # --- cross-session recall -------------------------------------------------
+    def search_history(self, query: str, limit: int = 8) -> str:
+        """Search this user's past conversations (transcripts, session summaries,
+        episodes) for `query`, rendered as lines the model can cite. The recall
+        tool's backend; the API's search endpoint uses the raw store hits."""
+        hits = self.store.search_history(self.scope().user_id, query, limit)
+        if not hits:
+            return "(nothing matching in past conversations)"
+        lines = []
+        for h in hits:
+            where = {
+                "transcript": f"session {h['session_id']}",
+                "summary": f"summary of session {h['session_id']}",
+                "episode": "a past episode",
+            }[h["kind"]]
+            speaker = f"{h['role']}: " if h.get("role") else ""
+            lines.append(f"- ({where}) {speaker}{h['snippet']}")
+        return "\n".join(lines)
