@@ -974,3 +974,97 @@ def test_title_route_null_when_pass_unusable():
 def test_title_route_503_without_a_pass():
     client, _ = _client()
     assert client.post("/v1/title", json={"text": "hi"}).status_code == 503
+
+
+# --- voice sidecars (/v1/tts, /v1/stt) --------------------------------------------
+class _FakeVoice:
+    """VoiceService stand-in: fixed answers, records what the app asked."""
+
+    def __init__(self, tts=True, stt=True):
+        self.tts_enabled = tts
+        self.stt_enabled = stt
+        self.calls: list[tuple] = []
+
+    async def synthesize(self, text, mood=None):
+        self.calls.append(("synthesize", text, mood))
+        return b"mp3-bytes", "audio/mpeg"
+
+    async def transcribe(self, data, *, filename, mime, language=None):
+        self.calls.append(("transcribe", data, filename, mime))
+        from magi.core.voice import Transcription
+
+        return Transcription(text="heard you", language="en", duration=1.5)
+
+
+def test_tts_speaks_text_with_the_reply_mood():
+    voice = _FakeVoice()
+    client = TestClient(create_app(_FakeConversation(), voice=voice))
+
+    resp = client.post("/v1/tts", json={"text": "hello there", "mood": "wry"})
+
+    assert resp.status_code == 200
+    assert resp.content == b"mp3-bytes"
+    assert resp.headers["content-type"].startswith("audio/mpeg")
+    assert voice.calls == [("synthesize", "hello there", "wry")]
+
+
+def test_tts_503_when_no_sidecar_is_wired():
+    client, _ = _client()
+    assert client.post("/v1/tts", json={"text": "hi"}).status_code == 503
+
+    client = TestClient(create_app(_FakeConversation(), voice=_FakeVoice(tts=False)))
+    assert client.post("/v1/tts", json={"text": "hi"}).status_code == 503
+
+
+def test_tts_requires_bearer_token_when_configured():
+    client = TestClient(
+        create_app(_FakeConversation(), auth_token="secret", voice=_FakeVoice())
+    )
+    assert client.post("/v1/tts", json={"text": "hi"}).status_code == 401
+
+
+def test_tts_maps_sidecar_failures_onto_http():
+    from magi.core.voice import VoiceUnavailable, VoiceUpstreamError
+
+    class _DownVoice(_FakeVoice):
+        async def synthesize(self, text, mood=None):
+            raise VoiceUnavailable("tts sidecar unreachable")
+
+    class _BrokenVoice(_FakeVoice):
+        async def synthesize(self, text, mood=None):
+            raise VoiceUpstreamError("tts sidecar answered 500")
+
+    client = TestClient(create_app(_FakeConversation(), voice=_DownVoice()))
+    assert client.post("/v1/tts", json={"text": "hi"}).status_code == 503
+
+    client = TestClient(create_app(_FakeConversation(), voice=_BrokenVoice()))
+    assert client.post("/v1/tts", json={"text": "hi"}).status_code == 502
+
+
+def test_stt_transcribes_an_uploaded_recording():
+    voice = _FakeVoice()
+    client = TestClient(create_app(_FakeConversation(), voice=voice))
+
+    resp = client.post(
+        "/v1/stt", files={"file": ("clip.ogg", b"opus-bytes", "audio/ogg")}
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"text": "heard you", "language": "en", "duration": 1.5}
+    assert voice.calls == [("transcribe", b"opus-bytes", "clip.ogg", "audio/ogg")]
+
+
+def test_stt_503_when_no_sidecar_is_wired():
+    client, _ = _client()
+    resp = client.post("/v1/stt", files={"file": ("a.webm", b"x", "audio/webm")})
+    assert resp.status_code == 503
+
+    client = TestClient(create_app(_FakeConversation(), voice=_FakeVoice(stt=False)))
+    resp = client.post("/v1/stt", files={"file": ("a.webm", b"x", "audio/webm")})
+    assert resp.status_code == 503
+
+
+def test_stt_rejects_an_empty_upload():
+    client = TestClient(create_app(_FakeConversation(), voice=_FakeVoice()))
+    resp = client.post("/v1/stt", files={"file": ("a.webm", b"", "audio/webm")})
+    assert resp.status_code == 400

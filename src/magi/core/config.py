@@ -149,6 +149,30 @@ class Config:
     )
     mood_vocab_version: int = 1
 
+    # --- Voice sidecars (see magi/core/voice). Two OpenAI-compatible LOCAL
+    # services, host-run like the chat backend: TTS speaks replies (POST
+    # {tts_base_url}/audio/speech — Kokoro-FastAPI-class) and STT hears the
+    # user (POST {stt_base_url}/audio/transcriptions — whisper-class). The chat
+    # API fronts them at /v1/tts and /v1/stt; browser clients never reach the
+    # sidecars directly. The reply's mood (mood_enabled above) picks a style
+    # override from tts_mood_styles — keys merge onto the speech request
+    # (voice, speed, response_format, …) so her voice tracks her face. Keys are
+    # secrets; URLs live here in code. ---
+    tts_enabled: bool = False
+    tts_base_url: str = "http://127.0.0.1:8880/v1"
+    tts_api_key: str | None = _secret("TTS_API_KEY")
+    tts_model: str = "tts-1"
+    tts_voice: str = "af_heart"
+    tts_format: str = "mp3"
+    tts_mood_styles: dict[str, dict] = field(default_factory=dict)
+    stt_enabled: bool = False
+    stt_base_url: str = "http://127.0.0.1:8890/v1"
+    stt_api_key: str | None = _secret("STT_API_KEY")
+    stt_model: str = "whisper-1"
+    stt_language: str | None = None
+    # One generous cap for both sidecars — local services, whole-clip calls.
+    voice_timeout_seconds: float = 60.0
+
     # --- Team behavior / robustness ---
     # Hard cap on tool calls per run (incl. member delegations) so a lead can't
     # loop forever delegating. None/0 = no limit.
@@ -425,7 +449,7 @@ class Config:
         backend urls, model ids, context windows, paths — in one place.
         """
         # Secrets that must never hit the log verbatim.
-        masked = {"litellm_api_key", "llamacpp_api_key", "openai_api_key", "DISCORD_BOT_TOKEN", "qdrant_api_key", "api_auth_token", "admin_auth_token", "seanime_token", "s3_access_key_id", "s3_secret_access_key", "admin_password", "session_secret"}
+        masked = {"litellm_api_key", "llamacpp_api_key", "openai_api_key", "DISCORD_BOT_TOKEN", "qdrant_api_key", "api_auth_token", "admin_auth_token", "seanime_token", "s3_access_key_id", "s3_secret_access_key", "admin_password", "session_secret", "tts_api_key", "stt_api_key"}
         # Long prose: log the length, not the body.
         prose = {"system_prompt", "persona_seed"}
 

@@ -181,10 +181,57 @@ class FramelessWindow(QWidget):
         channel.registerObject("nativeBridge", self._bridge)
         page.setWebChannel(channel)
 
+        self._wire_mic_permission(page)
+
         view.setUrl(url)
         # One-shot Python -> JS push once the page is up, to demo the signal path.
         view.loadFinished.connect(self._on_load_finished)
         return view
+
+    def _wire_mic_permission(self, page: QWebEnginePage) -> None:
+        """Auto-grant microphone capture to the app's own loopback frontend.
+
+        The shell renders a frontend it launched itself on 127.0.0.1, so a mic
+        prompt would be asking the user to trust our own page — and a frameless
+        window has no chrome to even show the prompt. Grant `MediaAudioCapture`
+        for loopback origins (that's what `getUserMedia({audio})` needs for
+        recorded speech → /v1/stt); everything else keeps the default deny, the
+        same behavior as having no handler at all.
+
+        Qt 6.8 replaced `featurePermissionRequested` with `permissionRequested`
+        (QWebEnginePermission); handle whichever this PySide6 exposes.
+        """
+
+        def _is_loopback(origin) -> bool:
+            return origin.host() in ("127.0.0.1", "localhost", "::1")
+
+        if hasattr(page, "permissionRequested"):  # Qt >= 6.8
+            from PySide6.QtWebEngineCore import QWebEnginePermission
+
+            def _on_permission(permission) -> None:
+                mic = QWebEnginePermission.PermissionType.MediaAudioCapture
+                if permission.permissionType() == mic and _is_loopback(permission.origin()):
+                    permission.grant()
+                else:
+                    permission.deny()
+
+            page.permissionRequested.connect(_on_permission)
+        else:  # Qt < 6.8
+
+            def _on_feature(origin, feature) -> None:
+                allowed = (
+                    feature == QWebEnginePage.Feature.MediaAudioCapture
+                    and _is_loopback(origin)
+                )
+                page.setFeaturePermission(
+                    origin,
+                    feature,
+                    QWebEnginePage.PermissionPolicy.PermissionGrantedByUser
+                    if allowed
+                    else QWebEnginePage.PermissionPolicy.PermissionDeniedByUser,
+                )
+
+            page.featurePermissionRequested.connect(_on_feature)
 
     def _build_close_button(self) -> QPushButton:
         btn = QPushButton("×", self)

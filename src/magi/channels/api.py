@@ -69,7 +69,8 @@ from typing import Optional, Protocol, Union
 from agno.db.base import BaseDb
 from agno.media import File, Image
 from agno.utils.log import log_info, log_warning
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, UploadFile
+from fastapi import File as FormFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -78,6 +79,7 @@ from pydantic import BaseModel, Field, model_validator
 from magi.agent.introspect import TeamSnapshot, build_snapshot
 from magi.channels.gateway import scoped_user_id
 from magi.core.config import config
+from magi.core.voice import VoiceService, VoiceUnavailable, VoiceUpstreamError
 from magi.core.conversation import (
     ConversationDelta,
     ConversationMood,
@@ -142,6 +144,23 @@ class TitleOut(BaseModel):
     the client keeps its derived title."""
 
     title: Optional[str] = None
+
+
+class TtsRequest(BaseModel):
+    """Text to speak (see the /v1/tts route). `mood` picks the per-mood style
+    override (tts_mood_styles) — clients pass the mood the reply rode in on."""
+
+    text: str = Field(min_length=1)
+    mood: Optional[str] = None
+
+
+class TranscriptionOut(BaseModel):
+    """What STT heard. `language`/`duration` only when the sidecar reports
+    them; the text is the contract."""
+
+    text: str
+    language: Optional[str] = None
+    duration: Optional[float] = None
 
 
 class MemoryFact(BaseModel):
@@ -584,6 +603,7 @@ def create_app(
     mcp_toolkits: Optional[Sequence[MCPConnection]] = None,
     admin_app: Optional[FastAPI] = None,
     title_fn: Optional[TitleFn] = None,
+    voice: Optional[VoiceService] = None,
 ) -> FastAPI:
     """The FastAPI app over an already-built `ConversationService` (pure factory).
 
@@ -593,6 +613,7 @@ def create_app(
     given, is mounted onto this same app (see `config.admin_enabled` / ADR 0002)
     so one process/port serves both the chat API and the admin surface. `title_fn`
     (magi/agent/title, injected by serve()) powers /v1/title; None = 503 there.
+    `voice` (magi/core/voice) powers /v1/tts and /v1/stt; None = 503 there.
     """
     app = FastAPI(title="chatbot", version="1", lifespan=_mcp_lifespan(mcp_toolkits or ()))
 
@@ -736,6 +757,49 @@ def create_app(
         if title_fn is None:
             raise HTTPException(status_code=503, detail="no title pass wired")
         return TitleOut(title=await title_fn(body.text))
+
+    @app.post("/v1/tts", dependencies=[Depends(require_auth)])
+    async def post_tts(body: TtsRequest) -> Response:
+        """Speak `text` through the TTS sidecar; the raw audio comes back with
+        its real mime type. `mood` shapes delivery (tts_mood_styles). 503 when
+        no TTS is wired — clients degrade to silent text."""
+        if voice is None or not voice.tts_enabled:
+            raise HTTPException(status_code=503, detail="no tts sidecar wired")
+        try:
+            audio, mime = await voice.synthesize(body.text, mood=body.mood)
+        except VoiceUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        except VoiceUpstreamError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+        return Response(content=audio, media_type=mime, headers={"Cache-Control": "no-store"})
+
+    @app.post(
+        "/v1/stt",
+        response_model=TranscriptionOut,
+        dependencies=[Depends(require_auth)],
+    )
+    async def post_stt(file: UploadFile = FormFile(...)) -> TranscriptionOut:
+        """Transcribe recorded speech (multipart `file`) via the STT sidecar.
+        503 when no STT is wired — clients keep their browser-side dictation
+        fallback or hide the mic."""
+        if voice is None or not voice.stt_enabled:
+            raise HTTPException(status_code=503, detail="no stt sidecar wired")
+        data = await file.read()
+        if not data:
+            raise HTTPException(status_code=400, detail="empty audio upload")
+        try:
+            result = await voice.transcribe(
+                data,
+                filename=file.filename or "audio.webm",
+                mime=file.content_type or "audio/webm",
+            )
+        except VoiceUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        except VoiceUpstreamError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
+        return TranscriptionOut(
+            text=result.text, language=result.language, duration=result.duration
+        )
 
     @app.get(
         "/v1/memory/facts",
@@ -964,6 +1028,7 @@ def build_api_app(db: Optional[BaseDb] = None) -> FastAPI:
 
     # The auto-title pass (one cheap member-model call per new conversation).
     from magi.agent.title import build_title_pass
+    from magi.core.voice import build_voice_service
 
     return create_app(
         conversation,
@@ -973,6 +1038,8 @@ def build_api_app(db: Optional[BaseDb] = None) -> FastAPI:
         mcp_toolkits=_collect_mcp_toolkits(conversation.runner),
         admin_app=admin_app,
         title_fn=build_title_pass(),
+        # The voice sidecars (tts/stt), when this deployment wired any.
+        voice=build_voice_service(),
     )
 
 

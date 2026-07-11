@@ -67,6 +67,8 @@ small and session-scoped, mirroring `ConversationService` one-to-one:
 | `POST /v1/sessions/{session_id}/messages/stream` | same body | Same turn, streamed over SSE |
 | `POST /v1/sessions/{session_id}/flush` | `{user_id}` | Close the session (fold summary → episode, wipe live turns) |
 | `GET /v1/sessions/{session_id}/context` | `?user_id=…` | Context size stats |
+| `POST /v1/tts` | `{text, mood?}` | Speak text through the TTS sidecar → raw `audio/*` (503 when none wired) |
+| `POST /v1/stt` | multipart `file` | Transcribe recorded speech via the STT sidecar → `{text, language?, duration?}` |
 
 The two message endpoints are **interchangeable per request** — same body, same
 brain, same memory semantics. Plain JSON returns the whole reply at once; the SSE
@@ -96,6 +98,20 @@ sequenceDiagram
 **CORS.** Browser clients are blocked unless the service returns CORS headers. Set
 `api_cors_origins` to the allowed web origins (or `["*"]` — safe here, since auth
 is a Bearer token, not a cookie).
+
+### Voice (TTS / STT)
+
+`/v1/tts` and `/v1/stt` front the two OpenAI-compatible voice sidecars
+([`magi/core/voice.py`](../src/magi/core/voice.py), configured under `tts_*` /
+`stt_*` — see [configuration.md](configuration.md#voice-sidecars-tts--stt)) so
+browser clients get voice through the same origin + bearer token as chat, never
+reaching the sidecars directly. `mood` on `/v1/tts` is the mood the reply rode
+in on (the pre-reply pass predicts delivery; `tts_mood_styles` maps it to voice
+parameters). Honest failure shape: **503** capability-off/sidecar-down, **502**
+sidecar-errored — clients degrade to silent text or hide the mic. The desktop
+shell auto-grants microphone capture to its own loopback frontend
+(`FramelessWindow._wire_mic_permission`); a plain browser shows its normal mic
+prompt.
 
 ### OpenAI-compatible shim
 

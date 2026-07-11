@@ -54,6 +54,7 @@ These never belong in code. See [`.env.example`](../.env.example).
 | `API_AUTH_TOKEN` | Gates `/v1` with `Authorization: Bearer <token>` |
 | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | S3-backend object storage |
 | `SEANIME_TOKEN` | Seanime server password (sent as `X-Seanime-Token`) |
+| `TTS_API_KEY`, `STT_API_KEY` | Only if the voice sidecars require auth |
 
 ## Settings reference
 
@@ -88,6 +89,33 @@ Defaults shown are the engine defaults; the bundled entrypoints override several
 | `tool_call_limit` | `12` | Hard cap on tool calls per run (bounds delegation loops); `None`/`0` = no limit |
 | `http_allow_private_hosts` | `False` | SSRF guard — block loopback/private hosts unless explicitly opened |
 | `ctx_warn_ratio` | `0.75` | Warn when assembled context crosses this fraction of the window |
+
+### Mood (pre-reply pass)
+
+| Field | Default | Notes |
+|---|---|---|
+| `mood_enabled` | `False` | One tiny grammar-constrained call per turn predicts the reply's delivery mood — early `meta` SSE frame + `reply.mood` |
+| `mood_vocabulary` | neutral/warm/wry/focused | `name -> description`; the FIRST entry is the fallback; grow it freely (the wire carries plain strings) |
+| `mood_vocab_version` | `1` | Bump when the vocabulary changes so clients re-sync |
+
+### Voice sidecars (TTS / STT)
+
+Two OpenAI-compatible local services (host-run, like the chat backend). The chat
+API fronts them at `POST /v1/tts` and `POST /v1/stt` — see
+[channels.md](channels.md#voice-tts--stt); browser clients never reach the
+sidecars directly. The reply's mood picks a style override so the voice tracks
+the face.
+
+| Field | Default | Notes |
+|---|---|---|
+| `tts_enabled` | `False` | Speak replies via `{tts_base_url}/audio/speech` (Kokoro-FastAPI-class) |
+| `tts_base_url` | `http://127.0.0.1:8880/v1` | |
+| `tts_model` / `tts_voice` / `tts_format` | `tts-1` / `af_heart` / `mp3` | Base speech request |
+| `tts_mood_styles` | `{}` | `mood -> payload overrides` merged onto the request (`voice`, `speed`, …); unknown moods use the base voice |
+| `stt_enabled` | `False` | Transcribe recorded speech via `{stt_base_url}/audio/transcriptions` (whisper-class) |
+| `stt_base_url` | `http://127.0.0.1:8890/v1` | Keep off `:8000` (the chat API) |
+| `stt_model` / `stt_language` | `whisper-1` / `None` | `None` language = auto-detect |
+| `voice_timeout_seconds` | `60.0` | One cap for both sidecars |
 
 ### Persistence
 
