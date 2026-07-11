@@ -113,6 +113,10 @@ export interface BotIdentity {
   moods?: string[];
   mood_vocab_version?: number;
   expressions?: Record<string, BotExpression>;
+  /** Voice capability flags: the deployment wired /v1/tts and/or /v1/stt.
+   * Feed these to ChatConsole's `voice` prop. Older engines omit them. */
+  tts_enabled?: boolean;
+  stt_enabled?: boolean;
 }
 
 /** Read the bot identity, or null when the chat-api is unreachable — the chat UI
@@ -159,6 +163,31 @@ export async function requestTitle(text: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** Open the chat-api's TTS synthesis (POST /v1/tts) and return the raw upstream
+ * Response — audio bytes with their real mime — for the BFF to relay. A non-2xx
+ * (503 no sidecar, 502 sidecar error) is returned as-is for the caller to
+ * translate; the client degrades to silent text. */
+export async function openTtsAudio(text: string, mood?: string | null): Promise<Response> {
+  return fetch(`${baseUrl()}/v1/tts`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ text, ...(mood ? { mood } : {}) }),
+    cache: "no-store",
+  });
+}
+
+/** Forward a recorded clip to the chat-api's STT (POST /v1/stt, multipart) and
+ * return the raw upstream Response (JSON `{text, language?, duration?}`; 503
+ * when no sidecar is wired). */
+export async function forwardTranscription(form: FormData): Promise<Response> {
+  return fetch(`${baseUrl()}/v1/stt`, {
+    method: "POST",
+    headers: authHeaders(), // multipart boundary is set by fetch from the body
+    body: form,
+    cache: "no-store",
+  });
 }
 
 /** One durable fact the assistant keeps about a user (read-only). */

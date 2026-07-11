@@ -64,6 +64,11 @@ async function seedGreeting(sessionId: string, text: string): Promise<void> {
 export type GreetingEvents = {
   onMood?: (mood: string) => void;
   onLifecycle?: (lifecycle: ChatLifecycle) => void;
+  /** Fires once when a greeting landed, with its final text + mood — the
+   * auto-speak cue. (In a plain browser a fresh page load has no user gesture
+   * yet, so playback may be autoplay-blocked and silently skipped; the desktop
+   * shell allows it.) */
+  onDone?: (done: { text: string; mood: string | null }) => void;
 };
 
 /** Greet if (and only if) this session's transcript is empty. Streams the
@@ -96,6 +101,7 @@ export async function greetIfFresh(
     let buffer = "";
     let chunks = "";
     let finalText = "";
+    let mood: string | null = null;
     let isError = false;
 
     while (true) {
@@ -109,6 +115,7 @@ export async function greetIfFresh(
         sep = buffer.indexOf("\n\n");
         if (!frame) continue;
         if (frame.event === "meta" && typeof frame.data.mood === "string" && frame.data.mood) {
+          mood = frame.data.mood;
           events.onMood?.(frame.data.mood);
         } else if (frame.event === "delta" && typeof frame.data.text === "string") {
           chunks += frame.data.text;
@@ -116,6 +123,7 @@ export async function greetIfFresh(
         } else if (frame.event === "done") {
           if (typeof frame.data.text === "string") finalText = frame.data.text;
           if (typeof frame.data.mood === "string" && frame.data.mood) {
+            mood = frame.data.mood;
             events.onMood?.(frame.data.mood);
           }
           isError = frame.data.is_error === true;
@@ -136,6 +144,7 @@ export async function greetIfFresh(
     }
     await seedGreeting(sessionId, text);
     events.onLifecycle?.("idle");
+    events.onDone?.({ text, mood });
     return true;
   } catch {
     events.onLifecycle?.("idle");

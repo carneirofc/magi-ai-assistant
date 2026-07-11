@@ -16,12 +16,16 @@
 //   - lifecycle treatments while a turn is in flight: dim-pulse when thinking,
 //     full presence when streaming, a working dot when a tool runs, desaturate
 //     on error;
+//   - voice treatments when an ambient VoiceProvider is mounted (optional —
+//     see chat-voice.tsx): a talk-pulse while a TTS clip plays, a listening
+//     glow while the mic records; without a provider these simply never show;
 //   - a mood with no image falls back to `neutral`; no usable art at all
 //     renders a quiet monogram placeholder instead of a broken image.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useMood, type ChatLifecycle } from "../lib/chat-mood";
+import { useVoiceOptional } from "../lib/chat-voice";
 
 export type PersonaStageProps = {
   /** mood name → portrait URL. `neutral` doubles as the fallback face. */
@@ -58,6 +62,11 @@ export function PersonaStage({
   className = "",
 }: PersonaStageProps) {
   const { mood, lifecycle } = useMood();
+  // Voice is an optional enhancement: no ambient VoiceProvider (an app without
+  // TTS/STT) simply never shows the speaking/listening treatments.
+  const voice = useVoiceOptional();
+  const speaking = voice?.speaking ?? false;
+  const listening = voice?.listening ?? false;
   const src = resolveExpression(expressions, mood, fallbackMood);
 
   // Crossfade: the outgoing portrait stays mounted underneath while the new one
@@ -79,8 +88,12 @@ export function PersonaStage({
     };
   }, [layers]);
 
-  const label = LIFECYCLE_LABEL[lifecycle];
+  // Voice states outrank lifecycle in the caption: while she's audibly
+  // speaking (or the mic is hot) that IS the status.
+  const label = listening ? "listening" : speaking ? "speaking" : LIFECYCLE_LABEL[lifecycle];
   const treatment = useMemo(() => {
+    if (speaking) return "magi-stage--speaking";
+    if (listening) return "magi-stage--listening";
     switch (lifecycle) {
       case "thinking":
         return "magi-stage--thinking";
@@ -91,7 +104,7 @@ export function PersonaStage({
       default:
         return "";
     }
-  }, [lifecycle]);
+  }, [lifecycle, speaking, listening]);
 
   return (
     <figure
@@ -109,11 +122,22 @@ export function PersonaStage({
           0%, 100% { filter: brightness(0.92); }
           50% { filter: brightness(1); }
         }
+        @keyframes magi-stage-talk {
+          0%, 100% { transform: scale(1); filter: brightness(1); }
+          50% { transform: scale(1.012); filter: brightness(1.06); }
+        }
+        @keyframes magi-stage-listen {
+          0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ui-ink-accent) 45%, transparent); }
+          50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--ui-ink-accent) 12%, transparent); }
+        }
         .magi-stage-motion { animation: magi-stage-breathe 6s ease-in-out infinite; }
         .magi-stage--thinking { animation: magi-stage-pulse 1.8s ease-in-out infinite; }
+        .magi-stage--speaking { animation: magi-stage-talk 0.9s ease-in-out infinite; }
+        .magi-stage--listening { animation: magi-stage-listen 1.6s ease-in-out infinite; }
         .magi-stage--error { filter: saturate(0.35) brightness(0.85); }
         @media (prefers-reduced-motion: reduce) {
-          .magi-stage-motion, .magi-stage--thinking { animation: none; }
+          .magi-stage-motion, .magi-stage--thinking, .magi-stage--speaking,
+          .magi-stage--listening { animation: none; }
         }
       `}</style>
 

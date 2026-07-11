@@ -255,6 +255,11 @@ class IdentityOut(BaseModel):
     moods: list[str] = Field(default_factory=list)
     mood_vocab_version: int = 1
     expressions: dict[str, ExpressionOut] = Field(default_factory=dict)
+    # Voice capability flags (the /v1/tts and /v1/stt sidecars), riding the
+    # identity payload for the same reason the moods do: one fetch tells a
+    # client who the bot is AND what it can do — speak, hear, emote.
+    tts_enabled: bool = False
+    stt_enabled: bool = False
 
 
 def _media_items(reply: ConversationReply) -> list[MediaItem]:
@@ -858,6 +863,8 @@ def create_app(
                 mood: ExpressionOut(mime=entry["mime"], version=entry["version"])
                 for mood, entry in store.expressions().items()
             },
+            tts_enabled=voice is not None and voice.tts_enabled,
+            stt_enabled=voice is not None and voice.stt_enabled,
         )
 
     @app.get("/v1/identity/avatar", dependencies=[Depends(require_auth)])

@@ -2,9 +2,17 @@ export {
   createChatModelAdapter,
   parseFrame,
   type ChatConfig,
+  type ChatDone,
   type ChatUsage,
   type SseFrame,
 } from "../../lib/chat-adapter";
+export {
+  createSpeechAdapter,
+  useVoice,
+  useVoiceOptional,
+  type VoiceContextValue,
+  type VoiceState,
+} from "../../lib/chat-voice";
 export {
   useMood,
   useMoodAdapterEvents,
@@ -34,3 +42,4 @@ export {
 } from "../../lib/chat-sessions";
 export { createChatAttachmentAdapter } from "../../lib/chat-attachments";
 export { createDictationAdapter, dictationSupported } from "../../lib/chat-dictation";
+export { createRecordingDictationAdapter, recordingSupported } from "../../lib/chat-recording";

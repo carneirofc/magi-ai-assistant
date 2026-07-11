@@ -282,18 +282,25 @@ function safeJson(value: unknown): string {
   }
 }
 
+/** The authoritative final turn, lifted off the `done` frame — what auto-speak
+ * reads (text + the mood that shapes the TTS style). */
+export type ChatDone = { text: string; mood: string | null };
+
 /** Build an adapter bound to a live `getConfig`, so the current session/user id
  * are resolved at the moment of each run. `onSend`, when given, is called with the
  * outgoing user text on each run (the console uses it to title/reorder sessions).
  * `onMood` fires with the turn's mood as the `meta` frame lands (before the first
  * delta) and again off the `done` frame; `onLifecycle` tracks the turn's phase
- * (thinking → streaming ⇄ tool → idle, or error) — see chat-mood.tsx. */
+ * (thinking → streaming ⇄ tool → idle, or error) — see chat-mood.tsx. `onDone`
+ * fires once per successful turn with the final text + mood (auto-speak's cue;
+ * error turns don't fire it — nobody wants an error read aloud). */
 export function createChatModelAdapter(
   getConfig: () => ChatConfig,
   onSend?: (text: string) => void,
   onUsage?: (usage: ChatUsage) => void,
   onMood?: (mood: string) => void,
   onLifecycle?: (lifecycle: ChatLifecycle) => void,
+  onDone?: (done: ChatDone) => void,
 ): ChatModelAdapter {
   return {
     async *run({ messages, abortSignal }) {
@@ -372,11 +379,18 @@ export function createChatModelAdapter(
               }
               // The done frame echoes the mood (authoritative; also covers a
               // server that skipped the early meta frame).
-              if (typeof frame.data.mood === "string" && frame.data.mood) {
-                onMood?.(frame.data.mood);
-              }
+              const doneMood =
+                typeof frame.data.mood === "string" && frame.data.mood ? frame.data.mood : null;
+              if (doneMood) onMood?.(doneMood);
               const usage = parseUsage(frame.data.usage);
               if (usage) onUsage?.(usage);
+              if (
+                frame.data.is_error !== true &&
+                typeof finalText === "string" &&
+                finalText.trim()
+              ) {
+                onDone?.({ text: finalText, mood: doneMood });
+              }
             } else {
               continue;
             }

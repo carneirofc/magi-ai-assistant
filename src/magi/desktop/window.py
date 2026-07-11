@@ -175,6 +175,14 @@ class FramelessWindow(QWidget):
         page = QWebEnginePage(profile, view)
         # Let the page background show the translucent panel through where it can.
         page.setBackgroundColor(QColor(Qt.GlobalColor.transparent))
+        # Let the frontend start audio without a prior click — the companion's
+        # spoken greeting (auto-speak TTS) plays on open, before any gesture.
+        # This is our own loopback page, not arbitrary web content.
+        from PySide6.QtWebEngineCore import QWebEngineSettings
+
+        page.settings().setAttribute(
+            QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture, False
+        )
         view.setPage(page)
 
         channel = QWebChannel(page)

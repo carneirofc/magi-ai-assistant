@@ -1068,3 +1068,23 @@ def test_stt_rejects_an_empty_upload():
     client = TestClient(create_app(_FakeConversation(), voice=_FakeVoice()))
     resp = client.post("/v1/stt", files={"file": ("a.webm", b"", "audio/webm")})
     assert resp.status_code == 400
+
+
+def test_identity_advertises_voice_capabilities():
+    """One identity fetch tells a client whether the deployment can speak/hear."""
+    conversation = _FakeConversation()
+    from types import SimpleNamespace
+    import tempfile
+
+    from magi.core.identity import IdentityStore
+
+    store = IdentityStore(tempfile.mkdtemp())
+    conversation.memory = SimpleNamespace(store=SimpleNamespace(identity=store))
+
+    client = TestClient(create_app(conversation))
+    body = client.get("/v1/identity").json()
+    assert (body["tts_enabled"], body["stt_enabled"]) == (False, False)
+
+    client = TestClient(create_app(conversation, voice=_FakeVoice(tts=True, stt=False)))
+    body = client.get("/v1/identity").json()
+    assert (body["tts_enabled"], body["stt_enabled"]) == (True, False)

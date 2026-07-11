@@ -17,6 +17,7 @@
 import type { ReactNode } from "react";
 
 import { MoodProvider, useMood } from "../lib/chat-mood";
+import { VoiceProvider } from "../lib/chat-voice";
 import { PersonaStage, resolveExpression } from "./PersonaStage";
 
 export type CompanionSurfaceProps = {
@@ -82,6 +83,7 @@ export function CompanionSurface({
 }: CompanionSurfaceProps) {
   return (
     <MoodProvider>
+    <VoiceProvider>
       <div className={`flex min-h-0 flex-1 flex-col gap-3 lg:flex-row ${className}`}>
         {/* Narrow: the face rides a compact header bust above the transcript. */}
         <div className="lg:hidden">
@@ -97,6 +99,7 @@ export function CompanionSurface({
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
       </div>
+    </VoiceProvider>
     </MoodProvider>
   );
 }

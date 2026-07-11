@@ -61,8 +61,10 @@ import { OutlineButton, TextInput } from "@carneirofc/ui";
 import { createChatModelAdapter, type ChatUsage } from "../lib/chat-adapter";
 import { greetIfFresh } from "../lib/chat-greeting";
 import { MoodScope, useMood, useMoodAdapterEvents } from "../lib/chat-mood";
+import { VoiceScope, createSpeechAdapter, useVoice } from "../lib/chat-voice";
 import { createChatAttachmentAdapter } from "../lib/chat-attachments";
 import { createDictationAdapter, dictationSupported } from "../lib/chat-dictation";
+import { createRecordingDictationAdapter, recordingSupported } from "../lib/chat-recording";
 import { ContextDisplay, type ThreadTokenUsage } from "./assistant-ui/context-display";
 import { CodeHeader, CodeSyntaxHighlighter } from "./CodeBlock";
 import { MermaidDiagram } from "./MermaidDiagram";
@@ -100,6 +102,12 @@ const UserIdContext = createContext<string>(DEFAULT_USER);
 type ChatIdentity = { avatarUrl: string | null; name: string | null };
 const IdentityContext = createContext<ChatIdentity>({ avatarUrl: null, name: null });
 
+/** Which voice capabilities this deployment wired (chat-api /v1/tts and
+ * /v1/stt). Both default off — the console then behaves exactly as before
+ * (Web Speech dictation, no speak actions). */
+export type ChatVoiceConfig = { tts?: boolean; stt?: boolean };
+const VoiceCapsContext = createContext<ChatVoiceConfig>({});
+
 export type ChatConsoleProps = {
   /** Pin every turn to this user id: the id input disappears and localStorage is
    * ignored — the companion surface chats as one configured person, while the
@@ -110,11 +118,16 @@ export type ChatConsoleProps = {
    * engine's greeting turn. Resuming an ongoing conversation never greets.
    * See lib/chat-greeting.ts. */
   greetOnOpen?: boolean;
+  /** Voice: `tts` adds per-reply speak actions + the auto-speak toggle (BFF
+   * /api/chat/tts); `stt` swaps the mic to record-and-transcribe server-side
+   * (BFF /api/chat/stt — the only mic that works in the desktop shell). */
+  voice?: ChatVoiceConfig;
 };
 
 export function ChatConsole({
   pinnedUserId = null,
   greetOnOpen = false,
+  voice = {},
 }: ChatConsoleProps = {}) {
   const [userId, setUserId] = useState(pinnedUserId || DEFAULT_USER);
   // Null until mounted so the first client render matches the server (no crypto /
@@ -216,10 +229,12 @@ export function ChatConsole({
 
   return (
     <IdentityContext.Provider value={identity}>
-    {/* Mood signal: join the page's MoodProvider when one is mounted (the
-        companion layout shares it with its stage), else scope our own so the
-        composer's mood badge still works standalone. */}
+    <VoiceCapsContext.Provider value={voice}>
+    {/* Mood + voice signals: join the page's providers when mounted (the
+        companion layout shares them with its stage), else scope our own so the
+        composer's mood badge and the speak controls still work standalone. */}
     <MoodScope>
+    <VoiceScope>
     <div className="flex min-h-[520px] flex-1 flex-col gap-3">
       <div className="flex flex-wrap items-end justify-between gap-3">
         {pinnedUserId ? (
@@ -238,11 +253,14 @@ export function ChatConsole({
             />
           </label>
         )}
-        <span
-          className="font-mono text-ui-2xs text-[color:var(--ui-ink-subtle)]"
-          title="Conversation id (scopes session memory)"
-        >
-          {sessionId}
+        <span className="flex items-center gap-2">
+          {voice.tts ? <AutoSpeakToggle /> : null}
+          <span
+            className="font-mono text-ui-2xs text-[color:var(--ui-ink-subtle)]"
+            title="Conversation id (scopes session memory)"
+          >
+            {sessionId}
+          </span>
         </span>
       </div>
 
@@ -278,8 +296,35 @@ export function ChatConsole({
         </div>
       </div>
     </div>
+    </VoiceScope>
     </MoodScope>
+    </VoiceCapsContext.Provider>
     </IdentityContext.Provider>
+  );
+}
+
+/** Header toggle for speaking replies aloud (persisted; see chat-voice.tsx).
+ * Doubles as the live indicator — the icon fills while a clip plays. */
+function AutoSpeakToggle() {
+  const { autoSpeak, setAutoSpeak, speaking, stopSpeaking } = useVoice();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (autoSpeak && speaking) stopSpeaking();
+        setAutoSpeak(!autoSpeak);
+      }}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-ui-2xs font-medium transition-colors ${
+        autoSpeak
+          ? "border-[color:var(--ui-border-active)] text-[color:var(--ui-ink-accent)]"
+          : "border-ui text-[color:var(--ui-ink-subtle)] hover:text-[color:var(--ui-ink)]"
+      }`}
+      title={autoSpeak ? "Voice on — replies are spoken aloud" : "Voice off — click to speak replies aloud"}
+      aria-pressed={autoSpeak}
+    >
+      <SpeakerIcon muted={!autoSpeak} pulsing={speaking} />
+      {autoSpeak ? "Voice on" : "Voice off"}
+    </button>
   );
 }
 
@@ -298,14 +343,28 @@ function GreetOnOpen({
 }) {
   const mood = useMood();
   const { onMood, onLifecycle } = useMoodAdapterEvents(mood);
+  // Speak the greeting when auto-speak is on (works in the desktop shell; a
+  // plain browser may autoplay-block a no-gesture load, which degrades silent).
+  const caps = useContext(VoiceCapsContext);
+  const voice = useVoice();
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
   const attempted = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!sessionId || !userId || attempted.current.has(sessionId)) return;
     attempted.current.add(sessionId);
-    void greetIfFresh(sessionId, userId, { onMood, onLifecycle }).then((greeted) => {
+    void greetIfFresh(sessionId, userId, {
+      onMood,
+      onLifecycle,
+      onDone: caps.tts
+        ? ({ text, mood: greetMood }) => {
+            if (voiceRef.current.autoSpeak) voiceRef.current.speak(text, greetMood);
+          }
+        : undefined,
+    }).then((greeted) => {
       if (greeted) onGreeted();
     });
-  }, [sessionId, userId, onMood, onLifecycle, onGreeted]);
+  }, [sessionId, userId, onMood, onLifecycle, onGreeted, caps.tts]);
   return null;
 }
 
@@ -635,18 +694,34 @@ function ChatThread({
   // Latest turn's token usage, surfaced by the context meter. Reset naturally per
   // session because the parent keys ChatThread on the session id (it remounts).
   const [usage, setUsage] = useState<ChatUsage | null>(null);
+  // Which voice capabilities the deployment wired (tts/stt), from the console.
+  const caps = useContext(VoiceCapsContext);
   // Voice-input support + the last dictation failure, so the mic can disable
-  // itself where SpeechRecognition is missing and surface permission errors the
+  // itself where the input path is missing and surface permission errors the
   // browser would otherwise swallow. `micSupported` starts false to keep SSR and
-  // the first client render in sync (window isn't there during SSR).
+  // the first client render in sync (window isn't there during SSR). With
+  // server STT wired the bar is getUserMedia+MediaRecorder (met everywhere,
+  // including the desktop shell); without it, the browser's SpeechRecognition.
   const [micSupported, setMicSupported] = useState(false);
   const [dictationError, setDictationError] = useState<string | null>(null);
-  useEffect(() => setMicSupported(dictationSupported()), []);
+  useEffect(
+    () => setMicSupported(caps.stt ? recordingSupported() : dictationSupported()),
+    [caps.stt],
+  );
 
   // The turn's mood + lifecycle, streamed into the ambient MoodScope so the
   // composer badge (and a surrounding persona stage) react as the reply starts.
   const mood = useMood();
   const { onMood, onLifecycle } = useMoodAdapterEvents(mood);
+  // The face's current mood at speak time (refs so adapters stay stable).
+  const moodRef = useRef(mood.mood);
+  moodRef.current = mood.mood;
+
+  // The shared voice controller (ambient when the companion layout provides
+  // one). Refs keep the memoized adapters stable across its state changes.
+  const voice = useVoice();
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
 
   const adapter = useMemo(
     () =>
@@ -656,22 +731,52 @@ function ChatThread({
         (next) => setUsage(next),
         onMood,
         onLifecycle,
+        // Auto-speak: read the toggle at done-time, speak in the reply's mood.
+        caps.tts
+          ? ({ text, mood: replyMood }) => {
+              if (voiceRef.current.autoSpeak) voiceRef.current.speak(text, replyMood);
+            }
+          : undefined,
       ),
-    [sessionId, onMood, onLifecycle],
+    [sessionId, onMood, onLifecycle, caps.tts],
   );
   const attachments = useMemo(() => createChatAttachmentAdapter(), []);
-  // Voice → text via the browser's Web Speech API (no server round-trip). The
-  // wrapper reports a failed session (denied mic, no device) so the composer can
+  // Voice → text. With an STT sidecar wired, record via MediaRecorder and
+  // transcribe server-side (the only mic path in the desktop shell); otherwise
+  // the browser's Web Speech API (no server round-trip). Either wrapper reports
+  // a failed session (denied mic, no device, sidecar down) so the composer can
   // show it instead of the click looking like a no-op.
   const dictation = useMemo(
-    () => createDictationAdapter((message) => setDictationError(message)),
-    [],
+    () =>
+      caps.stt
+        ? createRecordingDictationAdapter(
+            (message) => setDictationError(message),
+            (listening) => voiceRef.current.setListening(listening),
+          )
+        : createDictationAdapter((message) => setDictationError(message)),
+    [caps.stt],
+  );
+  // Reply audio: the action bar's Speak/StopSpeaking drive the same controller
+  // (and stage treatment) as auto-speak. Only wired when TTS is on — without
+  // it assistant-ui hides the speak action entirely.
+  const speech = useMemo(
+    () =>
+      caps.tts
+        ? createSpeechAdapter(
+            {
+              speak: (text, speakMood, onEnd) => voiceRef.current.speak(text, speakMood, onEnd),
+              stopSpeaking: () => voiceRef.current.stopSpeaking(),
+            },
+            () => moodRef.current,
+          )
+        : undefined,
+    [caps.tts],
   );
   // Persist this session's visible transcript so switching to it (or reloading)
   // restores the conversation, not an empty thread. Bound to this session id.
   const history = useMemo(() => createSessionHistoryAdapter(sessionId), [sessionId]);
   const runtime = useLocalRuntime(adapter, {
-    adapters: { attachments, dictation, history },
+    adapters: { attachments, dictation, history, ...(speech ? { speech } : {}) },
   });
 
   return (
@@ -1156,6 +1261,7 @@ function UserEditComposer() {
 
 function AssistantMessage() {
   const identity = useContext(IdentityContext);
+  const caps = useContext(VoiceCapsContext);
   return (
     <MessagePrimitive.Root className="group/message flex items-start justify-start gap-2">
       <Avatar kind="assistant" />
@@ -1185,6 +1291,22 @@ function AssistantMessage() {
               <CopyIcon />
             </MessageActionButton>
           </ActionBarPrimitive.Copy>
+          {/* Read this reply aloud (TTS sidecar); stop replaces play while
+              speaking. Only rendered when the deployment wired TTS. */}
+          {caps.tts ? (
+            <>
+              <ActionBarPrimitive.Speak asChild>
+                <MessageActionButton title="Read aloud" aria-label="Read aloud">
+                  <SpeakerIcon />
+                </MessageActionButton>
+              </ActionBarPrimitive.Speak>
+              <ActionBarPrimitive.StopSpeaking asChild>
+                <MessageActionButton title="Stop reading" aria-label="Stop reading">
+                  <StopIcon />
+                </MessageActionButton>
+              </ActionBarPrimitive.StopSpeaking>
+            </>
+          ) : null}
         </ActionBarPrimitive.Root>
         <BranchPicker />
       </div>
@@ -1237,6 +1359,32 @@ function MicIcon() {
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <rect x="9" y="2" width="6" height="12" rx="3" />
       <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+    </svg>
+  );
+}
+function SpeakerIcon({ muted = false, pulsing = false }: { muted?: boolean; pulsing?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="13"
+      height="13"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={pulsing ? "animate-pulse" : undefined}
+      aria-hidden
+    >
+      <path d="M11 5 6 9H3v6h3l5 4z" />
+      {muted ? (
+        <path d="M16 9l5 6M21 9l-5 6" />
+      ) : (
+        <>
+          <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+          <path d="M18.5 5.5a9 9 0 0 1 0 13" />
+        </>
+      )}
     </svg>
   );
 }
