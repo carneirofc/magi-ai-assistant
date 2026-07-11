@@ -1,0 +1,18 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check src tests
+        language: system
+        pass_filenames: false
+      - id: web-typecheck-app
+        name: web typecheck app
+        entry: bash -lc 'cd web && npm run typecheck'
+        language: system
+        pass_filenames: false
+      - id: web-typecheck-library
+        name: web typecheck library
+        entry: bash -lc 'cd web && npm run typecheck -w @carneirofc/magi-web'
+        language: system
+        pass_filenames: false

@@ -6,6 +6,8 @@ All notable changes to **magi** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-10
+
 ### Added
 
 - **Web slice entrypoints for extensibility.** `@carneirofc/magi-web` now exposes

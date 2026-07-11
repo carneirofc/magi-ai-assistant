@@ -3,7 +3,7 @@
 # [tool.hatch.build.targets.wheel] below — so overlays keep doing `import magi`.
 [project]
 name = "magi-ai-assistant"
-version = "0.1.2"
+version = "0.2.0"
 description = "magi — an assistant-core engine: a lead routing to a specialist team, with memory, knowledge, and tools."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -136,6 +136,7 @@ include = [
 
 [dependency-groups]
 dev = [
+    "pre-commit>=4.2.0",
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "ruff>=0.9.0",

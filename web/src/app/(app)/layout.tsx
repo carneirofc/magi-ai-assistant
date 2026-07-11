@@ -1,12 +1,26 @@
-// Layout for every authed dashboard page: wraps children in the sidebar shell.
-// The /login route lives outside this group so it stays chrome-free.
+// Layout for every authed dashboard page: the app owns shell/nav assembly explicitly
+// and uses the library's thin shell helper as a convenience, not a hidden app builder.
 
-import { AppShell } from "@carneirofc/magi-web/components/AppShell";
+import {
+  buildDefaultAppShellConfig,
+  MagiAppShell,
+} from "@carneirofc/magi-web/slices/shell";
+
+const shell = buildDefaultAppShellConfig();
 
 export default function AppGroupLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return <AppShell>{children}</AppShell>;
+  return (
+    <MagiAppShell
+      nav={shell.nav}
+      brand={shell.brand}
+      tagline={shell.tagline}
+      logo={shell.logo}
+    >
+      {children}
+    </MagiAppShell>
+  );
 }
