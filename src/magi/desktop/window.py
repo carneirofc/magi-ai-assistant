@@ -104,7 +104,12 @@ class FramelessWindow(QWidget):
         self._settings = QSettings(_SETTINGS_ORG, _SETTINGS_APP)
 
         self.setWindowTitle(_APP_NAME)
-        self.setMinimumSize(320, 380)  # keep the window usable when shrunk
+        # Floor the window size; an app with a fixed-frame desktop-only web layout
+        # raises this (via config) to its supported minimum so the shell never
+        # shrinks into a "window too small" state.
+        self.setMinimumSize(
+            config.desktop_window_min_width, config.desktop_window_min_height
+        )
         if self._frameless:
             self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)

@@ -4,9 +4,11 @@
 
 import { NextResponse } from "next/server";
 
+import { getConfigValue } from "../../lib/runtime-config";
+
 async function fetchReminders(userId: string): Promise<Response> {
-  const base = process.env.CHAT_API_URL ?? "http://127.0.0.1:8000";
-  const token = process.env.API_AUTH_TOKEN;
+  const base = getConfigValue("chatApiUrl");
+  const token = getConfigValue("apiAuthToken");
   return fetch(`${base}/v1/reminders?user_id=${encodeURIComponent(userId)}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     cache: "no-store",

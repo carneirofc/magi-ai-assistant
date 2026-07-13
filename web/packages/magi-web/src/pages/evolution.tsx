@@ -4,7 +4,9 @@
 
 import { PageHeader } from "@carneirofc/ui";
 
+import { AppPage } from "../components/AppPage";
 import { EvolutionQueue } from "../components/EvolutionQueue";
+import { ScrollRegion } from "../components/ScrollRegion";
 import { mergeCopy, type PageCopy } from "../lib/page-copy";
 
 export const evolutionCopy = {
@@ -17,14 +19,16 @@ export const evolutionCopy = {
 export function EvolutionPageView({ copy }: { copy?: PageCopy } = {}) {
   const header = mergeCopy(evolutionCopy, copy);
   return (
-    <div className="flex flex-col gap-6">
+    <AppPage className="gap-6">
       <PageHeader
         subtitle={header.subtitle}
         title={header.title}
         description={header.description}
       />
-      <EvolutionQueue />
-    </div>
+      <ScrollRegion className="flex flex-col gap-6">
+        <EvolutionQueue />
+      </ScrollRegion>
+    </AppPage>
   );
 }
 

@@ -6,6 +6,21 @@ All notable changes to **magi** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Fixed-frame layout primitives.** `@carneirofc/magi-web` now ships `AppPage`
+  (a freeform fill container) and `ScrollRegion` (the only element allowed to
+  scroll, axis-aware), so a consuming app can behave like a native application
+  window: the frame is viewport-sized and never grows a scrollbar, with all
+  scrolling delegated to explicit inner regions. The shared page views
+  (dashboard, chat, memory, knowledge, identity, persona, settings, subjects,
+  team, evolution) are migrated onto them; a fill page is safe under both a
+  fixed and a still-column-scroll frame.
+- **Configurable desktop window minimum size.** `desktop_window_min_width` /
+  `desktop_window_min_height` (default 320×380, the previous hardcoded floor) let
+  a fixed-frame, desktop-only app floor the shell at its supported width so it
+  never shrinks into a "window too small" state.
+
 ## [0.2.0] - 2026-07-10
 
 ### Added

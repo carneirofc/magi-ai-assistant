@@ -6,15 +6,19 @@ import "server-only";
 
 import type { paths } from "./api-types";
 import { encodeDocId } from "./encode";
+import { getConfigValue } from "./runtime-config";
 
 export { encodeDocId };
 
+// URL + bearer resolve through the runtime-config store (file override → env →
+// default), so an operator can repoint the admin-api from the Settings page
+// without a restart. See runtime-config.ts.
 function baseUrl(): string {
-  return process.env.ADMIN_API_URL ?? "http://127.0.0.1:8100";
+  return getConfigValue("adminApiUrl");
 }
 
 function authHeaders(): Record<string, string> {
-  const token = process.env.ADMIN_AUTH_TOKEN;
+  const token = getConfigValue("adminAuthToken");
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 

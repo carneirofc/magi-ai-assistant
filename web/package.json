@@ -15,8 +15,8 @@
     "gen:api": "npm run gen:api -w @carneirofc/magi-web"
   },
   "dependencies": {
-    "@carneirofc/magi-web": "*",
-    "@carneirofc/ui": "^0.2.0",
+    "@carneirofc/magi-web": "file:./packages/magi-web",
+    "@carneirofc/ui": "file:../../deedlit.dev/deedlit.dev.ui",
     "next": "^15.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

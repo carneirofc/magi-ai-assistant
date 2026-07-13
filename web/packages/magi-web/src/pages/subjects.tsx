@@ -2,6 +2,8 @@
 
 import { PageHeader, StatusMessage } from "@carneirofc/ui";
 
+import { AppPage } from "../components/AppPage";
+import { ScrollRegion } from "../components/ScrollRegion";
 import { SubjectManager } from "../components/SubjectManager";
 import { listSubjects } from "../lib/admin-api";
 import { mergeCopy, type PageCopy } from "../lib/page-copy";
@@ -25,16 +27,18 @@ export async function SubjectsView({ copy }: { copy?: PageCopy } = {}) {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <AppPage className="gap-6">
       <PageHeader subtitle={header.subtitle} title={header.title} description={header.description} />
-      {error ? (
-        <StatusMessage role="alert" tone="error">
-          {error}
-        </StatusMessage>
-      ) : (
-        <SubjectManager subjects={subjects} />
-      )}
-    </div>
+      <ScrollRegion className="flex flex-col gap-6">
+        {error ? (
+          <StatusMessage role="alert" tone="error">
+            {error}
+          </StatusMessage>
+        ) : (
+          <SubjectManager subjects={subjects} />
+        )}
+      </ScrollRegion>
+    </AppPage>
   );
 }
 

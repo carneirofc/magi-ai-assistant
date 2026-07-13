@@ -5,7 +5,9 @@
 
 import { PageHeader, StatusBadge, StatusMessage, SurfacePanel } from "@carneirofc/ui";
 
+import { AppPage } from "../components/AppPage";
 import { McpServerManager } from "../components/McpServerManager";
+import { ScrollRegion } from "../components/ScrollRegion";
 import { TeamView } from "../components/TeamView";
 import { getChatHealth, getIntrospection } from "../lib/chat-api";
 import type { TeamSnapshot } from "../lib/introspection-types";
@@ -37,7 +39,7 @@ export async function TeamPageView({ copy }: { copy?: PageCopy } = {}) {
     : 0;
 
   return (
-    <div className="flex flex-col gap-6">
+    <AppPage className="gap-6">
       <PageHeader
         subtitle={header.subtitle}
         title={header.title}
@@ -63,18 +65,20 @@ export async function TeamPageView({ copy }: { copy?: PageCopy } = {}) {
         }
       />
 
-      {error ? (
-        <StatusMessage role="alert" tone="error">
-          {error}
-        </StatusMessage>
-      ) : snapshot ? (
-        <TeamView snapshot={snapshot} />
-      ) : null}
+      <ScrollRegion className="flex flex-col gap-6">
+        {error ? (
+          <StatusMessage role="alert" tone="error">
+            {error}
+          </StatusMessage>
+        ) : snapshot ? (
+          <TeamView snapshot={snapshot} />
+        ) : null}
 
-      <SurfacePanel tone="subtle" padding="lg">
-        <McpServerManager />
-      </SurfacePanel>
-    </div>
+        <SurfacePanel tone="subtle" padding="lg">
+          <McpServerManager />
+        </SurfacePanel>
+      </ScrollRegion>
+    </AppPage>
   );
 }
 

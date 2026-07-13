@@ -14,8 +14,14 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 
-const DIR = process.env.CHAT_HISTORY_DIR
-  ? path.resolve(process.env.CHAT_HISTORY_DIR)
+import { getConfigValue } from "./runtime-config";
+
+// Resolved once at module load (file override → CHAT_HISTORY_DIR → OS temp dir):
+// the location is read at startup, so a Settings change here is restart-required —
+// the editor flags this field accordingly. See runtime-config.ts.
+const configuredDir = getConfigValue("chatHistoryDir");
+const DIR = configuredDir
+  ? path.resolve(configuredDir)
   : path.join(os.tmpdir(), "magi-chat-history");
 
 /** A safe filename for a session id, or null if the id looks unsafe. Session ids

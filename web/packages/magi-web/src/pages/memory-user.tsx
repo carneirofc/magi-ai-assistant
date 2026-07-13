@@ -4,10 +4,12 @@
 import Link from "next/link";
 import { EmptyState, InfoChip, PageHeader, StatusMessage, SurfacePanel } from "@carneirofc/ui";
 
+import { AppPage } from "../components/AppPage";
 import { FactEditor } from "../components/FactEditor";
 import { MemoryMaintenance } from "../components/MemoryMaintenance";
 import { MemoryTabs } from "../components/MemoryTabs";
 import { RawFileEditor } from "../components/RawFileEditor";
+import { ScrollRegion } from "../components/ScrollRegion";
 import { getProfile, getRawFile, listSessions } from "../lib/admin-api";
 import { mergeCopy, type PageCopy } from "../lib/page-copy";
 
@@ -41,7 +43,7 @@ export async function UserMemoryView({
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <AppPage className="gap-6">
       <div>
         <Link
           href="/memory"
@@ -68,12 +70,13 @@ export async function UserMemoryView({
         }
       />
 
-      {error ? (
-        <StatusMessage role="alert" tone="error">
-          {error}
-        </StatusMessage>
-      ) : profile ? (
-        <MemoryTabs
+      <ScrollRegion className="flex flex-col gap-6">
+        {error ? (
+          <StatusMessage role="alert" tone="error">
+            {error}
+          </StatusMessage>
+        ) : profile ? (
+          <MemoryTabs
           counts={{
             facts: profile.facts.length,
             episodes: profile.episodes.length,
@@ -150,8 +153,9 @@ export async function UserMemoryView({
             )
           }
         />
-      ) : null}
-    </div>
+        ) : null}
+      </ScrollRegion>
+    </AppPage>
   );
 }
 

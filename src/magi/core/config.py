@@ -491,6 +491,11 @@ class Config:
     # Initial window size (px); restored per-launch from QSettings after the first run.
     desktop_window_width: int = 420
     desktop_window_height: int = 680
+    # Minimum window size (px). Floors how small the shell can be dragged. An app with
+    # a fixed-frame, desktop-only web layout raises this to its supported minimum so the
+    # shell never shrinks into a "window too small" state (see Alyssa's console).
+    desktop_window_min_width: int = 320
+    desktop_window_min_height: int = 380
     # Translucent frame around the web content: a rounded, semi-transparent panel
     # with this inset (px) and corner radius, doubling as the window's drag border.
     desktop_window_margin: int = 12

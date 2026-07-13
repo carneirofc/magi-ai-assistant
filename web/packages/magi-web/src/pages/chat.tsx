@@ -5,6 +5,7 @@
 
 import { PageHeader, StatusBadge, StatusMessage } from "@carneirofc/ui";
 
+import { AppPage } from "../components/AppPage";
 import { ChatConsole } from "../components/ChatConsole";
 import { getChatHealth } from "../lib/chat-api";
 import { mergeCopy, type PageCopy } from "../lib/page-copy";
@@ -21,7 +22,7 @@ export async function ChatView({ copy }: { copy?: PageCopy } = {}) {
   const health = await getChatHealth();
 
   return (
-    <div className="app-page--fill flex flex-col gap-6">
+    <AppPage className="gap-6">
       <PageHeader
         subtitle={header.subtitle}
         title={header.title}
@@ -45,7 +46,7 @@ export async function ChatView({ copy }: { copy?: PageCopy } = {}) {
           `python main.py api` is running.
         </StatusMessage>
       )}
-    </div>
+    </AppPage>
   );
 }
 

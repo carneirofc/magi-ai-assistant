@@ -3,7 +3,9 @@
 
 import { PageHeader, StatusMessage, SurfacePanel } from "@carneirofc/ui";
 
+import { AppPage } from "../components/AppPage";
 import { RawFileEditor } from "../components/RawFileEditor";
+import { ScrollRegion } from "../components/ScrollRegion";
 import { getRawFile } from "../lib/admin-api";
 import { mergeCopy, type PageCopy } from "../lib/page-copy";
 
@@ -26,25 +28,27 @@ export async function PersonaView({ copy }: { copy?: PageCopy } = {}) {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <AppPage className="gap-6">
       <PageHeader subtitle={header.subtitle} title={header.title} description={header.description} />
 
-      {error ? (
-        <StatusMessage role="alert" tone="error">
-          {error}
-        </StatusMessage>
-      ) : file ? (
-        <SurfacePanel tone="soft" padding="lg">
-          <RawFileEditor
-            kind="persona"
-            label="Persona (global)"
-            initialContent={file.content}
-            initialVersion={file.version}
-            maxRows={48}
-          />
-        </SurfacePanel>
-      ) : null}
-    </div>
+      <ScrollRegion className="flex flex-col gap-6">
+        {error ? (
+          <StatusMessage role="alert" tone="error">
+            {error}
+          </StatusMessage>
+        ) : file ? (
+          <SurfacePanel tone="soft" padding="lg">
+            <RawFileEditor
+              kind="persona"
+              label="Persona (global)"
+              initialContent={file.content}
+              initialVersion={file.version}
+              maxRows={48}
+            />
+          </SurfacePanel>
+        ) : null}
+      </ScrollRegion>
+    </AppPage>
   );
 }
 

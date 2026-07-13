@@ -17,6 +17,8 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 
+import { getConfigValue } from "./runtime-config";
+
 export interface StoredBlob {
   bytes: Buffer;
   mimeType: string;
@@ -170,8 +172,11 @@ export function getBlobStore(): BlobStore {
       secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
     });
   } else {
+    // Resolved through the runtime-config store (file override → CHAT_BLOB_DIR →
+    // OS temp dir). Memoized here, so a Settings change is restart-required — the
+    // editor flags this field. See runtime-config.ts.
     cached = new LocalFileBlobStore(
-      process.env.CHAT_BLOB_DIR ?? path.join(os.tmpdir(), "magi-chat-blobs"),
+      getConfigValue("chatBlobDir") || path.join(os.tmpdir(), "magi-chat-blobs"),
     );
   }
   return cached;

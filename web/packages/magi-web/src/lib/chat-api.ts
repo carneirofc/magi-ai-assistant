@@ -7,15 +7,18 @@
 import "server-only";
 
 import type { TeamSnapshot } from "./introspection-types";
+import { getConfigValue } from "./runtime-config";
 
 function baseUrl(): string {
   // In docker-compose this is the chat-api service name; for local dev it's the
-  // host/port `python main.py api` binds (see main.py configure_api).
-  return process.env.CHAT_API_URL ?? "http://127.0.0.1:8000";
+  // host/port `python main.py api` binds (see main.py configure_api). Resolved
+  // through the runtime-config store so it's editable from Settings without a
+  // restart (file override → CHAT_API_URL → default). See runtime-config.ts.
+  return getConfigValue("chatApiUrl");
 }
 
 function authHeaders(): Record<string, string> {
-  const token = process.env.API_AUTH_TOKEN;
+  const token = getConfigValue("apiAuthToken");
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 

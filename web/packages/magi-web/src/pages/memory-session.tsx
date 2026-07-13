@@ -5,7 +5,9 @@
 import Link from "next/link";
 import { PageHeader, StatusMessage, SurfacePanel } from "@carneirofc/ui";
 
+import { AppPage } from "../components/AppPage";
 import { CopyId } from "../components/CopyId";
+import { ScrollRegion } from "../components/ScrollRegion";
 import { SessionFile } from "../components/SessionFile";
 import { SessionMemoryActions } from "../components/SessionMemoryActions";
 import { getRawFile } from "../lib/admin-api";
@@ -62,21 +64,23 @@ export async function SessionView({
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <AppPage className="gap-6">
       <div>
         <Link href={`/memory/${encodeURIComponent(userId)}`} className="text-ui-xs">
           ← {userId}
         </Link>
       </div>
       <PageHeader subtitle={header.subtitle} title={header.title} description={header.description} />
-      <CopyId value={sessionId} className="self-start" />
 
-      {error ? (
-        <StatusMessage role="alert" tone="error">
-          {error}
-        </StatusMessage>
-      ) : (
-        <div className="flex flex-col gap-4">
+      <ScrollRegion className="flex flex-col gap-6">
+        <CopyId value={sessionId} className="self-start" />
+
+        {error ? (
+          <StatusMessage role="alert" tone="error">
+            {error}
+          </StatusMessage>
+        ) : (
+          <div className="flex flex-col gap-4">
           <SurfacePanel tone="soft" padding="lg">
             <SessionMemoryActions userId={userId} sessionId={sessionId} />
           </SurfacePanel>
@@ -94,9 +98,10 @@ export async function SessionView({
               />
             </SurfacePanel>
           ))}
-        </div>
-      )}
-    </div>
+          </div>
+        )}
+      </ScrollRegion>
+    </AppPage>
   );
 }
 

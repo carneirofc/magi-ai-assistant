@@ -4,6 +4,8 @@ import Link from "next/link";
 import { PageHeader, StatusMessage } from "@carneirofc/ui";
 
 import { AddKnowledge } from "../components/AddKnowledge";
+import { AppPage } from "../components/AppPage";
+import { ScrollRegion } from "../components/ScrollRegion";
 import { listSubjects, listTags } from "../lib/admin-api";
 import { mergeCopy, type PageCopy } from "../lib/page-copy";
 
@@ -30,13 +32,14 @@ export async function AddKnowledgeView({ copy }: { copy?: PageCopy } = {}) {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <AppPage className="gap-6">
       <div>
         <Link href="/knowledge" className="text-ui-xs">
           ← all documents
         </Link>
       </div>
       <PageHeader subtitle={header.subtitle} title={header.title} description={header.description} />
+      <ScrollRegion className="flex flex-col gap-6">
       {error ? (
         <StatusMessage role="alert" tone="error">
           {error}
@@ -44,7 +47,8 @@ export async function AddKnowledgeView({ copy }: { copy?: PageCopy } = {}) {
       ) : (
         <AddKnowledge subjects={subjects} allTags={tags} />
       )}
-    </div>
+      </ScrollRegion>
+    </AppPage>
   );
 }
 

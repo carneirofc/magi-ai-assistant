@@ -12,9 +12,11 @@ import {
   SurfacePanel,
 } from "@carneirofc/ui";
 
+import { AppPage } from "../components/AppPage";
 import { CopyId } from "../components/CopyId";
 import { DocumentActions } from "../components/DocumentActions";
 import { DocumentMeta } from "../components/DocumentMeta";
+import { ScrollRegion } from "../components/ScrollRegion";
 import { getKnowledgeDocument, listSubjects, listTags } from "../lib/admin-api";
 import { mergeCopy, type PageCopy } from "../lib/page-copy";
 
@@ -53,7 +55,7 @@ export async function DocumentView({
   );
 
   return (
-    <div className="flex flex-col gap-6">
+    <AppPage className="gap-6">
       <div>
         <Link href="/knowledge" className="text-ui-xs">
           ← all documents
@@ -61,6 +63,8 @@ export async function DocumentView({
       </div>
 
       <PageHeader subtitle={header.subtitle} title={header.title} description={header.description} />
+
+      <ScrollRegion className="flex flex-col gap-6">
       <CopyId value={doc.doc_id} className="self-start" />
 
       <SurfacePanel tone="soft" padding="lg" className="flex flex-col gap-5">
@@ -91,7 +95,8 @@ export async function DocumentView({
           </SurfacePanel>
         ))}
       </div>
-    </div>
+      </ScrollRegion>
+    </AppPage>
   );
 }
 

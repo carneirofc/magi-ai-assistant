@@ -17,6 +17,8 @@ import {
   TableRow,
 } from "@carneirofc/ui";
 
+import { AppPage } from "../components/AppPage";
+import { ScrollRegion } from "../components/ScrollRegion";
 import { StatCard } from "../components/StatCard";
 import { encodeDocId } from "../lib/encode";
 import { getHealth, listKnowledgeDocuments, listSubjects, listUsers } from "../lib/admin-api";
@@ -61,7 +63,7 @@ export async function DashboardView({ copy }: { copy?: PageCopy } = {}) {
   const topUsers = [...users].sort((a, b) => b.fact_count - a.fact_count).slice(0, 6);
 
   return (
-    <div className="flex flex-col gap-6">
+    <AppPage className="gap-6">
       <PageHeader
         subtitle={header.subtitle}
         title={header.title}
@@ -77,6 +79,7 @@ export async function DashboardView({ copy }: { copy?: PageCopy } = {}) {
         }
       />
 
+      <ScrollRegion className="flex flex-col gap-6">
       {error ? (
         <StatusMessage role="alert" tone="error">
           {error}
@@ -177,7 +180,8 @@ export async function DashboardView({ copy }: { copy?: PageCopy } = {}) {
           </div>
         </>
       )}
-    </div>
+      </ScrollRegion>
+    </AppPage>
   );
 }
 
