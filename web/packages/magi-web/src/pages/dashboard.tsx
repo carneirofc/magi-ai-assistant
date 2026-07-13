@@ -80,106 +80,106 @@ export async function DashboardView({ copy }: { copy?: PageCopy } = {}) {
       />
 
       <ScrollRegion className="flex flex-col gap-6">
-      {error ? (
-        <StatusMessage role="alert" tone="error">
-          {error}
-        </StatusMessage>
-      ) : (
-        <>
-          <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <StatCard label="Users" value={users.length} hint="with memory" href="/memory" />
-            <StatCard label="Facts" value={facts} hint="curated, across users" href="/memory" />
-            <StatCard label="Episodes" value={episodes} hint="recorded interactions" />
-            <StatCard label="Sessions" value={sessions} hint="on disk" />
-            <StatCard
-              label="Documents"
-              value={documents.length}
-              hint="in the corpus"
-              href="/knowledge"
-            />
-            <StatCard label="Chunks" value={chunks} hint="embedded + indexed" href="/knowledge" />
-            <StatCard label="Subjects" value={subjects.length} hint="controlled vocab" href="/subjects" />
-          </section>
+        {error ? (
+          <StatusMessage role="alert" tone="error">
+            {error}
+          </StatusMessage>
+        ) : (
+          <>
+            <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <StatCard label="Users" value={users.length} hint="with memory" href="/memory" />
+              <StatCard label="Facts" value={facts} hint="curated, across users" href="/memory" />
+              <StatCard label="Episodes" value={episodes} hint="recorded interactions" />
+              <StatCard label="Sessions" value={sessions} hint="on disk" />
+              <StatCard
+                label="Documents"
+                value={documents.length}
+                hint="in the corpus"
+                href="/knowledge"
+              />
+              <StatCard label="Chunks" value={chunks} hint="embedded + indexed" href="/knowledge" />
+              <StatCard label="Subjects" value={subjects.length} hint="controlled vocab" href="/subjects" />
+            </section>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <SurfacePanel tone="soft" padding="lg" className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-ui-lg font-semibold">Recent documents</h2>
-                <Link href="/knowledge" className="text-ui-xs">
-                  View all →
-                </Link>
-              </div>
-              {recentDocs.length === 0 ? (
-                <EmptyState>No documents in the corpus yet.</EmptyState>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Document</TableHead>
-                      <TableHead>Subject</TableHead>
-                      <TableHead className="text-right">Chunks</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {recentDocs.map((d) => (
-                      <TableRow key={d.doc_id}>
-                        <TableCell>
-                          <Link href={`/knowledge/${encodeDocId(d.doc_id)}`}>
-                            {d.title || d.source || d.doc_id}
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          {d.subject ? (
-                            <InfoChip>{d.subject}</InfoChip>
-                          ) : (
-                            <span className="text-[color:var(--ui-ink-subtle)]">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">{d.chunk_count}</TableCell>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <SurfacePanel tone="soft" padding="lg" className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-ui-lg font-semibold">Recent documents</h2>
+                  <Link href="/knowledge" className="text-ui-xs">
+                    View all →
+                  </Link>
+                </div>
+                {recentDocs.length === 0 ? (
+                  <EmptyState>No documents in the corpus yet.</EmptyState>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Document</TableHead>
+                        <TableHead>Subject</TableHead>
+                        <TableHead className="text-right">Chunks</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </SurfacePanel>
+                    </TableHeader>
+                    <TableBody>
+                      {recentDocs.map((d) => (
+                        <TableRow key={d.doc_id}>
+                          <TableCell>
+                            <Link href={`/knowledge/${encodeDocId(d.doc_id)}`}>
+                              {d.title || d.source || d.doc_id}
+                            </Link>
+                          </TableCell>
+                          <TableCell>
+                            {d.subject ? (
+                              <InfoChip>{d.subject}</InfoChip>
+                            ) : (
+                              <span className="text-[color:var(--ui-ink-subtle)]">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">{d.chunk_count}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </SurfacePanel>
 
-            <SurfacePanel tone="soft" padding="lg" className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-ui-lg font-semibold">Top users</h2>
-                <Link href="/memory" className="text-ui-xs">
-                  View all →
-                </Link>
-              </div>
-              {topUsers.length === 0 ? (
-                <EmptyState>No users with memory yet.</EmptyState>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>User</TableHead>
-                      <TableHead className="text-right">Facts</TableHead>
-                      <TableHead className="text-right">Episodes</TableHead>
-                      <TableHead className="text-right">Sessions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {topUsers.map((u) => (
-                      <TableRow key={u.user_id}>
-                        <TableCell>
-                          <Link href={`/memory/${encodeURIComponent(u.user_id)}`}>{u.user_id}</Link>
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">{u.fact_count}</TableCell>
-                        <TableCell className="text-right tabular-nums">{u.episode_count}</TableCell>
-                        <TableCell className="text-right tabular-nums">{u.session_count}</TableCell>
+              <SurfacePanel tone="soft" padding="lg" className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-ui-lg font-semibold">Top users</h2>
+                  <Link href="/memory" className="text-ui-xs">
+                    View all →
+                  </Link>
+                </div>
+                {topUsers.length === 0 ? (
+                  <EmptyState>No users with memory yet.</EmptyState>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>User</TableHead>
+                        <TableHead className="text-right">Facts</TableHead>
+                        <TableHead className="text-right">Episodes</TableHead>
+                        <TableHead className="text-right">Sessions</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </SurfacePanel>
-          </div>
-        </>
-      )}
+                    </TableHeader>
+                    <TableBody>
+                      {topUsers.map((u) => (
+                        <TableRow key={u.user_id}>
+                          <TableCell>
+                            <Link href={`/memory/${encodeURIComponent(u.user_id)}`}>{u.user_id}</Link>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">{u.fact_count}</TableCell>
+                          <TableCell className="text-right tabular-nums">{u.episode_count}</TableCell>
+                          <TableCell className="text-right tabular-nums">{u.session_count}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </SurfacePanel>
+            </div>
+          </>
+        )}
       </ScrollRegion>
     </AppPage>
   );
