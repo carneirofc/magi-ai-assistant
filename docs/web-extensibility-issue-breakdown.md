@@ -240,7 +240,7 @@ This is the main proof that the architecture is real.
 - [x] Move/alias Chat sections/components to slice exports
 - [x] Rebuild default Chat screen on top of the slice contract
 - [x] Update internal imports to the new structure
-- [ ] Typecheck the package and app
+- [x] Typecheck the package and app
 
 ---
 
@@ -284,7 +284,7 @@ The architecture is only persuasive if the example app demonstrates it directly.
 - [x] Build the custom page from slice exports
 - [x] Preserve route ownership in the app
 - [x] Verify no forbidden/internal imports creep in accidentally
-- [ ] Build/typecheck the app
+- [x] Build/typecheck the app
 
 ---
 
@@ -330,7 +330,7 @@ One slice can always be a special case. Two slices prove the contract is reusabl
 - [x] Identify Knowledge components/sections
 - [x] Create Knowledge slice exports
 - [x] Rebuild convenience screen(s) on top
-- [ ] Update imports and typecheck
+- [x] Update imports and typecheck
 
 ---
 
