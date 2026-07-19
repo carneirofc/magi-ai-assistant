@@ -539,6 +539,7 @@ That surface optimized for file-layout discovery, not developer task discovery. 
 
 - `@carneirofc/magi-web/slices/chat/*`
 - `@carneirofc/magi-web/slices/knowledge/*`
+- `@carneirofc/magi-web/slices/memory/*`
 - `@carneirofc/magi-web/slices/core`
 - `@carneirofc/magi-web/slices/shell`
 
@@ -546,7 +547,7 @@ That surface optimized for file-layout discovery, not developer task discovery. 
 
 - `chat` — `src/pages/chat.tsx`, `src/components/ChatConsole.tsx`, `src/lib/chat-*`, `src/routes/chat*`
 - `knowledge` — `src/pages/knowledge*.tsx`, `src/components/KnowledgeList.tsx`, `AddKnowledge.tsx`, `Document*.tsx`
-- `memory` — current pages/components remain page-oriented for now
+- `memory` — `src/pages/memory*.tsx`, `src/components/{UserGrid,MemoryTabs,FactEditor,RawFileEditor,MemoryMaintenance,SessionFile,SessionMemoryActions}.tsx` (migrated to `slices/memory/*`)
 - `identity`
 - `subjects`
 - `persona`

@@ -39,6 +39,11 @@
     "./slices/knowledge/hooks": "./src/slices/knowledge/hooks.ts",
     "./slices/knowledge/components": "./src/slices/knowledge/components.ts",
     "./slices/knowledge/screens": "./src/slices/knowledge/screens.ts",
+    "./slices/memory": "./src/slices/memory/index.ts",
+    "./slices/memory/types": "./src/slices/memory/types.ts",
+    "./slices/memory/hooks": "./src/slices/memory/hooks.ts",
+    "./slices/memory/components": "./src/slices/memory/components.ts",
+    "./slices/memory/screens": "./src/slices/memory/screens.ts",
     "./routes/*": "./src/routes/*.ts",
     "./pages/*": "./src/pages/*.tsx",
     "./middleware": "./src/middleware.ts"

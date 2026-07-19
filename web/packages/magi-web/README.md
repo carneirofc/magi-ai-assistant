@@ -69,6 +69,8 @@ import { ChatConsole } from "@carneirofc/magi-web/slices/chat/components";
 import { chatCopy } from "@carneirofc/magi-web/slices/chat/screens";
 import { getChatHealth } from "@carneirofc/magi-web/lib/chat-api";
 import { KnowledgeList } from "@carneirofc/magi-web/slices/knowledge/components";
+import { UserGrid, MemoryTabs } from "@carneirofc/magi-web/slices/memory/components";
+import { listUsers, getProfile } from "@carneirofc/magi-web/slices/memory/hooks";
 import { buildDefaultAppShellConfig, MagiAppShell } from "@carneirofc/magi-web/slices/shell";
 ```
 
