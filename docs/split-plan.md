@@ -31,6 +31,9 @@ The public/private boundary maps onto extension points already in the codebase:
   what to remember*.
 - **Prompts are files** loaded by `load_prompt()` — persona is data, not code.
 - **Members are a registry** (`MEMBER_BUILDERS`) — specialists are pluggable.
+- **Tools are a registry too** — `register_tool()` (member default set) and
+  `register_lead_toolkit()` (lead-level, memory-injected) in
+  `agent/tools/__init__.py` let a persona add tools without editing the tree.
 - **Config is code-first** via `configure()` at `main.py` —
   deployment is already a thin, separable layer.
 

@@ -137,10 +137,30 @@ def my_action(...) -> ToolOutput[...]:
     return ok("done", ...)
 ```
 
-Then import it in [`tools/__init__.py`](../src/magi/agent/tools/__init__.py) and add
-it to `DEFAULT_TOOLS` (members), or to the lead's `tools=[...]` list in
-[team.py](../src/magi/agent/team.py). `enabled_tools()` is the single place members
-resolve their tool set, so the default is never duplicated across builders.
+Then wire it in — two paths, depending on where you sit:
+
+- **Engine contributor** — import it in
+  [`tools/__init__.py`](../src/magi/agent/tools/__init__.py) and add it to
+  `DEFAULT_TOOLS` (members), or to the lead's `tools=[...]` list in
+  [team.py](../src/magi/agent/team.py). `enabled_tools()` is the single place
+  members resolve their tool set, so the default is never duplicated across
+  builders.
+- **Persona overlay** — register it from outside the engine tree, at your
+  entrypoint *before* `build_team()` (the tool twin of `register_member`):
+
+  ```python
+  from magi.agent.tools import register_tool, register_lead_toolkit
+
+  register_tool(my_action)          # joins DEFAULT_TOOLS → every member
+
+  @register_lead_toolkit            # lead-level, dependency-injected
+  def build_my_tools(memory):       # receives the team's MemoryManager
+      return [my_action]
+  ```
+
+  Both are idempotent (safe under a re-imported entrypoint). Lead toolkit
+  builders follow the engine's own `build_*_tools(memory)` convention; a
+  raising builder is skipped with a warning instead of aborting team build.
 
 ## Memory tools
 

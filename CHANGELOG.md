@@ -8,6 +8,15 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Added
 
+- **Tool registration seam for persona overlays.** The tool twin of
+  `register_member`: `register_tool(fn)` appends a tool to the shared member
+  default set (flows through `enabled_tools()`), and
+  `register_lead_toolkit(builder)` registers a lead-level toolkit builder that
+  receives the injected `MemoryManager` at team build — so a persona attaches
+  code tools without editing the engine tree. Both are idempotent and
+  decorator-usable; a raising lead toolkit is skipped with a warning instead of
+  aborting startup.
+
 - **Fixed-frame layout primitives.** `@carneirofc/magi-web` now ships `AppPage`
   (a freeform fill container) and `ScrollRegion` (the only element allowed to
   scroll, axis-aware), so a consuming app can behave like a native application

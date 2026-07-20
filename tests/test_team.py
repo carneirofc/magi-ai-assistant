@@ -67,3 +67,35 @@ def test_build_team_omits_storage_tools_when_disabled(tmp_path, restore_config):
     team = build_team(build_memory_from_config())
     names = _lead_tool_names(team)
     assert not ({"store_file", "retrieve_file", "list_files"} & set(names))
+
+
+def test_build_team_attaches_registered_lead_toolkit(tmp_path, restore_config):
+    from agno.tools import tool
+
+    from magi.agent.tools import LEAD_TOOLKIT_BUILDERS, register_lead_toolkit
+    from magi.agent.tools.outputs import ok
+
+    received = []
+
+    def build_persona_tools(memory):
+        received.append(memory)
+
+        @tool(name="persona_action", show_result=True)
+        def persona_action():
+            """A persona-registered lead capability."""
+            return ok("done", None)
+
+        return [persona_action]
+
+    snapshot = list(LEAD_TOOLKIT_BUILDERS)
+    register_lead_toolkit(build_persona_tools)
+    try:
+        configure(memory_dir=str(tmp_path / "memory"))
+        memory = build_memory_from_config()
+        team = build_team(memory)
+    finally:
+        LEAD_TOOLKIT_BUILDERS[:] = snapshot
+
+    assert "persona_action" in _lead_tool_names(team)
+    # The builder got the same MemoryManager the team was built with.
+    assert received == [memory]

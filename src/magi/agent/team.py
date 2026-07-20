@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from magi.agent.hooks import tool_call_hook
 from magi.agent.members import MEMBER_BUILDERS
 from magi.agent.model import build_lead_model, build_member_model
+from magi.agent.tools import registered_lead_tools
 from magi.agent.tools.http import HTTP_TOOLS
 from magi.agent.tools.identity import build_identity_tools
 from magi.agent.tools.evolution import build_evolution_tools
@@ -270,6 +271,9 @@ def build_team(
             # unless evolution_enabled).
             *evolution_tools,
             *recipe_tools,
+            # Persona seam: lead toolkits registered from outside the engine
+            # tree via register_lead_toolkit (empty when none are registered).
+            *registered_lead_tools(memory),
             # Bound to the live model objects: members all share `member_model`,
             # so one mutation flips the whole team.
             *build_thinking_tools([lead, member_model]),
