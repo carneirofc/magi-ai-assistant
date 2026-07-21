@@ -35,17 +35,18 @@ jobs:
 
       # The workspace root links @carneirofc/ui from a sibling checkout for
       # local co-development (file:../../deedlit.dev/...). That path doesn't
-      # exist in CI, so repoint the root dep at the registry range before
-      # installing — same source the published library manifest declares.
+      # exist in CI, so repoint the root dep at the registry range — and drop
+      # the lockfile, whose stale file: entries would otherwise make npm keep
+      # a dangling symlink instead of fetching from the registry.
       - name: Use registry @carneirofc/ui in CI
-        run: npm pkg set 'dependencies.@carneirofc/ui=>=0.2.0'
+        run: |
+          npm pkg set 'dependencies.@carneirofc/ui=>=0.2.0'
+          rm -f package-lock.json
 
-      # Installs the whole workspace. The lockfile may lag the workspace split
-      # (and the repoint above invalidates it), so fall back to a fresh
-      # install; @carneirofc/ui is pulled from GitHub Packages using the same
-      # token.
+      # Fresh workspace install; @carneirofc/ui comes from GitHub Packages
+      # using the same token (same-owner package).
       - name: Install workspace
-        run: npm ci || npm install
+        run: npm install
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

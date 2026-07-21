@@ -67,13 +67,15 @@ jobs:
 
       # The workspace root links @carneirofc/ui from a sibling checkout for
       # local co-development; that path doesn't exist in CI, so repoint the
-      # root dep at the registry range before installing (see
-      # publish-magi-web.yml for the same step).
+      # root dep at the registry range and drop the stale lockfile before a
+      # fresh install (see publish-magi-web.yml for the same step).
       - name: Use registry @carneirofc/ui in CI
-        run: npm pkg set 'dependencies.@carneirofc/ui=>=0.2.0'
+        run: |
+          npm pkg set 'dependencies.@carneirofc/ui=>=0.2.0'
+          rm -f package-lock.json
 
       - name: Install workspace
-        run: npm ci || npm install
+        run: npm install
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
