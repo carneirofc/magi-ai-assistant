@@ -8,6 +8,14 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Added
 
+- **Capability roster grouped by origin.** The live team snapshot
+  (`GET /v1/introspection`, rendered on the dashboard's team page) now reports
+  *how* each lead capability got there: `builtin` (shipped with the engine),
+  `skill` (skill manifest), `registered` (persona toolkit), `recipe`
+  (operator-approved HTTP recipe), or `mcp`. Origins are stamped at team
+  assembly — the view reflects what actually attached, not what config
+  intended — and the team page groups the lead's tools under those headings,
+  so the operator watches capability growth land as it happens.
 - **The curator can file evolution proposals.** The post-turn memory curator
   gains an escalation path: when a behavioral issue clearly recurs and the fix
   belongs in an adjustable operating prompt rather than another persona line,

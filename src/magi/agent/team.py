@@ -21,6 +21,7 @@ from agno.utils.log import log_info
 from pydantic import BaseModel, Field
 
 from magi.agent.hooks import tool_call_hook
+from magi.agent.introspect import mark_origin
 from magi.agent.members import MEMBER_BUILDERS
 from magi.agent.model import build_lead_model, build_member_model
 from magi.agent.skills import compose_skill_prompts, skill_lead_tools
@@ -197,7 +198,7 @@ def build_team(
                 proposable=[*config.evolution_proposable, *proposable_skill_targets()],
             )
         )
-        recipe_tools = build_recipe_tools(memory.store.root)
+        recipe_tools = mark_origin(build_recipe_tools(memory.store.root), "recipe")
         log_info(
             f"evolution: ENABLED (proposable={config.evolution_proposable}, "
             f"{len(recipe_tools)} approved recipe tool(s))"
@@ -288,11 +289,12 @@ def build_team(
             *recipe_tools,
             # Persona seam: lead toolkits registered from outside the engine
             # tree via register_lead_toolkit (empty when none are registered).
-            *registered_lead_tools(memory),
+            # Origin stamps feed the introspection roster's by-origin grouping.
+            *mark_origin(registered_lead_tools(memory), "registered"),
             # Skill manifests: each active skill's lead tools (see
             # magi/agent/skills.py; its prompt fragment joined the
             # instructions above).
-            *skill_lead_tools(memory),
+            *mark_origin(skill_lead_tools(memory), "skill"),
             # Bound to the live model objects: members all share `member_model`,
             # so one mutation flips the whole team.
             *build_thinking_tools([lead, member_model]),

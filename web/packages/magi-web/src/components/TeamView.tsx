@@ -57,6 +57,50 @@ function ToolTable({ tools }: { tools: ToolInfo[] }) {
   );
 }
 
+// The capability roster's grouping: how each lead tool got here. Order is
+// trust-descending — engine first, then operator/persona-granted growth.
+const ORIGIN_GROUPS: Array<{ origin: string; label: string }> = [
+  { origin: "builtin", label: "Built-in" },
+  { origin: "skill", label: "Skills" },
+  { origin: "registered", label: "Registered (persona)" },
+  { origin: "recipe", label: "Approved recipes" },
+  { origin: "mcp", label: "MCP" },
+];
+
+function GroupedToolTables({ tools }: { tools: ToolInfo[] }) {
+  if (tools.length === 0) {
+    return <EmptyState>No tools.</EmptyState>;
+  }
+  const known = new Set(ORIGIN_GROUPS.map((g) => g.origin));
+  const groups = ORIGIN_GROUPS.map((g) => ({
+    ...g,
+    tools: tools.filter((t) => (t.origin ?? "builtin") === g.origin),
+  })).filter((g) => g.tools.length > 0);
+  // Anything with an unknown origin still shows — never silently dropped.
+  const other = tools.filter((t) => t.origin && !known.has(t.origin));
+  return (
+    <div className="flex flex-col gap-4">
+      {groups.map((g) => (
+        <div key={g.origin} className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <h3 className="text-ui-sm font-semibold">{g.label}</h3>
+            <span className="text-ui-2xs text-[color:var(--ui-ink-subtle)]">
+              {g.tools.length}
+            </span>
+          </div>
+          <ToolTable tools={g.tools} />
+        </div>
+      ))}
+      {other.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <h3 className="text-ui-sm font-semibold">Other</h3>
+          <ToolTable tools={other} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function McpCard({ server }: { server: McpServerInfo }) {
   return (
     <SurfacePanel tone="subtle" padding="md" className="flex flex-col gap-2">
@@ -162,7 +206,7 @@ export function TeamView({ snapshot }: { snapshot: TeamSnapshot }) {
           </span>
         </div>
         <SurfacePanel tone="soft" padding="lg">
-          <ToolTable tools={snapshot.team_tools} />
+          <GroupedToolTables tools={snapshot.team_tools} />
         </SurfacePanel>
       </section>
 

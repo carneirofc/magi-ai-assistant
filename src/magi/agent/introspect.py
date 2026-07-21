@@ -30,6 +30,14 @@ class ToolInfo(BaseModel):
         default="function",
         description="Where it comes from: 'function', 'toolkit:<name>', or 'mcp:<server>'.",
     )
+    origin: str = Field(
+        default="builtin",
+        description=(
+            "How the capability got here: 'builtin' (shipped with the engine), "
+            "'recipe' (operator-approved HTTP recipe), 'registered' (persona "
+            "toolkit), 'skill' (skill manifest), or 'mcp' (MCP server)."
+        ),
+    )
 
 
 class McpServerInfo(BaseModel):
@@ -73,6 +81,20 @@ def _text(value: object) -> str:
     return str(value).strip()
 
 
+def mark_origin(tools: list, origin: str) -> list:
+    """Stamp each tool with its capability origin, best-effort; returns `tools`.
+
+    Called at team assembly, where the origin is still known (which list a tool
+    came from); the snapshot reads the stamp back so the roster can group by it.
+    A tool that refuses the attribute just stays 'builtin'."""
+    for tool in tools:
+        try:
+            tool._magi_origin = origin
+        except Exception:  # noqa: BLE001 — an unstampable tool degrades to 'builtin'.
+            pass
+    return tools
+
+
 def _function_info(fn: object, source: str = "function") -> ToolInfo:
     """A `ToolInfo` from an agno `Function`, a `@tool` callable, or a plain function."""
     name = _text(getattr(fn, "name", None) or getattr(fn, "__name__", None)) or type(fn).__name__
@@ -82,6 +104,7 @@ def _function_info(fn: object, source: str = "function") -> ToolInfo:
         description=description,
         instructions=_text(getattr(fn, "instructions", None)),
         source=source,
+        origin=_text(getattr(fn, "_magi_origin", None)) or "builtin",
     )
 
 
@@ -119,7 +142,9 @@ def _expand_tools(tools: object, member: str = "") -> tuple[list[ToolInfo], list
         if is_mcp_toolkit(tool):
             server = _mcp_info(tool, member)
             mcps.append(server)
-            infos.extend(ToolInfo(name=n, source=f"mcp:{server.name}") for n in server.tools)
+            infos.extend(
+                ToolInfo(name=n, source=f"mcp:{server.name}", origin="mcp") for n in server.tools
+            )
             continue
         functions = getattr(tool, "functions", None)
         if isinstance(functions, dict) and functions:

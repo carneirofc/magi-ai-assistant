@@ -161,3 +161,80 @@ def test_introspection_endpoint_requires_auth_when_token_set():
     assert client.get("/v1/introspection").status_code == 401
     ok = client.get("/v1/introspection", headers={"Authorization": "Bearer secret"})
     assert ok.status_code == 200
+
+
+# --- capability origins (the by-origin roster grouping) ----------------------
+def test_snapshot_reads_origin_stamps():
+    from magi.agent.introspect import mark_origin
+
+    def approved_recipe():
+        """An operator-approved HTTP recipe tool."""
+
+    def engine_tool():
+        """A built-in."""
+
+    mark_origin([approved_recipe], "recipe")
+    runner = SimpleNamespace(
+        name="T", model=SimpleNamespace(id="lead"), tools=[approved_recipe, engine_tool],
+        members=None,
+    )
+
+    snapshot = build_snapshot(runner)
+    origins = {t.name: t.origin for t in snapshot.team_tools}
+    assert origins["approved_recipe"] == "recipe"
+    assert origins["engine_tool"] == "builtin"  # unstamped defaults honestly
+
+
+def test_team_build_stamps_recipe_registered_and_skill_origins(tmp_path):
+    import json as _json
+    from dataclasses import fields
+
+    from agno.tools import tool
+
+    from magi.agent.skills import SKILLS, Skill, register_skill
+    from magi.agent.team import build_team
+    from magi.agent.tools import LEAD_TOOLKIT_BUILDERS, register_lead_toolkit
+    from magi.core.config import config, configure
+    from magi.core.memory import build_memory_from_config
+
+    @tool(name="skill_tool", show_result=True)
+    def skill_tool():
+        """From a skill manifest."""
+
+    @tool(name="persona_tool", show_result=True)
+    def persona_tool():
+        """From a registered persona toolkit."""
+
+    # An operator-APPROVED recipe already on disk in the runtime dir.
+    recipes = tmp_path / "memory" / "tools-runtime"
+    recipes.mkdir(parents=True)
+    (recipes / "fetch_weather.json").write_text(
+        _json.dumps(
+            {
+                "name": "fetch_weather",
+                "description": "Local weather.",
+                "method": "GET",
+                "url_template": "http://127.0.0.1:9000/weather",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    skills_snapshot = list(SKILLS)
+    toolkit_snapshot = list(LEAD_TOOLKIT_BUILDERS)
+    config_snapshot = {f.name: getattr(config, f.name) for f in fields(config)}
+    register_skill(Skill(name="demo", prompt="demo skill", tools=(skill_tool,)))
+    register_lead_toolkit(lambda memory: [persona_tool])
+    try:
+        configure(memory_dir=str(tmp_path / "memory"), evolution_enabled=True)
+        team = build_team(build_memory_from_config())
+    finally:
+        SKILLS[:] = skills_snapshot
+        LEAD_TOOLKIT_BUILDERS[:] = toolkit_snapshot
+        configure(**config_snapshot)
+
+    origins = {t.name: t.origin for t in build_snapshot(team).team_tools}
+    assert origins["fetch_weather"] == "recipe"
+    assert origins["persona_tool"] == "registered"
+    assert origins["skill_tool"] == "skill"
+    assert origins["agent_introspection"] == "builtin"
