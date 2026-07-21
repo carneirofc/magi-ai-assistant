@@ -43,6 +43,21 @@ class FactOp:
 
 
 @dataclass(frozen=True)
+class PromptProposal:
+    """A self-evolution proposal the curator wants filed (see magi/core/evolution).
+
+    The curator's escalation path for a RECURRING behavioral issue whose fix
+    belongs in an adjustable operating prompt rather than in another persona
+    adjustment. Filing happens in the agent layer (magi/agent/curator.py) under
+    the same rails as every proposal — allowlisted target, capped queue, human
+    decision; this is just the decision payload."""
+
+    target: str  # overlay-relative prompt path, e.g. "curation.md"
+    text: str  # the complete replacement prompt text
+    rationale: str  # why — grounded in the observed recurring behavior
+
+
+@dataclass(frozen=True)
 class CurationInput:
     """What the curator reads: this turn, plus the durable memory it may revise."""
 
@@ -63,10 +78,13 @@ class CurationResult:
     episode: Optional[str] = None
     # A general, lasting behavior rule to append to the persona, or None.
     persona_adjustment: Optional[str] = None
+    # An evolution proposal to file (rare; the curator's escalation path when a
+    # recurring issue belongs in an adjustable prompt, not the persona), or None.
+    proposal: Optional[PromptProposal] = None
 
     @property
     def is_empty(self) -> bool:
-        return not (self.operations or self.episode or self.persona_adjustment)
+        return not (self.operations or self.episode or self.persona_adjustment or self.proposal)
 
 
 # An async curator: reads a turn + current durable memory, returns the changes.

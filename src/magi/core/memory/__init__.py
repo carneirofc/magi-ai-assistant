@@ -29,7 +29,13 @@ from magi.core.memory.admin import (
     UnknownMemoryFileKindError,
     UserRequiredError,
 )
-from magi.core.memory.curation import CurateFn, CurationInput, CurationResult, FactOp
+from magi.core.memory.curation import (
+    CurateFn,
+    CurationInput,
+    CurationResult,
+    FactOp,
+    PromptProposal,
+)
 from magi.core.memory.git_backend import build_memory_git
 from magi.core.memory.manager import MemoryManager, MemoryScope, SummarizeFn
 from magi.core.memory.semantic import MemoryRetriever, build_semantic_index
@@ -43,6 +49,7 @@ __all__ = [
     "CurationInput",
     "CurationResult",
     "FactOp",
+    "PromptProposal",
     "MemoryAdmin",
     "MemoryManagerRequiredError",
     "StaleVersionError",

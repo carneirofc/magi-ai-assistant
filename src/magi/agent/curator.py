@@ -18,11 +18,12 @@ import re
 from typing import Optional
 
 from agno.agent import Agent
-from agno.utils.log import log_info
+from agno.utils.log import log_info, log_warning
 from agno.utils.message import get_text_from_message
 
 from magi.agent.model import build_member_model
-from magi.core.memory import CurateFn, CurationInput, CurationResult, FactOp
+from magi.core.config import config
+from magi.core.memory import CurateFn, CurationInput, CurationResult, FactOp, PromptProposal
 from magi.core.prompts import load_prompt
 
 # The what-to-remember policy is a prompt file (prompts/curation.md), loaded via
@@ -69,6 +70,22 @@ def _parse_op(item: object) -> Optional[FactOp]:
     return None
 
 
+def _parse_proposal(data: dict) -> Optional[PromptProposal]:
+    """The optional `proposal` object -> a `PromptProposal`, or None.
+
+    All three fields must be non-empty strings; anything less is dropped (the
+    rails in the store would reject it anyway — this just avoids filing noise)."""
+    raw = data.get("proposal")
+    if not isinstance(raw, dict):
+        return None
+    target = _str_field(raw, "target")
+    text = _str_field(raw, "text")
+    rationale = _str_field(raw, "rationale")
+    if not (target and text and rationale):
+        return None
+    return PromptProposal(target=target, text=text, rationale=rationale)
+
+
 def _parse(text: str) -> CurationResult:
     """Parse the curator's JSON into a result. Malformed output => no-op."""
     if not text:
@@ -90,7 +107,38 @@ def _parse(text: str) -> CurationResult:
         operations=operations,
         episode=_str_field(data, "episode"),
         persona_adjustment=_str_field(data, "persona"),
+        proposal=_parse_proposal(data),
     )
+
+
+def file_curator_proposal(store, proposal: PromptProposal) -> bool:
+    """File one curator proposal into the evolution queue; never raises.
+
+    The same rails as every proposal (allowlisted target, capped queue) — a
+    violation or any store failure degrades to a warning, because curation must
+    never break a chat. Returns whether the proposal was queued."""
+    try:
+        current = ""
+        try:
+            current = load_prompt(proposal.target)
+        except Exception:  # noqa: BLE001 — no file yet; a skill's inline default still shows.
+            from magi.agent.skills import find_skill_by_prompt_path
+
+            skill = find_skill_by_prompt_path(proposal.target)
+            current = skill.prompt if skill is not None else ""
+        queued = store.propose(
+            "prompt",
+            proposal.target,
+            proposal.text,
+            proposal.rationale,
+            source="curator",
+            current_text=current,
+        )
+    except Exception as exc:  # noqa: BLE001 — full queue / bad target / IO: log and move on.
+        log_warning(f"curator: proposal for {proposal.target!r} not filed ({exc})")
+        return False
+    log_info(f"curator: filed evolution proposal {queued.id} for {proposal.target!r}")
+    return True
 
 
 def build_memory_curator() -> CurateFn:
@@ -104,10 +152,34 @@ def build_memory_curator() -> CurateFn:
     )
     log_info(f"MemoryCurator ready: model={getattr(agent.model, 'id', '?')}")
 
+    # The curator's escalation path: when evolution is on it may FILE a prompt
+    # proposal (source="curator") under the same rails as the lead's propose
+    # tools — allowlist (incl. registered skills), capped queue, operator
+    # decision. Off => proposals parse but are dropped with a log line.
+    evolution_store = None
+    if config.evolution_enabled:
+        from pathlib import Path
+
+        from magi.agent.skills import proposable_skill_targets
+        from magi.core.evolution import EvolutionStore
+
+        evolution_store = EvolutionStore(
+            Path(config.memory_dir),
+            proposable=[*config.evolution_proposable, *proposable_skill_targets()],
+        )
+
     async def curate(inp: CurationInput) -> CurationResult:
         resp = await agent.arun(input=_format_input(inp))
         text = get_text_from_message(resp.content) if resp.content else ""
         result = _parse(text)
+        if result.proposal is not None:
+            if evolution_store is not None:
+                file_curator_proposal(evolution_store, result.proposal)
+            else:
+                log_info(
+                    "MemoryCurator: dropped a proposal for "
+                    f"{result.proposal.target!r} (evolution disabled)"
+                )
         if result.is_empty:
             log_info("MemoryCurator: no durable change this turn")
         return result

@@ -8,6 +8,15 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Added
 
+- **The curator can file evolution proposals.** The post-turn memory curator
+  gains an escalation path: when a behavioral issue clearly recurs and the fix
+  belongs in an adjustable operating prompt rather than another persona line,
+  it returns a `proposal` (target, replacement text, rationale) that is filed
+  into the self-evolution queue as `source: "curator"` — same rails as the
+  lead's propose tools (allowlist incl. registered skills, capped queue, human
+  decision). Filing never breaks a chat: a full queue, bad target, or disabled
+  evolution degrades to a log line, and the curation prompt contract documents
+  when to propose vs. adjust the persona.
 - **Per-user knowledge scope.** The knowledge store's reserved `scope` seam is
   now live end to end: `save_knowledge(personal=True)` files a document under
   the current user's own scope (`user:<id>`, resolved from the ambient memory

@@ -8,8 +8,8 @@ the manager test injects a fake `CurateFn`.
 
 import pytest
 
-from magi.agent.curator import _format_input, _parse
-from magi.core.memory import CurationInput, CurationResult, FactOp
+from magi.agent.curator import _format_input, _parse, file_curator_proposal
+from magi.core.memory import CurationInput, CurationResult, FactOp, PromptProposal
 from magi.core.memory import manager as manager_mod
 from magi.core.memory.manager import MemoryManager
 from magi.core.memory.store import FileMemoryStore
@@ -25,6 +25,24 @@ def test_parse_full_object():
     assert result.episode == "Helped debug."
     assert result.persona_adjustment == "Be terse."
     assert not result.is_empty
+
+
+def test_parse_proposal_object():
+    result = _parse(
+        '{"operations": [], "episode": null, "persona": null, '
+        '"proposal": {"target": "curation.md", "text": "New policy body.", '
+        '"rationale": "keeps over-saving chatter"}}'
+    )
+    assert result.proposal == PromptProposal(
+        target="curation.md", text="New policy body.", rationale="keeps over-saving chatter"
+    )
+    assert not result.is_empty  # a proposal alone is a durable outcome
+
+
+def test_parse_partial_proposal_is_dropped():
+    result = _parse('{"operations": [], "proposal": {"target": "curation.md", "text": ""}}')
+    assert result.proposal is None
+    assert result.is_empty
 
 
 def test_parse_all_three_verbs():
@@ -254,3 +272,36 @@ async def test_maybe_curate_trims_facts_over_cap(tmp_path):
     facts = mgr.mem.long_term_facts.texts()
     assert len(facts) == 3  # capped to the newest 3
     assert "fact 0" not in facts and "fact 4" in facts
+
+
+# --- filing proposals (the curator as an evolution source) -------------------
+def _evo_store(tmp_path, **kwargs):
+    from magi.core.evolution import EvolutionStore
+
+    return EvolutionStore(tmp_path / "memory", proposable=["curation.md"], **kwargs)
+
+
+def test_file_curator_proposal_queues_with_curator_source(tmp_path):
+    store = _evo_store(tmp_path)
+    proposal = PromptProposal(
+        target="curation.md", text="New policy body.", rationale="recurring over-saving"
+    )
+
+    assert file_curator_proposal(store, proposal) is True
+    (queued,) = store.list(status="pending")
+    assert queued.source == "curator"
+    assert queued.target == "curation.md"
+    assert queued.current_text  # the live prompt rode along for the review diff
+
+
+def test_file_curator_proposal_degrades_on_the_rails(tmp_path):
+    store = _evo_store(tmp_path, queue_max=1)
+    ok_one = PromptProposal(target="curation.md", text="v1 body.", rationale="r1")
+    assert file_curator_proposal(store, ok_one) is True
+
+    # Full queue: swallowed, not raised — curation must never break a chat.
+    assert file_curator_proposal(store, ok_one) is False
+    # Non-allowlisted target: same.
+    bad = PromptProposal(target="team/SOUL.md", text="drift", rationale="nope")
+    assert file_curator_proposal(store, bad) is False
+    assert len(store.list()) == 1
