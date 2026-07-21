@@ -8,7 +8,12 @@ the manager test injects a fake `CurateFn`.
 
 import pytest
 
-from magi.agent.curator import _format_input, _parse, file_curator_proposal
+from magi.agent.curator import (
+    _format_input,
+    _parse,
+    dispatch_curator_proposal,
+    file_curator_proposal,
+)
 from magi.core.memory import CurationInput, CurationResult, FactOp, PromptProposal
 from magi.core.memory import manager as manager_mod
 from magi.core.memory.manager import MemoryManager
@@ -305,3 +310,23 @@ def test_file_curator_proposal_degrades_on_the_rails(tmp_path):
     bad = PromptProposal(target="team/SOUL.md", text="drift", rationale="nope")
     assert file_curator_proposal(store, bad) is False
     assert len(store.list()) == 1
+
+
+def test_dispatch_handles_disabled_evolution_and_no_proposal(tmp_path):
+    proposal = PromptProposal(target="curation.md", text="body text", rationale="r")
+
+    # Evolution disabled (store None): dropped with a log line, never raised.
+    dispatch_curator_proposal(None, proposal)
+    # No proposal this turn: a plain no-op either way.
+    dispatch_curator_proposal(None, None)
+    dispatch_curator_proposal(_evo_store(tmp_path), None)
+    assert _evo_store(tmp_path).list() == []  # nothing was ever queued
+
+
+def test_dispatch_files_when_evolution_is_on(tmp_path):
+    store = _evo_store(tmp_path)
+    dispatch_curator_proposal(
+        store, PromptProposal(target="curation.md", text="body text", rationale="r")
+    )
+    (queued,) = store.list(status="pending")
+    assert queued.source == "curator"

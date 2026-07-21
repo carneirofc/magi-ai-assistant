@@ -62,6 +62,16 @@ Turns evicted from the live window, held until the next session fold consumes th
 The (user, session) a memory operation belongs to. Set once per message, read via
 a process-global ContextVar — never threaded as a tool argument.
 
+**Skill** (`magi/agent/skills`):
+One registrable capability unit: what the assistant *knows* (a prompt fragment,
+overlay-resolved at `skills/<name>.md` with the manifest's inline default as
+fallback) plus what it *can do* (lead tools / a memory-injected lead toolkit /
+member tools), behind one `enabled` gate. Registered via `register_skill` at the
+entrypoint, composed at team build. Skill prompts are evolution-proposable by
+default (per-manifest opt-out).
+_Avoid_: using "skill" loosely for a single tool (a tool is one callable; a
+skill bundles prompt + tools + gate).
+
 **Knowledge** (`magi/core/knowledge`):
 A global, read-only RAG corpus the agent searches via the `search_knowledge` tool
 — distinct from **memory**: memory is per-user and conversation-derived (the

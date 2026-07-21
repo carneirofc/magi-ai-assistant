@@ -15,7 +15,7 @@ must never break a chat.
 
 import json
 import re
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from agno.agent import Agent
 from agno.utils.log import log_info, log_warning
@@ -25,6 +25,9 @@ from magi.agent.model import build_member_model
 from magi.core.config import config
 from magi.core.memory import CurateFn, CurationInput, CurationResult, FactOp, PromptProposal
 from magi.core.prompts import load_prompt
+
+if TYPE_CHECKING:
+    from magi.core.evolution import EvolutionStore
 
 # The what-to-remember policy is a prompt file (prompts/curation.md), loaded via
 # the overlay seam so a persona can supply its own policy without editing the
@@ -111,34 +114,44 @@ def _parse(text: str) -> CurationResult:
     )
 
 
-def file_curator_proposal(store, proposal: PromptProposal) -> bool:
+def file_curator_proposal(store: "EvolutionStore", proposal: PromptProposal) -> bool:
     """File one curator proposal into the evolution queue; never raises.
 
     The same rails as every proposal (allowlisted target, capped queue) — a
     violation or any store failure degrades to a warning, because curation must
     never break a chat. Returns whether the proposal was queued."""
     try:
-        current = ""
-        try:
-            current = load_prompt(proposal.target)
-        except Exception:  # noqa: BLE001 — no file yet; a skill's inline default still shows.
-            from magi.agent.skills import find_skill_by_prompt_path
+        from magi.agent.skills import current_prompt_text
 
-            skill = find_skill_by_prompt_path(proposal.target)
-            current = skill.prompt if skill is not None else ""
         queued = store.propose(
             "prompt",
             proposal.target,
             proposal.text,
             proposal.rationale,
             source="curator",
-            current_text=current,
+            current_text=current_prompt_text(proposal.target),
         )
     except Exception as exc:  # noqa: BLE001 — full queue / bad target / IO: log and move on.
         log_warning(f"curator: proposal for {proposal.target!r} not filed ({exc})")
         return False
     log_info(f"curator: filed evolution proposal {queued.id} for {proposal.target!r}")
     return True
+
+
+def dispatch_curator_proposal(
+    store: Optional["EvolutionStore"], proposal: Optional[PromptProposal]
+) -> None:
+    """Route a parsed proposal to the queue, or drop it honestly.
+
+    Split from `curate` so every degrade branch is testable without a model:
+    no proposal is a no-op; evolution off (store None) logs the drop; filing
+    itself degrades inside `file_curator_proposal`."""
+    if proposal is None:
+        return
+    if store is None:
+        log_info(f"MemoryCurator: dropped a proposal for {proposal.target!r} (evolution disabled)")
+        return
+    file_curator_proposal(store, proposal)
 
 
 def build_memory_curator() -> CurateFn:
@@ -160,26 +173,18 @@ def build_memory_curator() -> CurateFn:
     if config.evolution_enabled:
         from pathlib import Path
 
-        from magi.agent.skills import proposable_skill_targets
+        from magi.agent.skills import evolution_proposable_targets
         from magi.core.evolution import EvolutionStore
 
         evolution_store = EvolutionStore(
-            Path(config.memory_dir),
-            proposable=[*config.evolution_proposable, *proposable_skill_targets()],
+            Path(config.memory_dir), proposable=evolution_proposable_targets()
         )
 
     async def curate(inp: CurationInput) -> CurationResult:
         resp = await agent.arun(input=_format_input(inp))
         text = get_text_from_message(resp.content) if resp.content else ""
         result = _parse(text)
-        if result.proposal is not None:
-            if evolution_store is not None:
-                file_curator_proposal(evolution_store, result.proposal)
-            else:
-                log_info(
-                    "MemoryCurator: dropped a proposal for "
-                    f"{result.proposal.target!r} (evolution disabled)"
-                )
+        dispatch_curator_proposal(evolution_store, result.proposal)
         if result.is_empty:
             log_info("MemoryCurator: no durable change this turn")
         return result

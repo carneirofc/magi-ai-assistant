@@ -209,3 +209,31 @@ def test_save_personal_without_a_scope_fails_honestly():
     result = save.entrypoint(text="x" * 30, title="My setup", personal=True)
     assert result.get("success") is False
     assert indexer.calls == []  # nothing indexed under a guessed scope
+
+
+class _ScopedCorpus:
+    """A searcher that actually filters by scope, like the real Qdrant query —
+    so isolation is exercised against behavior, not just the passed tuple."""
+
+    def __init__(self):
+        self._docs: list[tuple[str, KnowledgeHit]] = []
+
+    def add(self, scope, hit):
+        self._docs.append((scope, hit))
+
+    def search(self, query, top_k, *, subject=None, tags=(), scopes=(GLOBAL_SCOPE,)):
+        return [h for s, h in self._docs if s in scopes][:top_k]
+
+
+def test_two_users_cannot_see_each_others_personal_knowledge():
+    corpus = _ScopedCorpus()
+    corpus.add(GLOBAL_SCOPE, KnowledgeHit(text="shared fact", source="wiki", score=0.9, doc_id="g"))
+    corpus.add("user:alice", KnowledgeHit(text="alice's note", source="chat", score=0.8, doc_id="a"))
+
+    (as_alice,) = build_knowledge_tools(corpus, memory=_ScopeMemory("alice"))
+    texts = [s["text"] for s in as_alice.entrypoint(query="q").get("data")["snippets"]]
+    assert texts == ["shared fact", "alice's note"]
+
+    (as_bob,) = build_knowledge_tools(corpus, memory=_ScopeMemory("bob"))
+    texts = [s["text"] for s in as_bob.entrypoint(query="q").get("data")["snippets"]]
+    assert texts == ["shared fact"]  # alice's personal note is unreachable

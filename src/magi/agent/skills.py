@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Optional, Union
 
 from agno.utils.log import log_warning
 
+from magi.core.config import config
 from magi.core.prompts import load_prompt
 
 if TYPE_CHECKING:
@@ -165,3 +166,26 @@ def find_skill_by_prompt_path(path: str) -> Optional[Skill]:
         if skill.prompt_path == path:
             return skill
     return None
+
+
+def current_prompt_text(path: str) -> str:
+    """The live text at an overlay prompt path, for an honest before/after.
+
+    The resolved file when one exists anywhere on the overlay search path;
+    else a matching skill's inline default; else "". The one fallback both
+    propose paths (the lead's tool and the curator) share."""
+    try:
+        return load_prompt(path)
+    except Exception:  # noqa: BLE001 — no file yet is the normal skill case.
+        skill = find_skill_by_prompt_path(path)
+        return skill.prompt if skill is not None else ""
+
+
+def evolution_proposable_targets() -> list[str]:
+    """The full evolution allowlist for this deployment: the configured prompt
+    targets plus registered skills' prompts.
+
+    The single composition helper every propose surface (team assembly, the
+    curator, the admin store) reads, so a new proposable source is one edit —
+    core stays agent-free by having the extension live here."""
+    return [*config.evolution_proposable, *proposable_skill_targets()]

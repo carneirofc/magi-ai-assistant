@@ -18,7 +18,6 @@ from pydantic import BaseModel, Field
 
 from magi.agent.tools.outputs import ToolOutput, fail, ok
 from magi.core.evolution import EvolutionStore, ProposalError
-from magi.core.prompts import load_prompt
 
 
 class ProposalData(BaseModel):
@@ -70,19 +69,16 @@ def build_evolution_tools(store: EvolutionStore) -> list:
     ) -> ToolOutput[ProposalData]:
         """Queue a prompt revision for operator review (never applies directly)."""
         try:
-            current = ""
-            try:
-                current = load_prompt(target)
-            except Exception:  # noqa: BLE001 — a missing current text is fine (new overlay).
-                # A skill with no overlay file yet still has a real current
-                # text: the manifest's inline default. Show the operator the
-                # honest before/after.
-                from magi.agent.skills import find_skill_by_prompt_path
+            # File-or-skill-default resolution, shared with the curator's path.
+            from magi.agent.skills import current_prompt_text
 
-                skill = find_skill_by_prompt_path(target)
-                current = skill.prompt if skill is not None else ""
             proposal = store.propose(
-                "prompt", target, proposed_text, rationale, source="lead", current_text=current
+                "prompt",
+                target,
+                proposed_text,
+                rationale,
+                source="lead",
+                current_text=current_prompt_text(target),
             )
         except ProposalError as exc:
             return fail(str(exc))

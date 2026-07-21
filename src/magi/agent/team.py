@@ -187,16 +187,13 @@ def build_team(
     evolution_tools: list = []
     recipe_tools: list = []
     if config.evolution_enabled:
-        from magi.agent.skills import proposable_skill_targets
+        from magi.agent.skills import evolution_proposable_targets
         from magi.core.evolution import EvolutionStore
 
         evolution_tools = build_evolution_tools(
-            EvolutionStore(
-                memory.store.root,
-                # Registered skills' prompts join the allowlist (core stays
-                # agent-free, so the extension happens here, at composition).
-                proposable=[*config.evolution_proposable, *proposable_skill_targets()],
-            )
+            # Config targets + registered skills' prompts (core stays
+            # agent-free, so the allowlist extension composes here).
+            EvolutionStore(memory.store.root, proposable=evolution_proposable_targets())
         )
         recipe_tools = mark_origin(build_recipe_tools(memory.store.root), "recipe")
         log_info(
