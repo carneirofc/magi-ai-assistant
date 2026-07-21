@@ -110,11 +110,12 @@ dependencies = ["magi-ai-assistant"]    # pin magi-ai-assistant==0.1.* for a rel
 magi-ai-assistant = { path = "../chatbot", editable = true }
 ```
 
-Three seams, no forking:
+Four seams, no forking:
 
 ```python
-# register private specialists and tools at your entrypoint, before build_team()
+# register private specialists, tools & skills at your entrypoint, before build_team()
 from magi.agent.members import register_member
+from magi.agent.skills import Skill, register_skill
 from magi.agent.tools import register_lead_toolkit
 
 @register_member
@@ -122,6 +123,9 @@ def build_myspecialist(model): ...      # your own agno Agent factory
 
 @register_lead_toolkit
 def build_mytools(memory): ...          # your own lead tools, memory-injected
+
+register_skill(Skill(                   # prompt + tools + gate as one unit
+    name="dice", prompt="Roll dice via roll_dice…", tools=(roll_dice,)))
 ```
 
 - **Prompts are an overlay search path** — point a config dir at your persona's

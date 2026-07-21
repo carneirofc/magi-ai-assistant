@@ -8,6 +8,14 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Added
 
+- **Skill manifests.** A skill — what the assistant *knows* plus what it *can
+  do* — is now one registrable unit: `register_skill(Skill(name, prompt, tools,
+  lead_toolkit, member_tools, enabled))`. At team build each active skill's
+  prompt fragment is composed (labeled) into the lead's instructions and its
+  tools attached, honoring the gate. The prompt is overlay-aware (`skills/
+  <name>.md` wins over the inline default), a broken skill degrades with a
+  warning instead of aborting boot, and registration is idempotent by name.
+  Runnable demo: `examples/custom_skill.py`.
 - **Tool registration seam for persona overlays.** The tool twin of
   `register_member`: `register_tool(fn)` appends a tool to the shared member
   default set (flows through `enabled_tools()`), and

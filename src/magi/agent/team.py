@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from magi.agent.hooks import tool_call_hook
 from magi.agent.members import MEMBER_BUILDERS
 from magi.agent.model import build_lead_model, build_member_model
+from magi.agent.skills import compose_skill_prompts, skill_lead_tools
 from magi.agent.tools import registered_lead_tools
 from magi.agent.tools.http import HTTP_TOOLS
 from magi.agent.tools.identity import build_identity_tools
@@ -195,7 +196,11 @@ def build_team(
     # The lead's prompt is its soul (who Alyssa is) followed by the operational
     # router (how she delegates and wields tools). SOUL.md establishes identity
     # first so persona stays primary; lead.md supplies the hard rules and routing.
-    instructions = "\n\n".join((load_prompt("team/SOUL.md"), load_prompt("team/lead.md")))
+    # Active skills append their labeled fragments last, so a skill teaches
+    # without ever outranking identity or the routing rules.
+    instructions = "\n\n".join(
+        (load_prompt("team/SOUL.md"), load_prompt("team/lead.md"), *compose_skill_prompts())
+    )
     log_info(
         f"building team 'ChatbotTeam': lead={lead.id} (ctx={config.lead_num_ctx}, "
         f"temp={config.model_temperature}), member_model={member_model.id} "
@@ -274,6 +279,10 @@ def build_team(
             # Persona seam: lead toolkits registered from outside the engine
             # tree via register_lead_toolkit (empty when none are registered).
             *registered_lead_tools(memory),
+            # Skill manifests: each active skill's lead tools (see
+            # magi/agent/skills.py; its prompt fragment joined the
+            # instructions above).
+            *skill_lead_tools(memory),
             # Bound to the live model objects: members all share `member_model`,
             # so one mutation flips the whole team.
             *build_thinking_tools([lead, member_model]),

@@ -162,6 +162,32 @@ Then wire it in — two paths, depending on where you sit:
   builders follow the engine's own `build_*_tools(memory)` convention; a
   raising builder is skipped with a warning instead of aborting team build.
 
+### Skills — prompt + tools + gate as one unit
+
+When a capability needs the model to *know* something as well as *do*
+something, register a **skill** instead of wiring a prompt fragment and tools
+separately ([`skills.py`](../src/magi/agent/skills.py)):
+
+```python
+from magi.agent.skills import Skill, register_skill
+
+register_skill(Skill(
+    name="dice",                       # slug; prompt resolves at skills/dice.md
+    prompt="Roll dice via roll_dice…", # inline default fragment
+    tools=(roll_dice,),                # lead tools
+    lead_toolkit=build_dice_tools,     # optional, memory-injected
+    member_tools=(),                   # optional, joins the member default set
+    enabled=lambda: config.dice_on,    # gate, evaluated at team build
+))
+```
+
+At team build each active skill's prompt fragment is appended (labeled) to the
+lead's instructions and its tools attached. The prompt is overlay-aware: a
+file at `skills/<name>.md` (runtime overlay > persona dir > bundled) wins over
+the inline default — the seam self-evolution enhances. A disabled or raising
+skill degrades to "not attached"; the bot always boots. Runnable demo:
+[`examples/custom_skill.py`](../examples/custom_skill.py).
+
 ## Memory tools
 
 Durable memory is written by the **curator** (see [memory.md](memory.md#the-curator--who-writes-durable-memory)),

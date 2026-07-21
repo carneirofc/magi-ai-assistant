@@ -88,8 +88,12 @@ def registered_lead_tools(memory: "MemoryManager") -> list:
 def enabled_tools(tools: Sequence | None = None) -> list:
     """Resolve the tools to attach to an magi/agent/member.
 
-    `None` means the default set; pass an explicit list to override it entirely.
+    `None` means the default set — plus any active skill's member tools (late
+    import: skills sit above this module). Pass an explicit list to override
+    everything.
     """
     if tools is None:
-        tools = DEFAULT_TOOLS
+        from magi.agent.skills import skill_member_tools
+
+        return [*DEFAULT_TOOLS, *skill_member_tools()]
     return list(tools)
