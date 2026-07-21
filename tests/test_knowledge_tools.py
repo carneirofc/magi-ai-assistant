@@ -138,3 +138,74 @@ def test_tag_knowledge_missing_doc_is_failure():
     result = tag_knowledge.entrypoint(doc_id="nope.md", add=["x"])
     assert result.get("success") is False
     assert "No knowledge document" in result.get("message")
+
+
+# --- per-user scope (search + save_knowledge) --------------------------------
+class _FakeIndexer:
+    def __init__(self, chunks=1):
+        self.calls = []
+        self._chunks = chunks
+
+    def index_document(
+        self, doc_id, text, *, source, title=None, subject="", tags=None, scope="global", metadata=None
+    ):
+        self.calls.append({"doc_id": doc_id, "source": source, "scope": scope})
+        return self._chunks
+
+
+class _ScopeMemory:
+    """MemoryManager stand-in exposing just the ambient scope (or none)."""
+
+    def __init__(self, user_id=None):
+        self._uid = user_id
+
+    def scope(self):
+        if self._uid is None:
+            raise RuntimeError("memory scope not set")
+        from types import SimpleNamespace
+
+        return SimpleNamespace(user_id=self._uid, session_id="s")
+
+
+def test_search_spans_the_current_users_scope():
+    searcher = _FakeSearcher([])
+    (search_knowledge,) = build_knowledge_tools(searcher, memory=_ScopeMemory("42"))
+    search_knowledge.entrypoint(query="my note")
+    assert searcher.calls[0][4] == (GLOBAL_SCOPE, "user:42")
+
+
+def test_search_stays_global_without_an_ambient_scope():
+    searcher = _FakeSearcher([])
+    (search_knowledge,) = build_knowledge_tools(searcher, memory=_ScopeMemory(None))
+    search_knowledge.entrypoint(query="anything")
+    assert searcher.calls[0][4] == (GLOBAL_SCOPE,)
+
+
+def _save_tool(indexer, memory=None):
+    tools = build_knowledge_tools(_FakeSearcher([]), None, indexer, memory)
+    return next(t for t in tools if t.name == "save_knowledge")
+
+
+def test_save_defaults_to_the_global_scope():
+    indexer = _FakeIndexer()
+    save = _save_tool(indexer, _ScopeMemory("42"))
+    result = save.entrypoint(text="x" * 30, title="Shared notes")
+    assert result.get("success") is True
+    assert indexer.calls[0]["scope"] == GLOBAL_SCOPE
+
+
+def test_save_personal_targets_the_users_own_scope():
+    indexer = _FakeIndexer()
+    save = _save_tool(indexer, _ScopeMemory("42"))
+    result = save.entrypoint(text="x" * 30, title="My setup", personal=True)
+    assert result.get("success") is True
+    assert indexer.calls[0]["scope"] == "user:42"
+    assert "personal" in result.get("message")
+
+
+def test_save_personal_without_a_scope_fails_honestly():
+    indexer = _FakeIndexer()
+    save = _save_tool(indexer, _ScopeMemory(None))
+    result = save.entrypoint(text="x" * 30, title="My setup", personal=True)
+    assert result.get("success") is False
+    assert indexer.calls == []  # nothing indexed under a guessed scope

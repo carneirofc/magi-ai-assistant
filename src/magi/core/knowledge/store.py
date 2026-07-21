@@ -36,6 +36,14 @@ from magi.core.knowledge.chunking import chunk_text
 
 GLOBAL_SCOPE = "global"
 
+
+def user_scope(user_id: object) -> str:
+    """The scope value for one user's own knowledge (e.g. "user:42").
+
+    The single place the naming lives, so ingest and search can never drift
+    apart on the format."""
+    return f"user:{user_id}"
+
 # The item-archive kind tag for knowledge documents (see magi/core/items). doc_id is
 # globally unique in this store (index/delete key on it regardless of scope), so the
 # archived original is keyed by doc_id alone under the archive's global scope.

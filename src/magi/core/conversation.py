@@ -277,8 +277,17 @@ class ConversationService:
         """
         if self.knowledge is None or self.knowledge_top_k <= 0 or not query.strip():
             return ""
+        from magi.core.knowledge import GLOBAL_SCOPE, user_scope
+
+        # Global corpus + this user's own scope (set_scope ran in
+        # _prepare_input, so the ambient scope is this message's user). No
+        # resolvable scope degrades to global-only, never to no injection.
         try:
-            hits = self.knowledge.search(query, self.knowledge_top_k)
+            scopes = (GLOBAL_SCOPE, user_scope(self.memory.scope().user_id))
+        except Exception:  # noqa: BLE001
+            scopes = (GLOBAL_SCOPE,)
+        try:
+            hits = self.knowledge.search(query, self.knowledge_top_k, scopes=scopes)
         except Exception as exc:  # noqa: BLE001 — retrieval must never break a chat.
             log_warning(f"conversation: knowledge retrieval failed: {type(exc).__name__}: {exc}")
             return ""

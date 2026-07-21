@@ -376,6 +376,22 @@ def test_list_documents_endpoint_returns_rows():
     }
 
 
+def test_list_documents_endpoint_filters_by_scope():
+    docs = [
+        DocumentSummary(doc_id="a.md", source="a.md", title="A", subject="",
+                        tags=[], scope="global", chunk_count=1, latest_ts="t1"),
+        DocumentSummary(doc_id="b.md", source="b.md", title="B", subject="",
+                        tags=[], scope="user:42", chunk_count=1, latest_ts="t2"),
+    ]
+    client = _client(documents=docs)
+
+    body = client.get("/admin/v1/knowledge/documents", params={"scope": "user:42"}).json()
+    assert [d["doc_id"] for d in body["documents"]] == ["b.md"]
+    # No filter = the whole corpus, scopes intact.
+    body = client.get("/admin/v1/knowledge/documents").json()
+    assert {d["scope"] for d in body["documents"]} == {"global", "user:42"}
+
+
 def test_list_documents_requires_bearer_when_token_set():
     client = _client(auth_token="secret")
 

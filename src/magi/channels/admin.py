@@ -486,10 +486,13 @@ def create_admin_app(
         response_model=DocumentList,
         dependencies=[Depends(require_auth)],
     )
-    def list_documents() -> DocumentList:
-        return DocumentList(
-            documents=[DocumentSummaryOut.of(d) for d in knowledge.list_documents()]
-        )
+    def list_documents(scope: Optional[str] = Query(default=None)) -> DocumentList:
+        """Every document, optionally narrowed to one scope ("global",
+        "user:<id>", …) — the origin partition per-user knowledge lives in."""
+        documents = knowledge.list_documents()
+        if scope:
+            documents = [d for d in documents if d.scope == scope]
+        return DocumentList(documents=[DocumentSummaryOut.of(d) for d in documents])
 
     @app.post(
         "/admin/v1/knowledge/documents",

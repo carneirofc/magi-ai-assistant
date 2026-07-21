@@ -24,6 +24,7 @@ from magi.core.knowledge.store import (
     KnowledgeStore,
     KnowledgeTagger,
     build_knowledge_from_config,
+    user_scope,
 )
 
 __all__ = [
@@ -40,4 +41,5 @@ __all__ = [
     "SubjectRegistry",
     "build_knowledge_from_config",
     "chunk_text",
+    "user_scope",
 ]

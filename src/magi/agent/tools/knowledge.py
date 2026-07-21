@@ -7,9 +7,10 @@ when it needs reference material) rather than always-injected context, so the
 window isn't paid on every turn — only when a question actually calls for a lookup.
 
 `build_knowledge_tools(searcher)` binds the tool to an injected `KnowledgeSearcher`
-(the `KnowledgeStore`, or a fake in tests) — no globals. The corpus is global, so
-the tool takes only a query; the searcher's `scopes=` seam is where per-user/
-session knowledge would later be added without changing this tool's contract.
+(the `KnowledgeStore`, or a fake in tests) — no globals. Retrieval spans the
+global corpus plus the current user's own scope (resolved from the ambient
+memory scope, never a tool argument — cross-user leakage is impossible by
+construction); `save_knowledge` can target that personal scope explicitly.
 """
 
 import uuid
@@ -21,7 +22,14 @@ from pydantic import BaseModel, Field
 
 from magi.agent.tools.outputs import ToolOutput, fail, ok
 from magi.core.config import config
-from magi.core.knowledge import KnowledgeIndexer, KnowledgeSearcher, KnowledgeTagger
+from magi.core.knowledge import (
+    GLOBAL_SCOPE,
+    KnowledgeIndexer,
+    KnowledgeSearcher,
+    KnowledgeTagger,
+    user_scope,
+)
+from magi.core.memory import MemoryManager
 
 
 class KnowledgeSnippet(BaseModel):
@@ -55,13 +63,30 @@ def build_knowledge_tools(
     searcher: KnowledgeSearcher,
     tagger: Optional[KnowledgeTagger] = None,
     indexer: Optional[KnowledgeIndexer] = None,
+    memory: Optional[MemoryManager] = None,
 ) -> list:
     """Return the knowledge tool set bound to the injected dependencies.
 
     `searcher` powers the read tool; when `tagger` is given (the store), the
     tag-write tool is included too; when `indexer` is given, `save_knowledge`
     lets the lead ingest chat-surfaced material into the corpus. The store
-    satisfies all three, so the composition root passes it for each."""
+    satisfies all three, so the composition root passes it for each. `memory`
+    supplies the ambient (user, session) scope: with it, searches also span
+    the current user's own knowledge and saves can target it; without it (or
+    outside a message) everything stays global-only."""
+
+    def _current_user() -> Optional[str]:
+        """The ambient user id, or None outside a scoped message."""
+        if memory is None:
+            return None
+        try:
+            return memory.scope().user_id
+        except Exception:  # noqa: BLE001 — no scope set (e.g. a direct call) is fine.
+            return None
+
+    def _search_scopes() -> tuple[str, ...]:
+        uid = _current_user()
+        return (GLOBAL_SCOPE, user_scope(uid)) if uid else (GLOBAL_SCOPE,)
 
     @tool(
         description="Search the knowledge base for reference material relevant to a question.",
@@ -106,6 +131,8 @@ def build_knowledge_tools(
             config.knowledge_top_k,
             subject=subject.strip() or None,
             tags=[t for t in tags if t.strip()],
+            # Global corpus + the current user's own scope — never anyone else's.
+            scopes=_search_scopes(),
         )
         snippets = [
             KnowledgeSnippet(
@@ -136,8 +163,12 @@ def build_knowledge_tools(
                 "future conversations should be able to look up via search_knowledge. "
                 "NOT for facts about the user themselves (memory handles those "
                 "automatically). Pass the material verbatim as `text` with a short "
-                "`title`; `subject`/`tags` improve later retrieval. Saving is explicit "
-                "and user-visible: mention what you saved and its title."
+                "`title`; `subject`/`tags` improve later retrieval. Set "
+                "`personal=True` when the material is for THIS user only (their own "
+                "notes, their setup) — it then surfaces only in their conversations, "
+                "never anyone else's; leave it False for material everyone should "
+                "find. Saving is explicit and user-visible: mention what you saved, "
+                "its title, and whether it was personal."
             ),
             show_result=True,
         )
@@ -156,14 +187,31 @@ def build_knowledge_tools(
             tags: Annotated[
                 list[str], Field(default_factory=list, description="Optional free-form labels.")
             ] = [],  # noqa: B006 — agno reads the annotation default; never mutated.
+            personal: Annotated[
+                bool,
+                Field(
+                    default=False,
+                    description="True = only this user's conversations can find it; False = shared.",
+                ),
+            ] = False,
         ) -> ToolOutput[SavedKnowledgeData]:
             """Ingest one document of reference material into the knowledge base.
 
             For shareable topic material, not user facts. The text is chunked and
-            indexed verbatim, so save exactly what should be retrievable later. A
+            indexed verbatim, so save exactly what should be retrievable later.
+            `personal=True` scopes it to the current user's own corpus. A
             zero-chunk result means the save failed (empty text or the knowledge
             backend is down) — report that, never claim it was saved.
             """
+            scope = GLOBAL_SCOPE
+            if personal:
+                uid = _current_user()
+                if uid is None:
+                    return fail(
+                        "Cannot save personal knowledge: no user scope is active "
+                        "for this message."
+                    )
+                scope = user_scope(uid)
             doc_id = f"chat-{uuid.uuid4().hex[:12]}"
             chunks = indexer.index_document(
                 doc_id,
@@ -172,6 +220,7 @@ def build_knowledge_tools(
                 title=title.strip(),
                 subject=subject.strip(),
                 tags=[t for t in tags if t.strip()],
+                scope=scope,
             )
             if chunks <= 0:
                 log_info(f"knowledge: save {title.strip()!r} failed (0 chunks)")
@@ -179,9 +228,13 @@ def build_knowledge_tools(
                     "Could not save to the knowledge base (nothing indexed — is the "
                     "knowledge backend up?)."
                 )
-            log_info(f"knowledge: saved doc {doc_id!r} ({chunks} chunk(s)) title={title.strip()!r}")
+            log_info(
+                f"knowledge: saved doc {doc_id!r} ({chunks} chunk(s)) "
+                f"title={title.strip()!r} scope={scope!r}"
+            )
             return ok(
-                f"Saved '{title.strip()}' ({chunks} chunk(s)).",
+                f"Saved '{title.strip()}' ({chunks} chunk(s)"
+                + (", personal — only this user can find it)." if personal else ")."),
                 SavedKnowledgeData(doc_id=doc_id, title=title.strip(), chunks=chunks),
             )
 

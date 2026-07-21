@@ -70,6 +70,8 @@ curator owns it); knowledge is a shared *document* corpus, chunked + embedded
 Qdrant collection. Reuses the shared proxy embedder (`magi/core/embeddings`) and the
 Qdrant endpoint. Populated out-of-band (`scripts/ingest_knowledge.py`); gated by
 `knowledge_enabled`; degrades to no tool when off / Qdrant down. Chunks carry a
-`scope` field (`"global"` today) — `store.search(scopes=…)` is the seam for
-per-user/session knowledge later.
+`scope` field — `"global"` for the shared corpus, `user:<id>` for one user's own
+knowledge (saved via `save_knowledge(personal=True)`). Search and auto-injection
+span global + the current user's scope, resolved from the ambient memory scope —
+never a tool argument, so cross-user leakage is impossible by construction.
 _Avoid_: conflating with memory (different lifecycle, different store).

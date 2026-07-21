@@ -160,8 +160,9 @@ class _FakeKnowledge:
         self._hits = hits
         self.queries = []
 
-    def search(self, query, top_k):
+    def search(self, query, top_k, *, scopes=("global",)):
         self.queries.append((query, top_k))
+        self.scopes = tuple(scopes)
         return self._hits
 
 
@@ -184,12 +185,35 @@ async def test_knowledge_hits_folded_into_context():
     assert "handbook.md" in call["input"]  # source labels the chunk
 
 
+async def test_knowledge_auto_injection_spans_the_users_own_scope():
+    """The injection query covers the global corpus plus THIS user's scope —
+    resolved from the ambient memory scope, so it can never name another user."""
+
+    class _ScopedMemory(_FakeMemory):
+        def set_scope(self, user_id, session_id):
+            self._scope = SimpleNamespace(user_id=str(user_id), session_id=str(session_id))
+
+        def scope(self):
+            return self._scope
+
+    hit = SimpleNamespace(source="notes.md", doc_id="d1", text="my note")
+    response = SimpleNamespace(status="COMPLETED", content="ok", reasoning_content=None)
+    knowledge = _FakeKnowledge([hit])
+    service = ConversationService(
+        runner=_FakeRunner(response), memory=_ScopedMemory(), knowledge=knowledge, knowledge_top_k=3
+    )
+
+    await service.handle(user_id=42, session_id="s", text="what did I note?")
+
+    assert knowledge.scopes == ("global", "user:42")
+
+
 async def test_knowledge_not_searched_when_auto_injection_off():
     """top_k <= 0 means tool-only retrieval — the searcher is never touched and the
     input stays bare."""
 
     class _BoomKnowledge:
-        def search(self, query, top_k):
+        def search(self, query, top_k, *, scopes=("global",)):
             raise AssertionError("must not search when auto-injection is off")
 
     response = SimpleNamespace(status="COMPLETED", content="ok", reasoning_content=None)
@@ -207,7 +231,7 @@ async def test_knowledge_retrieval_failure_never_breaks_the_turn():
     """A searcher that raises is swallowed — the turn proceeds with no knowledge block."""
 
     class _BoomKnowledge:
-        def search(self, query, top_k):
+        def search(self, query, top_k, *, scopes=("global",)):
             raise RuntimeError("qdrant down")
 
     response = SimpleNamespace(status="COMPLETED", content="ok", reasoning_content=None)

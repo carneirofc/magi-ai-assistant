@@ -1,9 +1,11 @@
 "use client";
 
-// The knowledge document list with filters: subject is a hard filter (a row must
-// match), tags are soft (matching rows float to the top but none are hidden) —
-// mirroring how the model's search_knowledge treats them. A table/grid toggle
-// switches between a dense list and mem0-style memory cards.
+// The knowledge document list with filters: subject and scope are hard filters
+// (a row must match), tags are soft (matching rows float to the top but none are
+// hidden) — mirroring how the model's search_knowledge treats them. Scope is the
+// origin partition ("global" for the shared corpus, "user:<id>" for one user's
+// own knowledge). A table/grid toggle switches between a dense list and
+// mem0-style memory cards.
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -30,6 +32,7 @@ type Doc = {
   title: string;
   subject: string;
   tags: string[];
+  scope: string;
   chunk_count: number;
   latest_ts: string;
 };
@@ -44,11 +47,18 @@ export function KnowledgeList({
   subjects: string[];
 }) {
   const [subject, setSubject] = useState("");
+  const [scope, setScope] = useState("");
   const [tag, setTag] = useState("");
   const [view, setView] = useState<View>("table");
 
+  const scopes = useMemo(
+    () => [...new Set(documents.map((d) => d.scope).filter(Boolean))].sort(),
+    [documents],
+  );
+
   const rows = useMemo(() => {
-    const filtered = subject ? documents.filter((d) => d.subject === subject) : [...documents];
+    let filtered = subject ? documents.filter((d) => d.subject === subject) : [...documents];
+    if (scope) filtered = filtered.filter((d) => d.scope === scope);
     if (tag.trim()) {
       const t = tag.trim().toLowerCase();
       filtered.sort((a, b) => {
@@ -58,7 +68,7 @@ export function KnowledgeList({
       });
     }
     return filtered;
-  }, [documents, subject, tag]);
+  }, [documents, subject, scope, tag]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -79,6 +89,23 @@ export function KnowledgeList({
               ))}
             </SelectInput>
           </label>
+          {scopes.length > 1 ? (
+            <label className="flex flex-col gap-1">
+              <span className="ui-text-label-sm text-[color:var(--ui-ink-accent)]">Scope</span>
+              <SelectInput
+                controlSize="sm"
+                value={scope}
+                onChange={(e) => setScope(e.target.value)}
+              >
+                <option value="">all</option>
+                {scopes.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </SelectInput>
+            </label>
+          ) : null}
           <label className="flex flex-col gap-1">
             <span className="ui-text-label-sm text-[color:var(--ui-ink-accent)]">Tag bias</span>
             <TextInput
@@ -124,11 +151,14 @@ export function KnowledgeList({
                     <div className="text-ui-2xs text-[color:var(--ui-ink-subtle)]">{d.doc_id}</div>
                   </TableCell>
                   <TableCell>
-                    {d.subject ? (
-                      <InfoChip>{d.subject}</InfoChip>
-                    ) : (
-                      <span className="text-[color:var(--ui-ink-subtle)]">—</span>
-                    )}
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      {d.subject ? (
+                        <InfoChip>{d.subject}</InfoChip>
+                      ) : (
+                        <span className="text-[color:var(--ui-ink-subtle)]">—</span>
+                      )}
+                      {d.scope && d.scope !== "global" ? <InfoChip>{d.scope}</InfoChip> : null}
+                    </span>
                   </TableCell>
                   <TableCell>
                     <span className="text-[color:var(--ui-ink-muted)]">
@@ -157,6 +187,7 @@ export function KnowledgeList({
                 <p className="truncate text-ui-2xs text-[color:var(--ui-ink-subtle)]">{d.doc_id}</p>
                 <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-1">
                   {d.subject ? <InfoChip>{d.subject}</InfoChip> : null}
+                  {d.scope && d.scope !== "global" ? <InfoChip>{d.scope}</InfoChip> : null}
                   {d.tags.slice(0, 3).map((t) => (
                     <InfoChip key={t}>{t}</InfoChip>
                   ))}

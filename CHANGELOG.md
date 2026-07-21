@@ -8,6 +8,14 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Added
 
+- **Per-user knowledge scope.** The knowledge store's reserved `scope` seam is
+  now live end to end: `save_knowledge(personal=True)` files a document under
+  the current user's own scope (`user:<id>`, resolved from the ambient memory
+  scope — never a tool argument), and both `search_knowledge` and context
+  auto-injection span the global corpus plus that user's scope, never anyone
+  else's. The admin knowledge list exposes each document's scope, filters by it
+  (`?scope=` on the API, a scope dropdown in the dashboard), and marks
+  non-global documents in both table and card views.
 - **Skill prompts are evolution targets.** Registered skills join the
   self-evolution allowlist (per-manifest opt-out via `Skill(proposable=False)`),
   so the assistant can propose improvements to its own skills under the same

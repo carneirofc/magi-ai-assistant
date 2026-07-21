@@ -171,8 +171,10 @@ def build_team(
         knowledge = build_knowledge_from_config()
     if knowledge is not None:
         # The store is searcher, tagger AND indexer, so it powers the read,
-        # tag-write, and save (chat-derived ingest) tools alike.
-        knowledge_tools = build_knowledge_tools(knowledge, knowledge, knowledge)
+        # tag-write, and save (chat-derived ingest) tools alike. Memory supplies
+        # the ambient user scope, so searches span the user's own knowledge and
+        # saves can target it.
+        knowledge_tools = build_knowledge_tools(knowledge, knowledge, knowledge, memory)
         log_info(
             f"knowledge: ENABLED ({len(knowledge_tools)} tool(s), "
             f"collection={config.knowledge_collection})"
