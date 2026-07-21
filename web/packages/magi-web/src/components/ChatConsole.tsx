@@ -1,24 +1,36 @@
 "use client";
 
-// The chat console: an operator playground for talking to the running assistant over
-// streaming SSE. Built on assistant-ui's LocalRuntime (state, streaming, auto-
-// scroll, cancel come for free) but rendered with unstyled primitives themed via
-// @carneirofc/ui tokens so it matches the rest of the dashboard.
+// The chat console: the single conversation surface — an LLM-chatbot arrangement
+// (session rail | centered transcript + composer) that absorbs the companion
+// presence when the app passes expression art. Built on assistant-ui's
+// LocalRuntime (state, streaming, auto-scroll, cancel come for free) but rendered
+// with unstyled primitives themed via @carneirofc/ui tokens so it matches the
+// rest of the dashboard.
 //
-// Feature-rich by design: sender avatars flank each turn; the composer takes image
-// + file attachments (drag-drop, dictation, click any image to zoom); the transcript
-// renders live *thinking* (reasoning) and *tool activity* (tool cards) as they
-// stream; assistant Markdown renders GFM, syntax-highlights ```lang fences (Shiki,
-// see CodeBlock.tsx) and draws `mermaid` fences as diagrams; reply media renders
-// inline (images) or as links (files); selecting text in a reply offers a "Quote"
-// action that cites it in the next turn; and a context-window meter in the composer
-// footer reports each turn's token usage (streamed on the `done` frame).
+// Feature-rich by design: the composer takes image + file attachments (drag-drop,
+// dictation, click any image to zoom); the transcript renders live *thinking*
+// (reasoning) and *tool activity* (tool cards) as they stream; assistant Markdown
+// renders GFM, syntax-highlights ```lang fences (Shiki, see CodeBlock.tsx) and
+// draws `mermaid` fences as diagrams; reply media renders inline (images) or as
+// links (files); selecting text in a reply offers a "Quote" action that cites it
+// in the next turn; and a context-window meter in the composer footer reports
+// each turn's token usage (streamed on the `done` frame).
 //
-// The `user_id` scopes durable memory (chat "as" any user to test their memory).
-// Conversations are tracked client-side (chat-sessions.ts): the session rail lists
-// them, switching re-keys ChatThread → a fresh runtime with an empty transcript,
-// while the assistant still remembers that session id server-side. The bearer token
-// stays server-side; see api/chat/route.ts.
+// The companion presence (the chat + companion merge): pass `expressions` (mood →
+// portrait URL) and the persona joins the console itself — a mood-reactive bust
+// in the header bar, the full PersonaStage portrait in a collapsible presence
+// column (plus whatever `presencePanel` mounts under it: memory, reminders), and
+// her face as the assistant's message avatar. No expressions → the console is the
+// same surface minus the presence chrome, so plain deployments keep working.
+//
+// The `user_id` scopes durable memory. It seeds from `defaultUserId` (or pins
+// hard via `pinnedUserId`) and the operator "chat as" switcher lives in a header
+// popover — testing another user's memory stays one click away without a raw
+// input dominating the chrome. Conversations are tracked client-side
+// (chat-sessions.ts): the session rail lists them, switching re-keys ChatThread →
+// a fresh runtime with an empty transcript, while the assistant still remembers
+// that session id server-side. The bearer token stays server-side; see
+// api/chat/route.ts.
 
 import {
   createContext,
@@ -68,6 +80,7 @@ import { createRecordingDictationAdapter, recordingSupported } from "../lib/chat
 import { ContextDisplay, type ThreadTokenUsage } from "./assistant-ui/context-display";
 import { ContextInspector } from "./ContextInspector";
 import { ArchiveReference } from "./ArchiveReference";
+import { PersonaStage, resolveExpression } from "./PersonaStage";
 import { CodeHeader, CodeSyntaxHighlighter } from "./CodeBlock";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { clearSessionHistory, createSessionHistoryAdapter } from "../lib/chat-history";
@@ -93,16 +106,19 @@ import {
 
 const USER_KEY = "magi.chat.userId";
 const RAIL_KEY = "magi.chat.railCollapsed";
+const PRESENCE_KEY = "magi.chat.presenceCollapsed";
 const DEFAULT_USER = "console";
-
-// The active user id, so user-message avatars can show whose turn it is (the
-// message parts assistant-ui hands to a renderer don't carry it).
-const UserIdContext = createContext<string>(DEFAULT_USER);
 
 // The bot's presented identity (name + avatar URL), so the assistant's face and
 // name match what's configured on the Identity page. Both null → default glyph.
 type ChatIdentity = { avatarUrl: string | null; name: string | null };
 const IdentityContext = createContext<ChatIdentity>({ avatarUrl: null, name: null });
+
+// The persona's visual presence (expression art + display name), so message
+// avatars, the empty state, and the composer placeholder can all speak with the
+// configured face/name. Null expressions → no presence chrome anywhere.
+type PersonaVisuals = { expressions: Record<string, string> | null; name: string | null };
+const PersonaContext = createContext<PersonaVisuals>({ expressions: null, name: null });
 
 /** Which voice capabilities this deployment wired (chat-api /v1/tts and
  * /v1/stt). Both default off — the console then behaves exactly as before
@@ -111,10 +127,14 @@ export type ChatVoiceConfig = { tts?: boolean; stt?: boolean };
 const VoiceCapsContext = createContext<ChatVoiceConfig>({});
 
 export type ChatConsoleProps = {
-  /** Pin every turn to this user id: the id input disappears and localStorage is
-   * ignored — the companion surface chats as one configured person, while the
-   * operator console (no prop) keeps its free switcher for testing. */
+  /** Pin every turn to this user id: the "chat as" switcher disappears and
+   * localStorage is ignored — the surface chats as one configured person. */
   pinnedUserId?: string | null;
+  /** Seed the user id without pinning it: turns start attributed to this person
+   * (durable memory accrues to them) but the header keeps the operator "chat
+   * as" popover for testing another user's memory. Session-local — switching
+   * is never persisted, so a reload always comes back as this id. */
+  defaultUserId?: string | null;
   /** Greet-on-open: when the active conversation is brand new (empty
    * transcript — including "New chat"), the assistant speaks first via the
    * engine's greeting turn. Resuming an ongoing conversation never greets.
@@ -124,14 +144,30 @@ export type ChatConsoleProps = {
    * /api/chat/tts); `stt` swaps the mic to record-and-transcribe server-side
    * (BFF /api/chat/stt — the only mic that works in the desktop shell). */
   voice?: ChatVoiceConfig;
+  /** mood name → portrait URL. Providing the map merges the companion into the
+   * console: header bust, presence column (PersonaStage), expression-art
+   * message avatars. See PersonaStage for resolution/fallback rules. */
+  expressions?: Record<string, string> | null;
+  /** The persona's display name. Falls back to the configured identity name. */
+  personaName?: string | null;
+  /** Extra presence-column content under the portrait (memory panel, reminders).
+   * Rendered inside the console's mood scope, so lifecycle-reactive panels work. */
+  presencePanel?: ReactNode;
+  /** Extra header-bar content (status pills etc.), right-aligned. */
+  headerExtra?: ReactNode;
 };
 
 export function ChatConsole({
   pinnedUserId = null,
+  defaultUserId = null,
   greetOnOpen = false,
   voice = {},
+  expressions = null,
+  personaName = null,
+  presencePanel,
+  headerExtra,
 }: ChatConsoleProps = {}) {
-  const [userId, setUserId] = useState(pinnedUserId || DEFAULT_USER);
+  const [userId, setUserId] = useState(pinnedUserId || defaultUserId || DEFAULT_USER);
   // Null until mounted so the first client render matches the server (no crypto /
   // localStorage during SSR → no hydration mismatch).
   const [registry, setRegistry] = useState<SessionRegistry | null>(null);
@@ -139,21 +175,36 @@ export function ChatConsole({
   // Whether the conversation rail is collapsed to a slim strip. Persisted so the
   // operator's preference survives reloads.
   const [railCollapsed, setRailCollapsed] = useState(false);
+  // Whether the presence column (portrait + panels) is open. Persisted like the
+  // rail; only meaningful when the console has presence content at all.
+  const [presenceOpen, setPresenceOpen] = useState(true);
   // Bumped when a greeting lands, so the thread remounts and its history
   // adapter restores the seeded greeting (see GreetOnOpen below).
   const [greetEpoch, setGreetEpoch] = useState(0);
   const onGreeted = useCallback(() => setGreetEpoch((e) => e + 1), []);
 
   useEffect(() => {
-    if (!pinnedUserId) setUserId(localStorage.getItem(USER_KEY) || DEFAULT_USER);
+    // Free mode (no pin, no default) restores the last "chat as" id; a seeded
+    // console always starts as the configured person.
+    if (!pinnedUserId && !defaultUserId)
+      setUserId(localStorage.getItem(USER_KEY) || DEFAULT_USER);
     setRegistry(loadRegistry());
     setRailCollapsed(localStorage.getItem(RAIL_KEY) === "1");
-  }, [pinnedUserId]);
+    setPresenceOpen(localStorage.getItem(PRESENCE_KEY) !== "1");
+  }, [pinnedUserId, defaultUserId]);
 
   function toggleRail() {
     setRailCollapsed((prev) => {
       const next = !prev;
       localStorage.setItem(RAIL_KEY, next ? "1" : "0");
+      return next;
+    });
+  }
+
+  function togglePresence() {
+    setPresenceOpen((prev) => {
+      const next = !prev;
+      localStorage.setItem(PRESENCE_KEY, next ? "0" : "1");
       return next;
     });
   }
@@ -181,7 +232,9 @@ export function ChatConsole({
 
   function changeUser(value: string) {
     setUserId(value);
-    localStorage.setItem(USER_KEY, value || DEFAULT_USER);
+    // Only the free operator console persists the switch; a seeded surface
+    // (defaultUserId) treats it as a session-local test drive.
+    if (!defaultUserId) localStorage.setItem(USER_KEY, value || DEFAULT_USER);
   }
 
   // One place to apply a registry mutation: persist + set state.
@@ -228,43 +281,41 @@ export function ChatConsole({
   const active = activeSession(registry);
   const sessionId = active?.id ?? "";
   const greetKey = `${sessionId}:${greetEpoch}`;
+  const displayName = personaName || identity.name;
+  const persona: PersonaVisuals = { expressions, name: displayName };
+  const hasPresence = Boolean(expressions || presencePanel);
 
   return (
     <IdentityContext.Provider value={identity}>
+    <PersonaContext.Provider value={persona}>
     <VoiceCapsContext.Provider value={voice}>
-    {/* Mood + voice signals: join the page's providers when mounted (the
-        companion layout shares them with its stage), else scope our own so the
-        composer's mood badge and the speak controls still work standalone. */}
+    {/* Mood + voice signals: join the page's providers when mounted, else scope
+        our own — the header bust, presence stage, composer mood badge and the
+        speak controls all read the same signal either way. */}
     <MoodScope>
     <VoiceScope>
     <div className="flex min-h-[520px] flex-1 flex-col gap-3">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        {pinnedUserId ? (
-          <span />
-        ) : (
-          <label className="flex flex-col gap-1">
-            <span className="text-ui-2xs font-semibold uppercase tracking-wide text-[color:var(--ui-ink-subtle)]">
-              Chat as user id
-            </span>
-            <TextInput
-              value={userId}
-              onChange={(e) => changeUser(e.target.value)}
-              spellCheck={false}
-              className="w-56 font-mono text-ui-xs"
-              aria-label="User id to chat as"
-            />
-          </label>
-        )}
-        <span className="flex items-center gap-2">
+      {/* Header bar: the persona anchors the left (face + name + live status);
+          controls stack on the right, chatbot-style. */}
+      <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-xl border border-ui bg-[color:var(--ui-bg)] px-3 py-2">
+        <PersonaChip expressions={expressions} name={displayName} avatarUrl={identity.avatarUrl} />
+        <div className="flex flex-wrap items-center gap-2">
+          {headerExtra}
           {voice.tts ? <AutoSpeakToggle /> : null}
+          {pinnedUserId ? null : (
+            <UserSwitcher userId={userId} defaultUserId={defaultUserId} onChange={changeUser} />
+          )}
+          {hasPresence ? (
+            <PresenceToggle open={presenceOpen} onToggle={togglePresence} />
+          ) : null}
           <span
-            className="font-mono text-ui-2xs text-[color:var(--ui-ink-subtle)]"
+            className="hidden font-mono text-ui-2xs text-[color:var(--ui-ink-subtle)] sm:inline"
             title="Conversation id (scopes session memory)"
           >
             {sessionId}
           </span>
-        </span>
-      </div>
+        </div>
+      </header>
 
       <div className="flex min-h-0 flex-1 gap-3">
         <SessionRail
@@ -277,7 +328,7 @@ export function ChatConsole({
           onTogglePin={(id) => commit(togglePinSession(registry, id))}
           onToggleArchive={(id) => commit(toggleArchiveSession(registry, id))}
           onExport={(session, format) =>
-            void exportTranscript(session.id, session.title, format, identity.name ?? "Assistant")
+            void exportTranscript(session.id, session.title, format, displayName ?? "Assistant")
           }
           onRemove={(id) => {
             clearSessionHistory(id);
@@ -297,12 +348,217 @@ export function ChatConsole({
             onFreshSession={() => commit(createSession(registry))}
           />
         </div>
+
+        {/* The presence column: her full portrait reacting to the stream, with
+            whatever the app mounts under it (memory, reminders). Collapsible
+            from the header; hidden below xl where the header bust carries the
+            face instead. Lives inside the MoodScope so lifecycle-reactive
+            panels (MemoryPanel) refresh on turn completion. */}
+        {hasPresence && presenceOpen ? (
+          <aside className="hidden w-60 shrink-0 flex-col gap-3 overflow-y-auto xl:flex 2xl:w-72">
+            {expressions ? (
+              <PersonaStage expressions={expressions} name={displayName} />
+            ) : null}
+            {presencePanel}
+          </aside>
+        ) : null}
       </div>
     </div>
     </VoiceScope>
     </MoodScope>
     </VoiceCapsContext.Provider>
+    </PersonaContext.Provider>
     </IdentityContext.Provider>
+  );
+}
+
+// --- header bar ---------------------------------------------------------------
+/** Status caption text while a turn (or voice) is active. */
+const CHIP_STATUS: Record<string, string | null> = {
+  idle: null,
+  thinking: "thinking…",
+  streaming: "replying…",
+  tool: "working…",
+  error: "connection trouble",
+};
+
+/** The persona's anchor in the header bar: a small reactive bust (expression
+ * art following the streamed mood), the display name, and a live status line
+ * (mood · lifecycle/voice). Without expression art it falls back to the
+ * configured identity avatar, then a monogram — so the plain console keeps an
+ * identity anchor too. */
+function PersonaChip({
+  expressions,
+  name,
+  avatarUrl,
+}: {
+  expressions: Record<string, string> | null;
+  name: string | null;
+  avatarUrl: string | null;
+}) {
+  const { mood, lifecycle } = useMood();
+  const { speaking, listening } = useVoice();
+  const src = expressions
+    ? (resolveExpression(expressions, mood, "neutral") ?? avatarUrl)
+    : avatarUrl;
+  const status = listening
+    ? "listening…"
+    : speaking
+      ? "speaking…"
+      : CHIP_STATUS[lifecycle] ?? null;
+
+  return (
+    <div className="flex min-w-0 items-center gap-2.5">
+      {src ? (
+        // eslint-disable-next-line @next/next/no-img-element -- dynamic persona art
+        <img
+          src={src}
+          alt=""
+          draggable={false}
+          className={`h-9 w-9 shrink-0 select-none rounded-full border border-ui object-cover transition-[filter] duration-300 ${
+            lifecycle === "error" ? "saturate-[.35] brightness-90" : ""
+          }`}
+        />
+      ) : (
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-ui bg-[color:var(--ui-bg-soft)] text-ui-sm font-semibold text-[color:var(--ui-ink-accent)]">
+          {(name ?? "?").slice(0, 1).toUpperCase()}
+        </div>
+      )}
+      <div className="flex min-w-0 flex-col">
+        <span className="truncate text-ui-sm font-semibold text-[color:var(--ui-ink)]">
+          {name ?? "Assistant"}
+        </span>
+        <span className="flex items-center gap-1.5 text-ui-2xs text-[color:var(--ui-ink-subtle)]">
+          {mood ? (
+            <span className="font-mono text-[color:var(--ui-ink-accent)]">{mood}</span>
+          ) : null}
+          {status ? (
+            <span className="flex items-center gap-1">
+              {lifecycle !== "error" ? (
+                <span
+                  aria-hidden
+                  className="inline-block h-1 w-1 animate-pulse rounded-full bg-current"
+                />
+              ) : (
+                <span aria-hidden>⚠</span>
+              )}
+              {status}
+            </span>
+          ) : mood ? null : (
+            <span>ready</span>
+          )}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** The operator "chat as" control: a compact chip showing the active user id
+ * that opens a small popover with the raw id input. Keeps the memory-scoping
+ * power feature one click away without a form field dominating the header. */
+function UserSwitcher({
+  userId,
+  defaultUserId,
+  onChange,
+}: {
+  userId: string;
+  defaultUserId: string | null;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const testing = Boolean(defaultUserId && userId !== defaultUserId);
+
+  // Light-dismiss: click anywhere outside closes the popover.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("pointerdown", onDown);
+    return () => window.removeEventListener("pointerdown", onDown);
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-ui-2xs transition-colors ${
+          testing
+            ? "border-[color:var(--ui-border-active)] text-[color:var(--ui-ink-accent)]"
+            : "border-ui text-[color:var(--ui-ink-subtle)] hover:text-[color:var(--ui-ink)]"
+        }`}
+        title={
+          testing
+            ? `Chatting as "${userId}" (testing — durable memory accrues to this id)`
+            : "Chat as another user id (scopes durable memory)"
+        }
+        aria-expanded={open}
+        aria-haspopup="dialog"
+      >
+        <UserIcon />
+        <span className="max-w-[9rem] truncate">{userId}</span>
+      </button>
+      {open ? (
+        <div
+          role="dialog"
+          aria-label="Chat as user id"
+          className="absolute right-0 top-full z-30 mt-1.5 flex w-64 flex-col gap-1.5 rounded-xl border border-ui bg-[color:var(--ui-bg)] p-3 shadow-lg"
+        >
+          <span className="text-ui-2xs font-semibold uppercase tracking-wide text-[color:var(--ui-ink-subtle)]">
+            Chat as user id
+          </span>
+          <TextInput
+            value={userId}
+            autoFocus
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === "Escape") setOpen(false);
+            }}
+            spellCheck={false}
+            className="w-full font-mono text-ui-xs"
+            aria-label="User id to chat as"
+          />
+          <span className="text-ui-2xs text-[color:var(--ui-ink-subtle)]">
+            Durable memory reads and writes are scoped to this id.
+          </span>
+          {defaultUserId && testing ? (
+            <button
+              type="button"
+              onClick={() => {
+                onChange(defaultUserId);
+                setOpen(false);
+              }}
+              className="self-start text-ui-2xs font-medium text-[color:var(--ui-ink-accent)] hover:opacity-80"
+            >
+              Back to {defaultUserId}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Show/hide the presence column (portrait + panels). Header-bar chip, xl+ only
+ * — below that the column never renders, so the toggle would be a no-op. */
+function PresenceToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`hidden items-center gap-1.5 rounded-full border px-2.5 py-1 text-ui-2xs font-medium transition-colors xl:inline-flex ${
+        open
+          ? "border-[color:var(--ui-border-active)] text-[color:var(--ui-ink-accent)]"
+          : "border-ui text-[color:var(--ui-ink-subtle)] hover:text-[color:var(--ui-ink)]"
+      }`}
+      title={open ? "Hide the presence panel" : "Show the presence panel"}
+      aria-pressed={open}
+    >
+      <PanelRightIcon />
+      Presence
+    </button>
   );
 }
 
@@ -487,7 +743,7 @@ function SessionRail({
   }
 
   return (
-    <aside className="flex w-52 shrink-0 flex-col gap-2 overflow-hidden rounded-xl border border-ui bg-[color:var(--ui-bg-soft)] p-2">
+    <aside className="flex w-56 shrink-0 flex-col gap-2 overflow-hidden rounded-xl border border-ui bg-[color:var(--ui-bg-soft)] p-2 2xl:w-64">
       <div className="flex items-center gap-2">
         <OutlineButton variant="accent" controlSize="md" onClick={onNew} className="flex-1">
           + New chat
@@ -786,7 +1042,6 @@ function ChatThread({
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-     <UserIdContext.Provider value={userId}>
       <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
         {/* Select text in any message to pop a "Quote" action; it captures the
             span into the composer, cited back to the assistant on the next send. */}
@@ -799,18 +1054,9 @@ function ChatThread({
 
         {/* Drop images/files anywhere over the conversation to attach them. */}
         <ComposerPrimitive.AttachmentDropzone className="group relative flex min-h-0 flex-1 flex-col rounded-lg outline-2 -outline-offset-2 outline-[color:var(--ui-border-active)] data-[dragging=true]:outline-dashed">
-          <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
+          <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4">
             <ThreadPrimitive.Empty>
-              <div className="m-auto flex max-w-sm flex-col items-center gap-1 text-center">
-                <p className="text-ui-sm font-medium text-[color:var(--ui-ink-muted)]">
-                  Talk to the assistant
-                </p>
-                <p className="text-ui-xs text-[color:var(--ui-ink-subtle)]">
-                  Drag in images or files, dictate with the mic, and watch it think and
-                  call tools. Messages route through the live team and read/write memory
-                  scoped to the user id above.
-                </p>
-              </div>
+              <ThreadEmptyState />
             </ThreadPrimitive.Empty>
 
             <ThreadPrimitive.Messages
@@ -839,54 +1085,77 @@ function ChatThread({
           />
         </ComposerPrimitive.AttachmentDropzone>
       </ThreadPrimitive.Root>
-     </UserIdContext.Provider>
     </AssistantRuntimeProvider>
   );
 }
 
-// --- avatars -----------------------------------------------------------------
-// A round sender chip beside each message. The user's shows the first letter of
-// the active user id (so "chatting as" someone is visible at a glance); the
-// assistant's is the configured profile picture (Identity page), falling back to
-// the assistant's initial in accent colors when none is set.
-function Avatar({ kind }: { kind: "user" | "assistant" }) {
-  const userId = useContext(UserIdContext);
+/** The fresh-conversation welcome: her portrait (reactive — a greet-on-open
+ * mood lands here before the first text token) with a chatbot-style prompt.
+ * Falls back to a text-only hero when the deployment has no expression art. */
+function ThreadEmptyState() {
+  const persona = useContext(PersonaContext);
   const identity = useContext(IdentityContext);
-  const isUser = kind === "user";
-  const initial = (userId.trim()[0] || "?").toUpperCase();
-  const assistantName = identity.name || "MAGI";
+  const { mood } = useMood();
+  const name = persona.name || identity.name || "the assistant";
+  const face = persona.expressions
+    ? resolveExpression(persona.expressions, mood, "neutral")
+    : identity.avatarUrl;
+  return (
+    <div className="m-auto flex max-w-md flex-col items-center gap-3 text-center">
+      {face ? (
+        // eslint-disable-next-line @next/next/no-img-element -- dynamic persona art
+        <img
+          src={face}
+          alt=""
+          draggable={false}
+          className="h-24 w-24 select-none rounded-3xl border border-ui object-cover shadow-sm"
+        />
+      ) : null}
+      <p className="text-ui-lg font-semibold text-[color:var(--ui-ink)]">
+        Chat with {name}
+      </p>
+      <p className="text-ui-xs text-[color:var(--ui-ink-subtle)]">
+        Ask anything. Drag in images or files, dictate with the mic, quote earlier
+        replies, and watch the thinking and tool activity stream in. She remembers —
+        durable memory accrues to the active user id.
+      </p>
+    </div>
+  );
+}
 
-  if (!isUser && identity.avatarUrl) {
+// --- avatars -----------------------------------------------------------------
+// The assistant's round face beside each reply: the configured profile picture
+// (Identity page) when set, else the persona's resting expression art (the
+// merged companion look), else the assistant's initial in accent colors. User
+// turns carry no avatar — chatbot-style, "who am I chatting as" lives in the
+// header switcher.
+function AssistantAvatar() {
+  const identity = useContext(IdentityContext);
+  const persona = useContext(PersonaContext);
+  const assistantName = persona.name || identity.name || "MAGI";
+  const src =
+    identity.avatarUrl ??
+    (persona.expressions ? resolveExpression(persona.expressions, null, "neutral") : null);
+
+  if (src) {
     return (
       <div
         className="h-7 w-7 shrink-0 select-none overflow-hidden rounded-full border border-ui"
         title={assistantName}
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- BFF-served, dynamic src */}
-        <img src={identity.avatarUrl} alt="" className="h-full w-full object-cover" />
+        <img src={src} alt="" className="h-full w-full object-cover" />
       </div>
     );
   }
 
   return (
     <div
-      className={`flex h-7 w-7 shrink-0 select-none items-center justify-center rounded-full border text-ui-2xs font-semibold ${
-        isUser
-          ? "border-accent-cyan/40 bg-[color:var(--ui-bg-info)] text-[color:var(--ui-ink)]"
-          : "border-ui bg-[color:var(--ui-bg-accent,var(--ui-bg-soft))] text-[color:var(--ui-ink-accent)]"
-      }`}
-      title={isUser ? `You — ${userId}` : assistantName}
+      className="flex h-7 w-7 shrink-0 select-none items-center justify-center rounded-full border border-ui bg-[color:var(--ui-bg-accent,var(--ui-bg-soft))] text-ui-2xs font-semibold text-[color:var(--ui-ink-accent)]"
+      title={assistantName}
       aria-hidden
     >
-      {isUser ? initial : (assistantName.trim()[0] || "M").toUpperCase()}
-    </div>
-  );
-}
-
-function RoleTag({ children }: { children: ReactNode }) {
-  return (
-    <div className="mb-1 text-ui-2xs font-semibold uppercase tracking-wide text-[color:var(--ui-ink-accent)]">
-      {children}
+      {(assistantName.trim()[0] || "M").toUpperCase()}
     </div>
   );
 }
@@ -1211,7 +1480,16 @@ function BranchPicker() {
 
 function UserMessage() {
   return (
-    <MessagePrimitive.Root className="group/message flex items-start justify-end gap-2">
+    <MessagePrimitive.Root className="group/message mx-auto flex w-full max-w-3xl flex-col items-end">
+      <div className="max-w-[85%] rounded-2xl rounded-br-md border border-accent-cyan/40 bg-[color:var(--ui-bg-info)] px-3.5 py-2.5">
+        <QuotedContext />
+        <div className="mb-1 flex flex-wrap gap-2 empty:mb-0">
+          <MessagePrimitive.Attachments components={{ Attachment: AttachmentTile }} />
+        </div>
+        <div className="whitespace-pre-wrap break-words text-ui-sm text-[color:var(--ui-ink)]">
+          <MessagePrimitive.Parts />
+        </div>
+      </div>
       {/* Hover actions: edit this message (resends it — downstream turns move to
           a new branch; the picker navigates back). */}
       <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
@@ -1224,17 +1502,6 @@ function UserMessage() {
           </ActionBarPrimitive.Edit>
         </ActionBarPrimitive.Root>
       </div>
-      <div className="max-w-[85%] rounded-lg border border-accent-cyan/40 bg-[color:var(--ui-bg-info)] px-3 py-2">
-        <RoleTag>You</RoleTag>
-        <QuotedContext />
-        <div className="mb-1 flex flex-wrap gap-2 empty:mb-0">
-          <MessagePrimitive.Attachments components={{ Attachment: AttachmentTile }} />
-        </div>
-        <div className="whitespace-pre-wrap break-words text-ui-sm text-[color:var(--ui-ink)]">
-          <MessagePrimitive.Parts />
-        </div>
-      </div>
-      <Avatar kind="user" />
     </MessagePrimitive.Root>
   );
 }
@@ -1244,9 +1511,8 @@ function UserMessage() {
  * re-runs the conversation from here; prior replies stay on the old branch. */
 function UserEditComposer() {
   return (
-    <MessagePrimitive.Root className="flex items-start justify-end gap-2">
-      <ComposerPrimitive.Root className="flex w-[85%] flex-col gap-2 rounded-lg border border-[color:var(--ui-border-active)] bg-[color:var(--ui-bg-info)] px-3 py-2">
-        <RoleTag>Edit message</RoleTag>
+    <MessagePrimitive.Root className="mx-auto flex w-full max-w-3xl justify-end">
+      <ComposerPrimitive.Root className="flex w-full max-w-[85%] flex-col gap-2 rounded-2xl rounded-br-md border border-[color:var(--ui-border-active)] bg-[color:var(--ui-bg-info)] px-3.5 py-2.5">
         <ComposerPrimitive.Input
           autoFocus
           className="max-h-40 w-full resize-none bg-transparent text-ui-sm text-[color:var(--ui-ink)] outline-none"
@@ -1262,19 +1528,22 @@ function UserEditComposer() {
           </ComposerPrimitive.Send>
         </div>
       </ComposerPrimitive.Root>
-      <Avatar kind="user" />
     </MessagePrimitive.Root>
   );
 }
 
 function AssistantMessage() {
   const identity = useContext(IdentityContext);
+  const persona = useContext(PersonaContext);
   const caps = useContext(VoiceCapsContext);
+  const name = persona.name || identity.name || "MAGI";
   return (
-    <MessagePrimitive.Root className="group/message flex items-start justify-start gap-2">
-      <Avatar kind="assistant" />
-      <div className="max-w-[85%] rounded-lg border border-ui bg-[color:var(--ui-bg-soft)] px-3 py-2">
-        <RoleTag>{identity.name || "MAGI"}</RoleTag>
+    <MessagePrimitive.Root className="group/message mx-auto flex w-full max-w-3xl items-start gap-3">
+      <AssistantAvatar />
+      <div className="min-w-0 flex-1">
+        <div className="mb-0.5 text-ui-2xs font-semibold text-[color:var(--ui-ink-subtle)]">
+          {name}
+        </div>
         <div className="break-words text-ui-sm text-[color:var(--ui-ink)]">
           <MessagePrimitive.Parts components={ASSISTANT_PART_COMPONENTS} />
         </div>
@@ -1285,9 +1554,8 @@ function AssistantMessage() {
             <ErrorPrimitive.Message />
           </ErrorPrimitive.Root>
         </MessagePrimitive.Error>
-      </div>
-      {/* Hover actions: regenerate (or retry after an error) + copy. */}
-      <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
+        {/* Hover actions: regenerate (or retry after an error) + copy. */}
+        <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
         <ActionBarPrimitive.Root hideWhenRunning autohide="never" className="flex items-center gap-1">
           <ActionBarPrimitive.Reload asChild>
             <MessageActionButton title="Regenerate reply" aria-label="Regenerate reply">
@@ -1317,6 +1585,7 @@ function AssistantMessage() {
           ) : null}
         </ActionBarPrimitive.Root>
         <BranchPicker />
+        </div>
       </div>
     </MessagePrimitive.Root>
   );
@@ -1359,6 +1628,22 @@ function CopyIcon() {
     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <rect x="9" y="9" width="12" height="12" rx="2" />
       <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+    </svg>
+  );
+}
+function UserIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" />
+    </svg>
+  );
+}
+function PanelRightIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M15 4v16" />
     </svg>
   );
 }
@@ -1457,9 +1742,14 @@ function Composer({
   onFreshSession?: () => void;
 }) {
   const isRunning = useThread((t) => t.isRunning);
+  const persona = useContext(PersonaContext);
+  const identity = useContext(IdentityContext);
+  const assistantName = persona.name || identity.name;
 
   return (
-    <ComposerPrimitive.Root className="flex flex-col gap-2 border-t border-ui bg-[color:var(--ui-bg-soft)] px-3 py-3">
+    <ComposerPrimitive.Root className="flex flex-col border-t border-ui bg-[color:var(--ui-bg-soft)] px-3 py-3">
+     {/* Centered to the same readable column as the transcript. */}
+     <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
       {/* One integrated field: attachments, transcript, textarea, and a toolbar
           row all live inside a single rounded surface (Claude-style). */}
       <div className="flex flex-col gap-1.5 rounded-2xl border border-ui bg-[color:var(--ui-bg)] px-2 py-2 transition-colors focus-within:border-[color:var(--ui-border-active)]">
@@ -1486,7 +1776,7 @@ function Composer({
         </ComposerPrimitive.If>
 
         <ComposerPrimitive.Input
-          placeholder="Message the assistant…  (Enter to send, Shift+Enter for a newline)"
+          placeholder={`Message ${assistantName ?? "the assistant"}…  (Enter to send, Shift+Enter for a newline)`}
           className="max-h-40 min-h-[2.5rem] w-full resize-none bg-transparent px-2 py-1.5 text-ui-sm text-[color:var(--ui-ink)] outline-none placeholder:text-[color:var(--ui-ink-subtle)]"
         />
 
@@ -1598,6 +1888,7 @@ function Composer({
           />
         </div>
       </div>
+     </div>
     </ComposerPrimitive.Root>
   );
 }

@@ -6,6 +6,23 @@ All notable changes to **magi** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **`ChatConsole` absorbs the companion presence and reads like an LLM
+  chatbot.** New optional props merge the two surfaces into one: `expressions`
+  (mood → portrait URL) puts a mood-reactive bust in a new header bar, the full
+  `PersonaStage` portrait in a collapsible presence column (`presencePanel`
+  mounts extra cards under it, e.g. memory/reminders), and the persona's face
+  on every reply avatar; `personaName` and `headerExtra` finish the header;
+  `defaultUserId` seeds the memory-scoping user id while keeping the operator
+  "chat as" switcher — now a compact header popover instead of an always-on
+  input (`pinnedUserId` still hides it entirely). The transcript was restyled
+  chatbot-first: a centered readable column, flat assistant messages,
+  right-aligned user bubbles without sender avatars, and a persona-aware empty
+  state and composer placeholder. All existing props and features (attachments,
+  dictation, TTS, quoting, branches, context meter, session rail) are
+  unchanged, and `CompanionSurface` still works for the side-stage arrangement.
+
 ## [0.4.0] - 2026-07-21
 
 ### Security

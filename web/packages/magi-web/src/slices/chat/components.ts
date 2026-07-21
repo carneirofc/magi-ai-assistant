@@ -1,4 +1,8 @@
-export { ChatConsole, type ChatVoiceConfig } from "../../components/ChatConsole";
+export {
+  ChatConsole,
+  type ChatConsoleProps,
+  type ChatVoiceConfig,
+} from "../../components/ChatConsole";
 export { ContextDisplay } from "../../components/assistant-ui/context-display";
 export { ContextInspector, type ContextInspectorProps } from "../../components/ContextInspector";
 export { ArchiveReference } from "../../components/ArchiveReference";
