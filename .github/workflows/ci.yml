@@ -62,10 +62,19 @@ jobs:
           registry-url: https://npm.pkg.github.com
           scope: "@carneirofc"
 
-      # Pulls @carneirofc/ui from GitHub Packages (same owner) with the job token;
-      # links the @carneirofc/magi-web workspace. Lockfile may lag → plain install.
+      # The workspace root links @carneirofc/ui from a sibling checkout for
+      # local co-development; that path doesn't exist in CI, so repoint the
+      # root dep at the registry range and drop the stale lockfile (same step
+      # as the publish workflows).
+      - name: Use registry @carneirofc/ui in CI
+        run: |
+          npm pkg set 'dependencies.@carneirofc/ui=>=0.2.0'
+          rm -f package-lock.json
+
+      # Pulls @carneirofc/ui from GitHub Packages (same owner) with the job
+      # token; links the @carneirofc/magi-web workspace.
       - name: Install workspace
-        run: npm ci || npm install
+        run: npm install
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
