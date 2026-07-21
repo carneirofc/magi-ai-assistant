@@ -6,6 +6,8 @@ All notable changes to **magi** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-21
+
 ### Security
 
 - **Both dependency audits are clean again.** Engine: `litellm` bumped past
