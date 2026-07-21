@@ -57,11 +57,11 @@ export const CONFIG_FIELDS: ConfigField[] = [
   {
     key: "adminApiUrl",
     env: "ADMIN_API_URL",
-    fallback: "http://127.0.0.1:8100",
+    fallback: "http://127.0.0.1:8000",
     label: "Admin API URL",
     group: "connection",
     apply: "live",
-    help: "Base URL of the Python admin-api the BFF proxies to.",
+    help: "Base URL the BFF proxies admin routes to. The chat-api mounts the admin surface at /admin/v1/* on its own port, so this defaults to the chat-api URL.",
   },
   {
     key: "adminAuthToken",
