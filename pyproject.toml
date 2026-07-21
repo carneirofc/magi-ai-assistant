@@ -52,7 +52,9 @@ dependencies = [
     "docker>=7.1.0",
     "fastapi>=0.136.3",
     "httpx>=0.28.0",
-    "litellm>=1.87.0",
+    # 1.87.0 was yanked from PyPI (pip-audit can no longer resolve it) and
+    # 1.88–1.92 exclude Python 3.14; 1.93.0 is the first 3.14-compatible line.
+    "litellm>=1.93.0",
     "ollama>=0.6.2",
     "openai>=2.40.0",
     "python-dotenv>=1.2.2",

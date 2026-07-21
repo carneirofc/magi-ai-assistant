@@ -6,6 +6,18 @@ All notable changes to **magi** are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- **Both dependency audits are clean again.** Engine: `litellm` bumped past
+  its yanked 1.87.0 pin to 1.93.0 (the first Python 3.14-compatible line —
+  the yank had aborted `pip-audit` entirely), and the vulnerable transitive
+  pins it then surfaced were patched (`aiohttp` 3.14.2, `pydantic-settings`
+  2.14.2, `python-multipart` 0.0.32, `starlette` 1.3.1). Web: `postcss`
+  (GHSA-qx2v-qp2m-jg93) and `js-yaml` (GHSA-52cp-r559-cp3m) are forced to
+  patched versions via npm `overrides`, and `brace-expansion`
+  (GHSA-3jxr-9vmj-r5cp) was patched in the lockfile. `pip-audit` and
+  `npm audit` both report zero known vulnerabilities.
+
 ### Fixed
 
 - **`@carneirofc/magi-web` publishes with a registry dependency again.** The
