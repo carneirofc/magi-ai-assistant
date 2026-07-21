@@ -155,3 +155,20 @@ def test_proposal_endpoints_roundtrip(tmp_path):
         assert client.post("/admin/v1/proposals/nope/approve").status_code == 404
     finally:
         configure(evolution_enabled=old[0], evolution_proposable=old[1])
+
+
+def test_proposal_endpoints_list_registered_skills_as_proposable(tmp_path):
+    from magi.agent.skills import SKILLS, Skill, register_skill
+
+    client = _admin_client(tmp_path)
+    snapshot = list(SKILLS)
+    old = (config.evolution_enabled, config.evolution_proposable)
+    register_skill(Skill(name="dice", prompt="Roll dice honestly."))
+    configure(evolution_enabled=True, evolution_proposable=["greet.md"])
+    try:
+        body = client.get("/admin/v1/proposals").json()
+        # The operator sees the same allowlist the assistant proposes against.
+        assert body["proposable"] == ["greet.md", "skills/dice.md"]
+    finally:
+        SKILLS[:] = snapshot
+        configure(evolution_enabled=old[0], evolution_proposable=old[1])

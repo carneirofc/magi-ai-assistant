@@ -54,6 +54,10 @@ class Skill:
     lead_toolkit: Optional[Callable[["MemoryManager"], Sequence]] = None
     member_tools: Sequence = field(default_factory=tuple)
     enabled: Union[bool, Callable[[], bool]] = True
+    # Whether self-evolution may target this skill's prompt (see
+    # magi/core/evolution.py). The manifest owns the choice; identity-class
+    # prompts are never proposable regardless.
+    proposable: bool = True
 
     @property
     def prompt_path(self) -> str:
@@ -143,3 +147,21 @@ def skill_member_tools() -> list:
     for skill in active_skills():
         tools.extend(skill.member_tools)
     return tools
+
+
+def proposable_skill_targets() -> list[str]:
+    """Registered skills' prompt paths that evolution may target.
+
+    All *registered* skills (not just active ones — approvals apply on
+    restart, when the gate may pass) whose manifest opted in. Composition
+    points append these to the evolution allowlist; core stays agent-free.
+    """
+    return [s.prompt_path for s in SKILLS if s.proposable]
+
+
+def find_skill_by_prompt_path(path: str) -> Optional[Skill]:
+    """The registered skill whose prompt lives at `path`, if any."""
+    for skill in SKILLS:
+        if skill.prompt_path == path:
+            return skill
+    return None

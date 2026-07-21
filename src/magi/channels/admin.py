@@ -1067,6 +1067,7 @@ def create_admin_app(
 
     # --- self-evolution proposals (approve/reject; apply on restart) --------
     def _evolution_store():
+        from magi.agent.skills import proposable_skill_targets
         from magi.core.evolution import build_evolution_store
 
         store = build_evolution_store(memory.root)
@@ -1074,6 +1075,9 @@ def create_admin_app(
             raise HTTPException(
                 status_code=503, detail="self-evolution is not enabled in this deployment"
             )
+        # Mirror team assembly: registered skills' prompts are proposable, so
+        # the operator sees the same allowlist the assistant proposes against.
+        store.proposable = [*store.proposable, *proposable_skill_targets()]
         return store
 
     @app.get(

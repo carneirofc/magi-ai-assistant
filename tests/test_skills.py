@@ -16,6 +16,7 @@ from magi.agent.skills import (
     Skill,
     active_skills,
     compose_skill_prompts,
+    proposable_skill_targets,
     register_skill,
     skill_lead_tools,
     skill_member_tools,
@@ -149,3 +150,61 @@ def test_build_team_composes_skill_prompt_and_tools(tmp_path):
     names = [getattr(t, "name", type(t).__name__) for t in (team.tools or [])]
     assert "roll_dice" in names
     assert "Roll dice when the user asks for randomness." in team.instructions
+
+
+# --- self-evolution: skill prompts as proposable targets -----------------------
+
+
+def test_proposable_skill_targets_respects_manifest_flag():
+    register_skill(Skill(name="open", prompt="a"))
+    register_skill(Skill(name="closed", prompt="b", proposable=False))
+
+    targets = proposable_skill_targets()
+    assert "skills/open.md" in targets
+    assert "skills/closed.md" not in targets
+
+
+def test_skill_prompt_proposal_end_to_end(tmp_path, restore_overlay):
+    """Register → propose (via the real team's tool) → approve → overlay wins."""
+    from magi.agent.team import build_team
+    from magi.core.config import config, configure
+    from magi.core.evolution import EvolutionStore
+    from magi.core.memory import build_memory_from_config
+
+    skill = Skill(name="dice", prompt="Roll dice honestly.")
+    register_skill(skill)
+
+    snapshot = {f.name: getattr(config, f.name) for f in fields(config)}
+    try:
+        configure(memory_dir=str(tmp_path / "memory"), evolution_enabled=True)
+        memory = build_memory_from_config()
+        team = build_team(memory)
+
+        propose = next(t for t in team.tools if getattr(t, "name", "") == "propose_prompt_update")
+
+        # Identity prompts stay non-proposable even with skills registered.
+        refused = propose.entrypoint(
+            target="team/SOUL.md", proposed_text="x" * 30, rationale="drift attempt"
+        )
+        assert not refused.success
+
+        result = propose.entrypoint(
+            target="skills/dice.md",
+            proposed_text="Roll dice honestly, and always show the modifier math.",
+            rationale="users keep asking for the modifier breakdown",
+        )
+        assert result.success
+
+        store = EvolutionStore(memory.store.root)
+        proposal = store.get(result.data.proposal_id)
+        # The honest before: no overlay file yet, so the manifest's inline default.
+        assert proposal.current_text == "Roll dice honestly."
+
+        decided = store.decide(proposal.id, approve=True)
+        assert decided.applied_path.endswith("prompts-runtime/skills/dice.md")
+
+        # The approved overlay wins over the inline default at next build.
+        set_prompt_overlay(memory.store.root / "prompts-runtime")
+        assert skill_prompt(skill) == "Roll dice honestly, and always show the modifier math."
+    finally:
+        configure(**snapshot)

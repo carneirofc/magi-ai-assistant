@@ -38,8 +38,9 @@ def build_evolution_tools(store: EvolutionStore) -> list:
         ),
         instructions=(
             "Use when experience shows one of your adjustable prompts (the "
-            "allowlisted ones — e.g. the memory-curation policy or the greeting "
-            "policy) should work differently, or when the user asks you to adjust "
+            "allowlisted ones — e.g. the memory-curation policy, the greeting "
+            "policy, or one of your registered skills at 'skills/<name>.md') "
+            "should work differently, or when the user asks you to adjust "
             "how such a process behaves. Pass the COMPLETE replacement text, not a "
             "diff, and a rationale grounded in what actually happened. This queues a "
             "proposal for the operator; it does NOT change anything now — say so. "
@@ -52,7 +53,10 @@ def build_evolution_tools(store: EvolutionStore) -> list:
             str,
             Field(
                 min_length=4,
-                description="The prompt's overlay path, e.g. 'curation.md' or 'greet.md'.",
+                description=(
+                    "The prompt's overlay path, e.g. 'curation.md', 'greet.md', "
+                    "or a skill's 'skills/<name>.md'."
+                ),
             ),
         ],
         proposed_text: Annotated[
@@ -70,7 +74,13 @@ def build_evolution_tools(store: EvolutionStore) -> list:
             try:
                 current = load_prompt(target)
             except Exception:  # noqa: BLE001 — a missing current text is fine (new overlay).
-                current = ""
+                # A skill with no overlay file yet still has a real current
+                # text: the manifest's inline default. Show the operator the
+                # honest before/after.
+                from magi.agent.skills import find_skill_by_prompt_path
+
+                skill = find_skill_by_prompt_path(target)
+                current = skill.prompt if skill is not None else ""
             proposal = store.propose(
                 "prompt", target, proposed_text, rationale, source="lead", current_text=current
             )

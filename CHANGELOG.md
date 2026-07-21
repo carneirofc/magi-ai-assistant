@@ -8,6 +8,14 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Added
 
+- **Skill prompts are evolution targets.** Registered skills join the
+  self-evolution allowlist (per-manifest opt-out via `Skill(proposable=False)`),
+  so the assistant can propose improvements to its own skills under the same
+  human-in-the-loop rails: queued, operator-decided, applied to the
+  `prompts-runtime` overlay on approval — where it wins over the manifest's
+  inline default at the next restart. The proposal's "current text" honestly
+  shows the inline default when no overlay file exists yet; identity prompts
+  stay non-proposable.
 - **Skill manifests.** A skill — what the assistant *knows* plus what it *can
   do* — is now one registrable unit: `register_skill(Skill(name, prompt, tools,
   lead_toolkit, member_tools, enabled))`. At team build each active skill's
