@@ -6,6 +6,15 @@ All notable changes to **magi** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`@carneirofc/magi-web` publishes with a registry dependency again.** The
+  library manifest shipped a local `file:` path for `@carneirofc/ui` (a
+  sibling-checkout dev link), which broke CI publishing and would have been
+  unresolvable for every consumer. The published manifest now declares the
+  registry range; the local link lives only at the workspace root, and CI
+  repoints it to the registry before installing.
+
 ## [0.3.0] - 2026-07-21
 
 ### Added

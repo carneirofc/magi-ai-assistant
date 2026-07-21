@@ -53,7 +53,7 @@
     "gen:api": "node scripts/gen-api.mjs"
   },
   "peerDependencies": {
-    "@carneirofc/ui": "file:../../../../deedlit.dev/deedlit.dev.ui",
+    "@carneirofc/ui": ">=0.2.0",
     "next": ">=15",
     "react": ">=19",
     "react-dom": ">=19"
