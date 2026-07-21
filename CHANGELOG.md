@@ -6,6 +6,8 @@ All notable changes to **magi** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-21
+
 ### Added
 
 - **Capability roster grouped by origin.** The live team snapshot
