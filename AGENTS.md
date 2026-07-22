@@ -1,27 +1,3 @@
-# Project
-
-magi is the **reusable core of a personal AI assistant** — one shared brain
-(lead model routing to a specialist team, with deliberate memory, a knowledge
-corpus, and tools) driven by several channels (Discord, HTTP, an OpenAI-compatible
-shim, a desktop shell). A private *persona* overlay repo extends prompts, members,
-and tools from the outside without editing this tree.
-
-Two shippable products live here:
-- The Python **engine** (`src/magi/`, distribution `magi-ai-assistant`, import
-  package `magi`).
-- The **web frontend** (`web/`): a Next.js operator admin/chat app (BFF) and the
-  `@carneirofc/magi-web` React library it consumes.
-
-Read [docs/architecture.md](docs/architecture.md) before non-trivial engine work;
-[CONTEXT.md](CONTEXT.md) is the memory-subsystem glossary. `docs/` holds the deep
-dives and ADRs; keep them current when the contracts they describe change.
-
-# Verification
-
-- Engine: `uv run ruff check src tests` and `uv run pytest -q`.
-- Web (from `web/`): `npm run typecheck` and `npm run typecheck -w @carneirofc/magi-web`.
-- `pre-commit` runs all four; CI (`.github/workflows/ci.yml`) enforces them.
-
 # Git commits
 - Always use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages (e.g. `feat:`, `fix:`, `chore:`, `docs:`).
 - Whenever a `CHANGELOG.md` file exists, add a matching changelog entry for the change. If no `CHANGELOG.md` exists, suggest creating one.
@@ -109,20 +85,22 @@ When the user requests a durable behavior change, record it here or in the relev
 
 ## Child Index
 
-- `src/magi/` — the Python engine. Layering, DI, and extension-point rules for the
-  shared brain. Children:
-  - `src/magi/core/` — model-free mechanism: conversation runner, config, memory,
-    knowledge, storage, db, media.
-  - `src/magi/agent/` — model-bound brain: team, members, model builders, curator,
-    summarizers, and the tool registry.
-  - `src/magi/channels/` — transport adapters (Discord, HTTP/API, admin) over the
-    shared `PlatformAdapter` gateway.
-- `tests/` — the engine's pytest suite and its code-first config conventions.
-- `web/` — the frontend: Next.js admin/chat BFF plus the `@carneirofc/magi-web`
-  library. Child:
-  - `web/packages/magi-web/` — the presentational React + SSE-runtime library
-    (slice architecture, generated API types).
+- `src/magi/` — the magi engine (Python package): core mechanism, agent brain,
+  channel adapters, prompts, client SDK, desktop shell. Has its own Child Index
+  for `core/`, `agent/`, `channels/`.
+- `tests/` — the engine's pytest suite; one `test_<area>.py` per subsystem.
+- `web/` — the web frontend workspace: the `magi-admin-web` Next.js BFF app and
+  the `@carneirofc/magi-web` library (`packages/magi-web/`, own child doc).
 
-Owned by root (no child doc): `main.py` (entrypoints/wiring), `docs/`, `clients/`,
-`examples/`, `scripts/`, and deployment files (`Dockerfile`, `docker-compose*.yaml`,
-`litellm.config.yaml`, `.github/`).
+Owned here at the root (no child doc):
+
+- `main.py` — the single entrypoint; picks a channel and sets all non-secret
+  config in code via `configure(...)`.
+- `docs/` — human documentation: architecture, memory, channels, configuration,
+  and ADRs (`docs/adr/`). Update alongside behavior changes they describe.
+- `clients/` — Discord presentation layer (`mydiscord.py`) driven by the injected
+  `ConversationService`; constructed by `src/magi/channels/discord.py`.
+- `scripts/` — out-of-band operational scripts (e.g. `ingest_knowledge.py`).
+- `examples/` — runnable persona/desktop examples of the extension points.
+- `.github/`, `Dockerfile`, `docker-compose*.yaml`, `pyproject.toml` — CI,
+  packaging, and container wiring.
