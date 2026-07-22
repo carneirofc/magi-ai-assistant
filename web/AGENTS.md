@@ -11,7 +11,9 @@ The MAGI web frontend. An npm workspace with two products:
 
 - **BFF security model — the browser only ever talks to this Next.js server.** It
   holds upstream bearer tokens **server-side** and gates the operator with a
-  password → httpOnly session cookie (`middleware.ts`, `lib/session.ts`). Two
+  password → httpOnly session cookie (`middleware.ts`, `lib/session.ts`). The gate
+  is keyed on `ADMIN_PASSWORD`: unset/empty means the tool is **open** (no login,
+  no session) — there is deliberately no default password fallback. Two
   upstreams: the Python `admin-api` (`ADMIN_API_URL` + `ADMIN_AUTH_TOKEN`, memory &
   knowledge) and the `chat-api` (`CHAT_API_URL` + `API_AUTH_TOKEN`, the running
   team, SSE). Neither token may ever reach the browser; never expose the Python APIs

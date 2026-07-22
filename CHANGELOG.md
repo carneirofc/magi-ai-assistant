@@ -6,6 +6,15 @@ All notable changes to **magi** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Web operator auth is now optional.** When `ADMIN_PASSWORD` is unset or
+  empty the BFF runs open: the auth middleware skips the session gate and the
+  login route sends visitors straight into the app. There is no default
+  password — an unset value means open, never a fallback secret. Setting
+  `ADMIN_PASSWORD` restores the password → httpOnly-session flow unchanged
+  (`@carneirofc/magi-web` 0.8.0, new `authEnabled()` in `lib/session`).
+
 ### Changed
 
 - **`ChatConsole` absorbs the companion presence and reads like an LLM

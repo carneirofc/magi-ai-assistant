@@ -7,11 +7,16 @@ import { cookies } from "next/headers";
 import { session, signSession } from "../../lib/session";
 
 export async function POST(req: Request) {
+  const expected = process.env.ADMIN_PASSWORD;
+  // No password configured → the tool is open; there is nothing to check and no
+  // session to sign, just send them into the app.
+  if (!expected) {
+    return NextResponse.redirect(new URL("/knowledge", req.url), { status: 303 });
+  }
+
   const form = await req.formData();
   const password = String(form.get("password") ?? "");
-
-  const expected = process.env.ADMIN_PASSWORD;
-  if (!expected || password !== expected) {
+  if (password !== expected) {
     const url = new URL("/login?error=1", req.url);
     return NextResponse.redirect(url, { status: 303 });
   }

@@ -11,7 +11,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-import { session, verifySession } from "./lib/session";
+import { authEnabled, session, verifySession } from "./lib/session";
 
 export const DEFAULT_PUBLIC_PATHS = ["/login", "/api/auth/login"];
 
@@ -20,6 +20,11 @@ export const DEFAULT_PUBLIC_PATHS = ["/login", "/api/auth/login"];
 export function createAuthMiddleware(publicPaths: readonly string[] = DEFAULT_PUBLIC_PATHS) {
   return async function middleware(req: NextRequest) {
     const { pathname } = req.nextUrl;
+    // No password configured → the tool is open; skip the gate entirely so
+    // nothing is ever redirected to /login.
+    if (!authEnabled()) {
+      return NextResponse.next();
+    }
     if (publicPaths.includes(pathname)) {
       return NextResponse.next();
     }

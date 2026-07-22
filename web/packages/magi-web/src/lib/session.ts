@@ -50,6 +50,13 @@ export async function verifySession(token: string | undefined): Promise<boolean>
   return Number(exp) > Math.floor(Date.now() / 1000);
 }
 
+/** Whether operator auth is enabled. When ADMIN_PASSWORD is unset or empty the
+ * tool is open — no password prompt, no session gate. There is no default
+ * password: an unset value means open, never a fallback secret. */
+export function authEnabled(): boolean {
+  return !!process.env.ADMIN_PASSWORD;
+}
+
 export const session = {
   cookieName: COOKIE_NAME,
   ttlSeconds: TTL_SECONDS,
