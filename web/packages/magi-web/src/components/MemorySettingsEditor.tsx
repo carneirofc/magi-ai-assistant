@@ -6,10 +6,11 @@
 // (and shows the directory the process is actually running from when they differ).
 // Saves go through the admin BFF with the optimistic-concurrency version.
 
-import { useState } from "react";
 import { Checkbox, OutlineButton, StatusMessage, TextInput } from "@carneirofc/ui";
+import { useState } from "react";
 
 import type { AdminMemorySettings } from "../lib/admin-api";
+import { schemas } from "../lib/api-schemas";
 
 export function MemorySettingsEditor({ initial }: { initial: AdminMemorySettings }) {
   const [memoryDir, setMemoryDir] = useState(initial.memory_dir);
@@ -62,7 +63,7 @@ export function MemorySettingsEditor({ initial }: { initial: AdminMemorySettings
     });
     setBusy(false);
     if (res.ok) {
-      apply((await res.json()) as AdminMemorySettings);
+      apply(schemas.MemorySettingsOut.parse(await res.json()));
       setDirty(false);
       setSaved(true);
       return;
@@ -83,8 +84,8 @@ export function MemorySettingsEditor({ initial }: { initial: AdminMemorySettings
         </StatusMessage>
       ) : (
         <StatusMessage role="status" tone="info">
-          Changes are saved immediately but take effect the next time the service
-          restarts. Running from <code className="font-mono">{activeDir}</code>.
+          Changes are saved immediately but take effect the next time the service restarts. Running
+          from <code className="font-mono">{activeDir}</code>.
         </StatusMessage>
       )}
 
@@ -115,8 +116,8 @@ export function MemorySettingsEditor({ initial }: { initial: AdminMemorySettings
           }}
         />
         <span className="text-ui-2xs text-[color:var(--ui-ink-subtle)]">
-          Requires the optional <code className="font-mono">git</code> extra. The
-          directory must be its own top-level repo (not inside another one).
+          Requires the optional <code className="font-mono">git</code> extra. The directory must be
+          its own top-level repo (not inside another one).
         </span>
       </div>
 

@@ -18,24 +18,31 @@
 
 import "server-only";
 
-import { mkdirSync, readFileSync, writeFileSync } from "fs";
-import path from "path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 
-export type ConfigKey =
-  | "adminApiUrl"
-  | "adminAuthToken"
-  | "chatApiUrl"
-  | "apiAuthToken"
-  | "primaryUser"
-  | "chatHistoryDir"
-  | "chatBlobDir";
+import {
+  type ApplyMode,
+  type ConfigFieldState,
+  ConfigFileSchema,
+  type ConfigGroup,
+  type ConfigKey,
+  ConfigKeySchema,
+  type ConfigPatch,
+  type ConfigSource,
+  type ConfigState,
+} from "./runtime-config-schema";
 
-export type ConfigGroup = "connection" | "app";
-
-/** `live` keys are re-read per request (edits apply immediately); `restart` keys
- * are read once at startup, so a saved change only takes effect after a restart —
- * the editor flags these so the operator knows. */
-export type ApplyMode = "live" | "restart";
+export {
+  type ApplyMode,
+  type ConfigFieldState,
+  type ConfigGroup,
+  type ConfigKey,
+  type ConfigPatch,
+  ConfigPatchSchema,
+  type ConfigSource,
+  type ConfigState,
+} from "./runtime-config-schema";
 
 export interface ConfigField {
   key: ConfigKey;
@@ -140,7 +147,7 @@ let cache: Partial<Record<ConfigKey, string>> | null = null;
 function load(): Partial<Record<ConfigKey, string>> {
   if (cache) return cache;
   try {
-    const parsed = JSON.parse(readFileSync(configFile(), "utf8")) as Record<string, unknown>;
+    const parsed = ConfigFileSchema.parse(JSON.parse(readFileSync(configFile(), "utf8")));
     const clean: Partial<Record<ConfigKey, string>> = {};
     for (const f of CONFIG_FIELDS) {
       const v = parsed[f.key];
@@ -164,36 +171,11 @@ export function getConfigValue(key: ConfigKey): string {
   return field.fallback;
 }
 
-export type ConfigSource = "file" | "env" | "default";
-
 function sourceOf(key: ConfigKey): ConfigSource {
   const field = FIELD_BY_KEY[key];
   if (load()[key]) return "file";
   if (process.env[field.env]) return "env";
   return "default";
-}
-
-/** A browser-safe view of one field: the resolved value for non-secrets, or just
- * whether one is set for secrets — the token bytes never leave the server. */
-export interface ConfigFieldState {
-  key: ConfigKey;
-  label: string;
-  group: ConfigGroup;
-  apply: ApplyMode;
-  env: string;
-  secret: boolean;
-  help?: string;
-  source: ConfigSource;
-  /** A file override exists (so it can be reset back to env/default). */
-  overridden: boolean;
-  /** Whether any value resolves (used for secrets, where `value` is withheld). */
-  isSet: boolean;
-  /** The resolved value — omitted for secrets. */
-  value?: string;
-}
-
-export interface ConfigState {
-  fields: ConfigFieldState[];
 }
 
 export function readConfigState(): ConfigState {
@@ -218,25 +200,20 @@ export function readConfigState(): ConfigState {
   return { fields };
 }
 
-export interface ConfigPatch {
-  /** Upsert these overrides. Empty / blank values are ignored — use `clear`. */
-  set?: Partial<Record<ConfigKey, string>>;
-  /** Remove these overrides so the key falls back to env/default. */
-  clear?: ConfigKey[];
-}
-
 /** Apply a patch to the on-disk overrides, refresh the in-process cache, and
  * return the fresh browser-safe state. Rejects unknown keys. */
 export function writeConfig(patch: ConfigPatch): ConfigState {
   const overrides: Partial<Record<ConfigKey, string>> = { ...load() };
 
   for (const [k, v] of Object.entries(patch.set ?? {})) {
-    if (!(k in FIELD_BY_KEY)) throw new Error(`unknown config key: ${k}`);
-    if (typeof v === "string" && v.trim() !== "") overrides[k as ConfigKey] = v;
+    const key = ConfigKeySchema.safeParse(k);
+    if (!key.success) throw new Error(`unknown config key: ${k}`);
+    if (v.trim() !== "") overrides[key.data] = v;
   }
   for (const k of patch.clear ?? []) {
-    if (!(k in FIELD_BY_KEY)) throw new Error(`unknown config key: ${k}`);
-    delete overrides[k];
+    const key = ConfigKeySchema.safeParse(k);
+    if (!key.success) throw new Error(`unknown config key: ${k}`);
+    delete overrides[key.data];
   }
 
   const file = configFile();

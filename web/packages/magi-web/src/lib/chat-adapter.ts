@@ -23,6 +23,7 @@ import type {
 
 import type { InboundAttachment } from "./chat-api";
 import type { ChatLifecycle } from "./chat-mood";
+import { ErrorBodySchema, JsonObjectSchema } from "./wire-schemas";
 
 /** Where the console draws its session/user scoping from at send time. Read
  * lazily so edits to the user id (or a "New chat") take effect on the next run
@@ -71,7 +72,8 @@ export function parseFrame(frame: string): SseFrame | null {
   }
   if (dataLines.length === 0) return null;
   try {
-    return { event, data: JSON.parse(dataLines.join("\n")) as Record<string, unknown> };
+    const data = JsonObjectSchema.safeParse(JSON.parse(dataLines.join("\n")));
+    return data.success ? { event, data: data.data } : null;
   } catch {
     return null;
   }
@@ -100,7 +102,7 @@ function userText(message: ThreadMessage | null): string {
  * `metadata.custom.quote` (a `QuoteInfo`); we read it directly since the adapter
  * runs outside React (no `useMessageQuote`). */
 function quotedText(message: ThreadMessage | null): string {
-  const quote = message?.metadata.custom["quote"];
+  const quote = message?.metadata.custom.quote;
   if (quote && typeof quote === "object") {
     const text = (quote as { text?: unknown }).text;
     if (typeof text === "string") return text;
@@ -148,7 +150,7 @@ function outboundAttachments(message: ThreadMessage | null): {
 } {
   const images: InboundAttachment[] = [];
   const files: InboundAttachment[] = [];
-  if (!message || message.role !== "user") return { images, files };
+  if (message?.role !== "user") return { images, files };
   for (const attachment of message.attachments ?? []) {
     for (const part of attachment.content ?? []) {
       if (part.type === "image" && typeof part.image === "string" && part.image) {
@@ -177,7 +179,8 @@ function replyMediaParts(media: unknown): (ImageMessagePart | FileMessagePart)[]
       data_base64?: string;
       filename?: string;
     };
-    const mime = item.mime_type ?? (item.kind === "image" ? "image/png" : "application/octet-stream");
+    const mime =
+      item.mime_type ?? (item.kind === "image" ? "image/png" : "application/octet-stream");
     const src = item.url
       ? item.url
       : item.data_base64
@@ -185,7 +188,11 @@ function replyMediaParts(media: unknown): (ImageMessagePart | FileMessagePart)[]
         : null;
     if (!src) continue;
     if (item.kind === "image") {
-      parts.push({ type: "image", image: src, ...(item.filename ? { filename: item.filename } : {}) });
+      parts.push({
+        type: "image",
+        image: src,
+        ...(item.filename ? { filename: item.filename } : {}),
+      });
     } else {
       parts.push({
         type: "file",
@@ -204,7 +211,10 @@ class StreamAssembly {
   private reasoning = "";
   private answer = "";
   private toolOrder: string[] = [];
-  private tools = new Map<string, { name: string; args: object; result?: string; isError?: boolean }>();
+  private tools = new Map<
+    string,
+    { name: string; args: object; result?: string; isError?: boolean }
+  >();
   private synthetic = 0;
   private mediaParts: (ImageMessagePart | FileMessagePart)[] = [];
 
@@ -321,7 +331,7 @@ export function createChatModelAdapter(
         if (!res.ok || !res.body) {
           let detail = `chat request failed (${res.status})`;
           try {
-            const body = (await res.json()) as { error?: string };
+            const body = ErrorBodySchema.parse(await res.json());
             if (body.error) detail = body.error;
           } catch {
             /* keep the status-code fallback */

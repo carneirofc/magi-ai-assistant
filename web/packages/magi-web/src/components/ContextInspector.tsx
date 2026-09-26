@@ -15,6 +15,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ContextStats } from "../lib/chat-api";
+import { fetchJson } from "../lib/utils";
+import { ContextStatsSchema, JsonObjectSchema } from "../lib/wire-schemas";
 
 const SECTION_LABELS: Record<string, string> = {
   persona: "Persona",
@@ -54,8 +56,8 @@ export function ContextInspector({
       `/api/chat/context?sessionId=${encodeURIComponent(sessionId)}&userId=${encodeURIComponent(userId)}`,
       { cache: "no-store" },
     )
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`${res.status}`))))
-      .then((body: ContextStats) => {
+      .then((res) => fetchJson(res, ContextStatsSchema))
+      .then((body) => {
         setStats(body);
         setState("idle");
       })
@@ -85,7 +87,7 @@ export function ContextInspector({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId, userId }),
     })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`${res.status}`))))
+      .then((res) => fetchJson(res, JsonObjectSchema))
       .then(() => {
         setOpen(false);
         setState("idle");

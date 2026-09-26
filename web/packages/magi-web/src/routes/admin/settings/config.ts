@@ -5,17 +5,19 @@
 // runtime (touches the filesystem). Mount at `app/api/admin/settings/config/route.ts`.
 
 import { NextResponse } from "next/server";
-
-import { readConfigState, writeConfig, type ConfigPatch } from "../../../lib/runtime-config";
+import { ConfigPatchSchema, readConfigState, writeConfig } from "../../../lib/runtime-config";
 
 export function GET() {
   return NextResponse.json(readConfigState(), { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function PUT(req: Request) {
-  const body = (await req.json().catch(() => ({}))) as ConfigPatch;
+  const body = ConfigPatchSchema.safeParse(await req.json().catch(() => ({})));
+  if (!body.success) {
+    return NextResponse.json({ error: "invalid config patch" }, { status: 400 });
+  }
   try {
-    return NextResponse.json(writeConfig({ set: body.set, clear: body.clear }));
+    return NextResponse.json(writeConfig(body.data));
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });
   }

@@ -4,11 +4,14 @@
 // `app/api/admin/memory/consolidate/route.ts`.
 
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import { consolidateFacts } from "../../../lib/admin-api";
+import { invalidBody, readJsonBody } from "../../../lib/route-body";
 
 export async function POST(req: Request) {
-  const b = (await req.json().catch(() => ({}))) as { userId?: string };
+  const b = await readJsonBody(req, z.object({ userId: z.string().optional() }));
+  if (!b) return invalidBody();
   if (!b.userId) {
     return NextResponse.json({ error: "userId required" }, { status: 400 });
   }

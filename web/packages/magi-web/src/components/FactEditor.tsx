@@ -5,7 +5,6 @@
 // write's response, so consecutive edits don't 409 against themselves; a real
 // conflict (the curator wrote meanwhile) surfaces as a 409 prompt to reload.
 
-import { useState } from "react";
 import {
   ConfirmationDialog,
   EditIcon,
@@ -18,6 +17,8 @@ import {
   TextInput,
   TrashIcon,
 } from "@carneirofc/ui";
+import { useState } from "react";
+import { schemas } from "../lib/api-schemas";
 
 type Fact = { id: string; text: string; ts: string };
 
@@ -49,7 +50,7 @@ export function FactEditor({
     });
     setBusy(false);
     if (res.ok) {
-      const data = (await res.json()) as { facts: Fact[]; version: string };
+      const data = schemas.FactsResult.parse(await res.json());
       setFacts(data.facts);
       setVersion(data.version);
       return true;

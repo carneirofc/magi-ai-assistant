@@ -4,8 +4,10 @@
 // (stale version) and 503 (settings store not wired).
 
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import { getMemorySettings, updateMemorySettings } from "../../../lib/admin-api";
+import { invalidBody, readJsonBody } from "../../../lib/route-body";
 
 export async function GET() {
   try {
@@ -18,13 +20,17 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
-  const b = (await req.json().catch(() => ({}))) as {
-    memory_dir?: string;
-    git_enabled?: boolean;
-    git_author_name?: string;
-    git_author_email?: string;
-    expectedVersion?: string;
-  };
+  const b = await readJsonBody(
+    req,
+    z.object({
+      memory_dir: z.string().optional(),
+      git_enabled: z.boolean().optional(),
+      git_author_name: z.string().optional(),
+      git_author_email: z.string().optional(),
+      expectedVersion: z.string().optional(),
+    }),
+  );
+  if (!b) return invalidBody();
   const res = await updateMemorySettings({
     memory_dir: b.memory_dir ?? "",
     git_enabled: b.git_enabled ?? false,

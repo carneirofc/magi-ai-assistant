@@ -2,17 +2,23 @@
 // the admin-api status, including 409 (stale version) and 422 (invalid JSON shape).
 
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import { putRawFile } from "../../lib/admin-api";
+import { invalidBody, readJsonBody } from "../../lib/route-body";
 
 export async function PUT(req: Request) {
-  const b = (await req.json().catch(() => ({}))) as {
-    kind?: string;
-    content?: string;
-    userId?: string;
-    sessionId?: string;
-    expectedVersion?: string;
-  };
+  const b = await readJsonBody(
+    req,
+    z.object({
+      kind: z.string().optional(),
+      content: z.string().optional(),
+      userId: z.string().optional(),
+      sessionId: z.string().optional(),
+      expectedVersion: z.string().optional(),
+    }),
+  );
+  if (!b) return invalidBody();
   if (!b.kind || b.content === undefined) {
     return NextResponse.json({ error: "kind and content required" }, { status: 400 });
   }

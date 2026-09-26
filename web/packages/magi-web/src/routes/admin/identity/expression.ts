@@ -5,12 +5,14 @@
 // version, 422 bad image or mood key).
 
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import {
   deleteIdentityExpression,
   fetchIdentityExpression,
   putIdentityExpression,
 } from "../../../lib/admin-api";
+import { invalidBody, readJsonBody } from "../../../lib/route-body";
 
 type Ctx = { params: Promise<{ mood: string }> };
 
@@ -32,17 +34,18 @@ export async function GET(_req: Request, ctx: Ctx) {
 
 export async function PUT(req: Request, ctx: Ctx) {
   const { mood } = await ctx.params;
-  const b = (await req.json().catch(() => ({}))) as {
-    data_base64?: string;
-    mime_type?: string;
-    filename?: string;
-    expectedVersion?: string;
-  };
+  const b = await readJsonBody(
+    req,
+    z.object({
+      data_base64: z.string().optional(),
+      mime_type: z.string().optional(),
+      filename: z.string().optional(),
+      expectedVersion: z.string().optional(),
+    }),
+  );
+  if (!b) return invalidBody();
   if (!b.data_base64 || !b.mime_type) {
-    return NextResponse.json(
-      { error: "data_base64 and mime_type required" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "data_base64 and mime_type required" }, { status: 400 });
   }
   const res = await putIdentityExpression(mood, {
     dataBase64: b.data_base64,

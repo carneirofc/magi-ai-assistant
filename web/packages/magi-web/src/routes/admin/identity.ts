@@ -3,8 +3,10 @@
 // including 409 (stale version).
 
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import { getIdentity, updateIdentity } from "../../lib/admin-api";
+import { invalidBody, readJsonBody } from "../../lib/route-body";
 
 export async function GET() {
   try {
@@ -17,11 +19,15 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
-  const b = (await req.json().catch(() => ({}))) as {
-    display_name?: string;
-    description?: string;
-    expectedVersion?: string;
-  };
+  const b = await readJsonBody(
+    req,
+    z.object({
+      display_name: z.string().optional(),
+      description: z.string().optional(),
+      expectedVersion: z.string().optional(),
+    }),
+  );
+  if (!b) return invalidBody();
   const res = await updateIdentity({
     display_name: b.display_name ?? "",
     description: b.description ?? "",

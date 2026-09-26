@@ -4,8 +4,6 @@
 // resolvers in this slice; URL/connectors grow on the server later). Both produce
 // {title, text}; subject is picked from the registry, tags are free-form.
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
 import {
   OutlineButton,
   SelectInput,
@@ -15,6 +13,9 @@ import {
   TextAreaInput,
   TextInput,
 } from "@carneirofc/ui";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { schemas } from "../lib/api-schemas";
 
 export function AddKnowledge({
   subjects,
@@ -51,7 +52,7 @@ export function AddKnowledge({
     });
     setBusy(false);
     if (res.ok) {
-      const data = (await res.json()) as { doc_id: string; chunks_indexed: number };
+      const data = schemas.IngestResult.parse(await res.json());
       setMsg(
         data.chunks_indexed > 0
           ? `Ingested "${data.doc_id}" (${data.chunks_indexed} chunks).`
@@ -114,7 +115,12 @@ export function AddKnowledge({
           </label>
           <label className="flex flex-1 flex-col gap-1">
             <span className="ui-text-label-sm text-[color:var(--ui-ink-accent)]">Tags</span>
-            <TagSelect value={tags} onChange={setTags} suggestions={allTags} placeholder="add tag…" />
+            <TagSelect
+              value={tags}
+              onChange={setTags}
+              suggestions={allTags}
+              placeholder="add tag…"
+            />
           </label>
         </div>
 

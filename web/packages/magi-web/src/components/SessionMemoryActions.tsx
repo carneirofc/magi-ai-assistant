@@ -6,21 +6,15 @@
 // refreshes the server-rendered files on a change. The two model-backed passes
 // (summarize, curate) surface a friendly note when the deployment has no model.
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { ConfirmationDialog, OutlineButton, StatusMessage } from "@carneirofc/ui";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { schemas } from "../lib/api-schemas";
 
 type Action = "summarize" | "curate" | "flush";
-type Result = { action: string; changed: boolean; detail: string };
 type Tone = "success" | "warn" | "error";
 
-export function SessionMemoryActions({
-  userId,
-  sessionId,
-}: {
-  userId: string;
-  sessionId: string;
-}) {
+export function SessionMemoryActions({ userId, sessionId }: { userId: string; sessionId: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState<Action | null>(null);
   const [status, setStatus] = useState<{ tone: Tone; text: string } | null>(null);
@@ -43,7 +37,7 @@ export function SessionMemoryActions({
     }
     setBusy(null);
     if (res.ok) {
-      const data = (await res.json()) as Result;
+      const data = schemas.MemoryTriggerResult.parse(await res.json());
       setStatus({ tone: data.changed ? "success" : "warn", text: data.detail });
       if (data.changed) router.refresh();
       return;

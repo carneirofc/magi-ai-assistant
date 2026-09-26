@@ -11,6 +11,7 @@
 // happens inside stop() while the composer shows its "dictating" state.
 
 import type { DictationAdapter } from "@assistant-ui/react";
+import { TranscriptBodySchema } from "./wire-schemas";
 
 /** MediaRecorder mimes we try, most-compatible first; the STT sidecar
  * (whisper-class) decodes all of them. */
@@ -102,7 +103,7 @@ export function createRecordingDictationAdapter(
             form.append("file", blob, `dictation.${extensionFor(blob.type)}`);
             const res = await fetch("/api/chat/stt", { method: "POST", body: form });
             if (!res.ok) throw new Error(`stt ${res.status}`);
-            const body = (await res.json()) as { text?: string };
+            const body = TranscriptBodySchema.parse(await res.json());
             const transcript = (body.text ?? "").trim();
             if (transcript) {
               const result: DictationAdapter.Result = { transcript, isFinal: true };

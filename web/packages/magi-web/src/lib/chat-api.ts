@@ -8,6 +8,16 @@ import "server-only";
 
 import type { TeamSnapshot } from "./introspection-types";
 import { getConfigValue } from "./runtime-config";
+import {
+  ArchiveHitsSchema,
+  BotIdentitySchema,
+  ContextStatsSchema,
+  FlushBodySchema,
+  JsonObjectSchema,
+  SelfMemoryFactsSchema,
+  TeamSnapshotSchema,
+  TitleBodySchema,
+} from "./wire-schemas";
 
 function baseUrl(): string {
   // In docker-compose this is the chat-api service name; for local dev it's the
@@ -32,7 +42,7 @@ export async function getIntrospection(): Promise<TeamSnapshot> {
   if (!res.ok) {
     throw new Error(`chat-api GET /v1/introspection failed: ${res.status}`);
   }
-  return (await res.json()) as TeamSnapshot;
+  return TeamSnapshotSchema.parse(await res.json());
 }
 
 /** An attachment the client sends for the agent to see. Mirrors the chat-api's
@@ -66,25 +76,19 @@ export async function openMessageStream(
   sessionId: string,
   body: ChatMessageBody,
 ): Promise<Response> {
-  return fetch(
-    `${baseUrl()}/v1/sessions/${encodeURIComponent(sessionId)}/messages/stream`,
-    {
-      method: "POST",
-      headers: { ...authHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      cache: "no-store",
-    },
-  );
+  return fetch(`${baseUrl()}/v1/sessions/${encodeURIComponent(sessionId)}/messages/stream`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
 }
 
 /** Open the chat-api's greeting stream (an assistant-initiated turn: the
  * assistant speaks first, drawn from memory + the time of day) and return the
  * raw upstream Response for the BFF to relay. Same SSE framing as a message
  * stream, mood frame included. */
-export async function openGreetingStream(
-  sessionId: string,
-  userId: string,
-): Promise<Response> {
+export async function openGreetingStream(sessionId: string, userId: string): Promise<Response> {
   return fetch(`${baseUrl()}/v1/sessions/${encodeURIComponent(sessionId)}/greet`, {
     method: "POST",
     headers: { ...authHeaders(), "Content-Type": "application/json" },
@@ -131,7 +135,7 @@ export async function getIdentity(): Promise<BotIdentity | null> {
       cache: "no-store",
     });
     if (!res.ok) return null;
-    return (await res.json()) as BotIdentity;
+    return BotIdentitySchema.parse(await res.json());
   } catch {
     return null;
   }
@@ -161,7 +165,7 @@ export async function requestTitle(text: string): Promise<string | null> {
       cache: "no-store",
     });
     if (!res.ok) return null;
-    const body = (await res.json()) as { title?: string | null };
+    const body = TitleBodySchema.parse(await res.json());
     return typeof body.title === "string" && body.title.trim() ? body.title : null;
   } catch {
     return null;
@@ -196,7 +200,7 @@ export async function getContextStats(
       { headers: authHeaders(), cache: "no-store" },
     );
     if (!res.ok) return null;
-    return (await res.json()) as ContextStats;
+    return ContextStatsSchema.parse(await res.json());
   } catch {
     return null;
   }
@@ -205,23 +209,16 @@ export async function getContextStats(
 /** Close a session server-side (fold summary → episode, wipe live turns) —
  * the "fresh session, carry the gist" action. Returns dropped turns, or null
  * when the engine was unreachable. */
-export async function flushChatSession(
-  sessionId: string,
-  userId: string,
-): Promise<number | null> {
+export async function flushChatSession(sessionId: string, userId: string): Promise<number | null> {
   try {
-    const res = await fetch(
-      `${baseUrl()}/v1/sessions/${encodeURIComponent(sessionId)}/flush`,
-      {
-        method: "POST",
-        headers: { ...authHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId }),
-        cache: "no-store",
-      },
-    );
+    const res = await fetch(`${baseUrl()}/v1/sessions/${encodeURIComponent(sessionId)}/flush`, {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId }),
+      cache: "no-store",
+    });
     if (!res.ok) return null;
-    const body = (await res.json()) as { dropped_turns?: number };
-    return typeof body.dropped_turns === "number" ? body.dropped_turns : 0;
+    return FlushBodySchema.parse(await res.json()).dropped_turns;
   } catch {
     return null;
   }
@@ -249,8 +246,7 @@ export async function searchChatArchive(
       { headers: authHeaders(), cache: "no-store" },
     );
     if (!res.ok) return null;
-    const body = (await res.json()) as { hits?: ArchiveHit[] };
-    return Array.isArray(body.hits) ? body.hits : [];
+    return ArchiveHitsSchema.parse(await res.json()).hits;
   } catch {
     return null;
   }
@@ -292,13 +288,12 @@ export interface SelfMemoryFact {
  * unreachable or predates the endpoint — the panel just stays quiet. */
 export async function getSelfMemory(userId: string): Promise<SelfMemoryFact[] | null> {
   try {
-    const res = await fetch(
-      `${baseUrl()}/v1/memory/facts?user_id=${encodeURIComponent(userId)}`,
-      { headers: authHeaders(), cache: "no-store" },
-    );
+    const res = await fetch(`${baseUrl()}/v1/memory/facts?user_id=${encodeURIComponent(userId)}`, {
+      headers: authHeaders(),
+      cache: "no-store",
+    });
     if (!res.ok) return null;
-    const body = (await res.json()) as { facts?: SelfMemoryFact[] };
-    return Array.isArray(body.facts) ? body.facts : [];
+    return SelfMemoryFactsSchema.parse(await res.json()).facts;
   } catch {
     return null;
   }
@@ -310,7 +305,7 @@ export async function getChatHealth(): Promise<Record<string, unknown> | null> {
   try {
     const res = await fetch(`${baseUrl()}/healthz`, { cache: "no-store" });
     if (!res.ok) return null;
-    return (await res.json()) as Record<string, unknown>;
+    return JsonObjectSchema.parse(await res.json());
   } catch {
     return null;
   }

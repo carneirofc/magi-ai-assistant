@@ -11,15 +11,18 @@
 // JSON-as-editor on purpose: the spec is an open dict (transports, headers,
 // allowlists, roles) and a form would either lag the engine or dumb it down.
 
-import { useEffect, useState } from "react";
 import { OutlineButton, StatusMessage, TextAreaInput } from "@carneirofc/ui";
+import { useEffect, useState } from "react";
+import { z } from "zod";
+import { fetchJson } from "../lib/utils";
 
-type McpSettings = {
-  code_servers: Record<string, unknown>[];
-  operator_servers: Record<string, unknown>[];
-  version: string;
-  restart_required?: boolean;
-};
+const McpSettingsSchema = z.object({
+  code_servers: z.array(z.record(z.string(), z.unknown())).default([]),
+  operator_servers: z.array(z.record(z.string(), z.unknown())).default([]),
+  version: z.string().default(""),
+  restart_required: z.boolean().optional(),
+});
+type McpSettings = z.infer<typeof McpSettingsSchema>;
 
 export function McpServerManager() {
   const [settings, setSettings] = useState<McpSettings | null>(null);
@@ -33,8 +36,8 @@ export function McpServerManager() {
   useEffect(() => {
     let active = true;
     fetch("/api/admin/settings/mcp", { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`${res.status}`))))
-      .then((body: McpSettings) => {
+      .then((res) => fetchJson(res, McpSettingsSchema))
+      .then((body) => {
         if (!active) return;
         setSettings(body);
         setText(JSON.stringify(body.operator_servers, null, 2));
@@ -69,7 +72,7 @@ export function McpServerManager() {
     });
     setBusy(false);
     if (res.ok) {
-      const body = (await res.json()) as McpSettings;
+      const body = McpSettingsSchema.parse(await res.json());
       setSettings(body);
       setText(JSON.stringify(body.operator_servers, null, 2));
       setDirty(false);
@@ -86,9 +89,9 @@ export function McpServerManager() {
       <div>
         <h2 className="text-ui-md font-semibold">MCP servers</h2>
         <p className="text-ui-xs text-[color:var(--ui-ink-subtle)]">
-          Wire any Model Context Protocol server as a specialist (or lead tools) without
-          code. Operator entries merge over the code-declared list by name; changes
-          apply on restart. Connection status shows on the roster above.
+          Wire any Model Context Protocol server as a specialist (or lead tools) without code.
+          Operator entries merge over the code-declared list by name; changes apply on restart.
+          Connection status shows on the roster above.
         </p>
       </div>
 
@@ -98,8 +101,11 @@ export function McpServerManager() {
             Declared in code (main.py)
           </p>
           <ul className="mt-1 flex flex-col gap-0.5">
-            {settings.code_servers.map((s, i) => (
-              <li key={i} className="font-mono text-ui-2xs text-[color:var(--ui-ink-muted)]">
+            {settings.code_servers.map((s) => (
+              <li
+                key={String(s.name ?? s.url ?? s.command ?? "")}
+                className="font-mono text-ui-2xs text-[color:var(--ui-ink-muted)]"
+              >
                 {String(s.name ?? "?")} — {String(s.url ?? s.command ?? "")}{" "}
                 <span className="opacity-60">({String(s.attach ?? "member")})</span>
               </li>
@@ -118,7 +124,9 @@ export function McpServerManager() {
         spellCheck={false}
         className="font-mono text-ui-2xs"
         aria-label="Operator MCP server list (JSON)"
-        placeholder={'[\n  {"name": "my-server", "url": "http://127.0.0.1:9000/mcp", "attach": "member"}\n]'}
+        placeholder={
+          '[\n  {"name": "my-server", "url": "http://127.0.0.1:9000/mcp", "attach": "member"}\n]'
+        }
       />
       <div className="flex items-center gap-3">
         <OutlineButton

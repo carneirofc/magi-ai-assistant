@@ -3,8 +3,14 @@
 // stale version, 422 bad image).
 
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
-import { deleteIdentityAvatar, fetchIdentityAvatar, putIdentityAvatar } from "../../../lib/admin-api";
+import {
+  deleteIdentityAvatar,
+  fetchIdentityAvatar,
+  putIdentityAvatar,
+} from "../../../lib/admin-api";
+import { invalidBody, readJsonBody } from "../../../lib/route-body";
 
 export async function GET() {
   const res = await fetchIdentityAvatar();
@@ -22,17 +28,18 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
-  const b = (await req.json().catch(() => ({}))) as {
-    data_base64?: string;
-    mime_type?: string;
-    filename?: string;
-    expectedVersion?: string;
-  };
+  const b = await readJsonBody(
+    req,
+    z.object({
+      data_base64: z.string().optional(),
+      mime_type: z.string().optional(),
+      filename: z.string().optional(),
+      expectedVersion: z.string().optional(),
+    }),
+  );
+  if (!b) return invalidBody();
   if (!b.data_base64 || !b.mime_type) {
-    return NextResponse.json(
-      { error: "data_base64 and mime_type required" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "data_base64 and mime_type required" }, { status: 400 });
   }
   const res = await putIdentityAvatar({
     dataBase64: b.data_base64,

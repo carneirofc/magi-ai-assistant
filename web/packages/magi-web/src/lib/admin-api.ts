@@ -4,9 +4,11 @@
 
 import "server-only";
 
-import type { paths } from "./api-types";
+import { z } from "zod";
+import { schemas } from "./api-schemas";
 import { encodeDocId } from "./encode";
 import { getConfigValue } from "./runtime-config";
+import { fetchJson } from "./utils";
 
 export { encodeDocId };
 
@@ -30,34 +32,21 @@ export async function adminRequest(path: string, init?: RequestInit): Promise<Re
   return fetch(`${baseUrl()}${path}`, { ...init, headers, cache: "no-store" });
 }
 
-/** GET a JSON path on the admin-api with the server-side bearer. Throws on non-2xx. */
-export async function adminGet<T>(path: string): Promise<T> {
+/** GET a JSON path on the admin-api with the server-side bearer, validated against
+ * `schema`. Throws on non-2xx or a validation mismatch. */
+export async function adminGet<T>(path: string, schema: z.ZodType<T>): Promise<T> {
   const res = await adminRequest(path);
-  if (!res.ok) {
-    throw new Error(`admin-api GET ${path} failed: ${res.status}`);
-  }
-  return (await res.json()) as T;
+  return fetchJson(res, schema);
 }
 
-
-// Typed convenience helpers, each shaped by the generated OpenAPI types. A
-// conditional `infer` so it resolves only for paths that actually expose a GET
-// with a JSON 200 (generated types mark missing methods as `never`).
-type JsonOf<G> = G extends { responses: { 200: { content: { "application/json": infer R } } } }
-  ? R
-  : never;
-type Body<P extends keyof paths> = paths[P] extends { get: infer G } ? JsonOf<G> : never;
-
-export async function listKnowledgeDocuments(): Promise<
-  Body<"/admin/v1/knowledge/documents">
-> {
-  return adminGet("/admin/v1/knowledge/documents");
+export async function listKnowledgeDocuments(): Promise<z.infer<typeof schemas.DocumentList>> {
+  return adminGet("/admin/v1/knowledge/documents", schemas.DocumentList);
 }
 
 export async function getKnowledgeDocument(
   docId: string,
-): Promise<Body<"/admin/v1/knowledge/documents/{doc_id}">> {
-  return adminGet(`/admin/v1/knowledge/documents/${encodeDocId(docId)}`);
+): Promise<z.infer<typeof schemas.DocumentDetailOut>> {
+  return adminGet(`/admin/v1/knowledge/documents/${encodeDocId(docId)}`, schemas.DocumentDetailOut);
 }
 
 /** Rename a document's title (proxied by the BFF). Returns the admin-api Response. */
@@ -75,74 +64,57 @@ export function deleteDocument(docId: string): Promise<Response> {
   });
 }
 
+const HealthSchema = z.record(z.string(), z.unknown());
+
 /** Liveness probe. Returns the admin-api's healthz body, or null when unreachable
  * — callers surface a backend-status indicator without failing the whole page. */
 export async function getHealth(): Promise<Record<string, unknown> | null> {
   try {
     const res = await adminRequest("/healthz");
     if (!res.ok) return null;
-    return (await res.json()) as Record<string, unknown>;
+    return await fetchJson(res, HealthSchema);
   } catch {
     return null;
   }
 }
 
-export async function listUsers(): Promise<Body<"/admin/v1/memory/users">> {
-  return adminGet("/admin/v1/memory/users");
+export async function listUsers(): Promise<z.infer<typeof schemas.UserList>> {
+  return adminGet("/admin/v1/memory/users", schemas.UserList);
 }
 
-export async function getProfile(
-  userId: string,
-): Promise<Body<"/admin/v1/memory/users/{user_id}/profile">> {
-  return adminGet(`/admin/v1/memory/users/${encodeURIComponent(userId)}/profile`);
+export async function getProfile(userId: string): Promise<z.infer<typeof schemas.Profile>> {
+  return adminGet(`/admin/v1/memory/users/${encodeURIComponent(userId)}/profile`, schemas.Profile);
 }
 
-export async function listSessions(
-  userId: string,
-): Promise<Body<"/admin/v1/memory/users/{user_id}/sessions">> {
-  return adminGet(`/admin/v1/memory/users/${encodeURIComponent(userId)}/sessions`);
+export async function listSessions(userId: string): Promise<z.infer<typeof schemas.SessionList>> {
+  return adminGet(
+    `/admin/v1/memory/users/${encodeURIComponent(userId)}/sessions`,
+    schemas.SessionList,
+  );
 }
 
 export async function getSession(
   userId: string,
   sessionId: string,
-): Promise<Body<"/admin/v1/memory/users/{user_id}/sessions/{session_id}">> {
+): Promise<z.infer<typeof schemas.SessionDetail>> {
   return adminGet(
     `/admin/v1/memory/users/${encodeURIComponent(userId)}/sessions/${encodeURIComponent(
       sessionId,
     )}`,
+    schemas.SessionDetail,
   );
 }
 
-export async function getPersona(): Promise<Body<"/admin/v1/memory/persona">> {
-  return adminGet("/admin/v1/memory/persona");
+export async function getPersona(): Promise<z.infer<typeof schemas.Persona>> {
+  return adminGet("/admin/v1/memory/persona", schemas.Persona);
 }
 
 // --- bot identity -----------------------------------------------------------
-// Hand-typed (like introspection-types) rather than derived from the generated
-// OpenAPI `paths`, so these helpers don't require regenerating api-types.ts.
-export interface AdminExpression {
-  mime: string;
-  filename: string | null;
-  version: string;
-}
-
-export interface AdminIdentity {
-  display_name: string;
-  description: string;
-  has_avatar: boolean;
-  avatar_mime: string | null;
-  avatar_filename: string | null;
-  version: string;
-  /** The mood-keyed portrait pack (`neutral` = the avatar slot). Older engines
-   * omit this — read defensively. */
-  expressions?: Record<string, AdminExpression>;
-  /** The deployment's mood vocabulary (one upload slot each in the editor). */
-  moods?: string[];
-}
+export type AdminExpression = z.infer<typeof schemas.ExpressionOut>;
+export type AdminIdentity = z.infer<typeof schemas.IdentityOut>;
 
 export async function getIdentity(): Promise<AdminIdentity> {
-  return adminGet<AdminIdentity>("/admin/v1/identity");
+  return adminGet("/admin/v1/identity", schemas.IdentityOut);
 }
 
 /** Set the bot's name + description (proxied by the BFF). Relays 409 on a stale
@@ -220,10 +192,9 @@ export function deleteIdentityExpression(
   expectedVersion?: string,
 ): Promise<Response> {
   const q = expectedVersion ? `?expected_version=${encodeURIComponent(expectedVersion)}` : "";
-  return adminRequest(
-    `/admin/v1/identity/expressions/${encodeURIComponent(mood)}${q}`,
-    { method: "DELETE" },
-  );
+  return adminRequest(`/admin/v1/identity/expressions/${encodeURIComponent(mood)}${q}`, {
+    method: "DELETE",
+  });
 }
 
 /** Open one mood's portrait bytes (404 when the pack has no such portrait). */
@@ -232,20 +203,10 @@ export function fetchIdentityExpression(mood: string): Promise<Response> {
 }
 
 // --- operator settings: memory location + git-versioning --------------------
-export interface AdminMemorySettings {
-  memory_dir: string;
-  git_enabled: boolean;
-  git_author_name: string;
-  git_author_email: string;
-  /** Where the running process actually reads/writes memory right now. */
-  active_memory_dir: string;
-  /** True when the saved settings differ from the running process (restart to apply). */
-  restart_required: boolean;
-  version: string;
-}
+export type AdminMemorySettings = z.infer<typeof schemas.MemorySettingsOut>;
 
 export async function getMemorySettings(): Promise<AdminMemorySettings> {
-  return adminGet<AdminMemorySettings>("/admin/v1/settings/memory");
+  return adminGet("/admin/v1/settings/memory", schemas.MemorySettingsOut);
 }
 
 /** Save the memory location + git-versioning (applied on the next restart). Relays
@@ -284,12 +245,12 @@ export function ingestDocument(doc: {
 }
 
 // --- subjects ---------------------------------------------------------------
-export async function listSubjects(): Promise<Body<"/admin/v1/knowledge/subjects">> {
-  return adminGet("/admin/v1/knowledge/subjects");
+export async function listSubjects(): Promise<z.infer<typeof schemas.SubjectListOut>> {
+  return adminGet("/admin/v1/knowledge/subjects", schemas.SubjectListOut);
 }
 
-export async function listTags(): Promise<Body<"/admin/v1/knowledge/tags">> {
-  return adminGet("/admin/v1/knowledge/tags");
+export async function listTags(): Promise<z.infer<typeof schemas.TagList>> {
+  return adminGet("/admin/v1/knowledge/tags", schemas.TagList);
 }
 
 export function createSubject(name: string, description = ""): Promise<Response> {
@@ -379,9 +340,10 @@ function rawFileQuery(userId?: string, sessionId?: string): string {
 export async function getRawFile(
   kind: string,
   opts: { userId?: string; sessionId?: string } = {},
-): Promise<Body<"/admin/v1/memory/files/{kind}">> {
+): Promise<z.infer<typeof schemas.RawFile>> {
   return adminGet(
     `/admin/v1/memory/files/${encodeURIComponent(kind)}${rawFileQuery(opts.userId, opts.sessionId)}`,
+    schemas.RawFile,
   );
 }
 
@@ -397,15 +359,8 @@ export function putRawFile(
 }
 
 // --- operator-triggered memory passes ---------------------------------------
-// Hand-typed (like the identity helpers) rather than derived from the generated
-// OpenAPI `paths`, so adding these doesn't require regenerating api-types.ts.
 export type MemoryTriggerAction = "summarize" | "curate" | "flush";
-
-export interface MemoryTriggerResult {
-  action: string;
-  changed: boolean;
-  detail: string;
-}
+export type MemoryTriggerResult = z.infer<typeof schemas.MemoryTriggerResult>;
 
 /** Run an operator-triggered memory pass on one session (proxied by the BFF).
  * Relays the admin-api status verbatim — notably 503 when the deployment has no
@@ -428,42 +383,36 @@ export function triggerSessionMemory(
 /** Maintenance curation over a user's whole fact sheet (merge duplicates, drop
  * contradictions). 503 when no model is wired. */
 export function consolidateFacts(userId: string): Promise<Response> {
-  return adminRequest(
-    `/admin/v1/memory/users/${encodeURIComponent(userId)}/consolidate`,
-    { method: "POST" },
-  );
+  return adminRequest(`/admin/v1/memory/users/${encodeURIComponent(userId)}/consolidate`, {
+    method: "POST",
+  });
 }
 
-export interface RecallPreview {
-  query: string;
-  sections: Record<string, string>;
-}
+export type RecallPreview = z.infer<typeof schemas.RecallPreview>;
 
 /** Dry-run the context assembly for a query — exactly what each memory section
  * would inject (the retrieval-quality lens for semantic memory). */
 export async function getRecallPreview(userId: string, q: string): Promise<RecallPreview> {
   return adminGet(
     `/admin/v1/memory/users/${encodeURIComponent(userId)}/recall-preview?q=${encodeURIComponent(q)}`,
+    schemas.RecallPreview,
   );
 }
 
-export interface FileHistoryEntry {
-  sha: string;
-  ts: string;
-  message: string;
-}
+export type FileHistoryEntry = z.infer<typeof schemas.FileHistoryEntry>;
 
 /** The git history of one raw memory file. Empty entries — not an error — when
  * memory versioning (memory_git_enabled) is off. */
 export async function getRawFileHistory(
   kind: string,
   opts: { userId?: string; sessionId?: string; limit?: number } = {},
-): Promise<{ kind: string; entries: FileHistoryEntry[] }> {
+): Promise<z.infer<typeof schemas.FileHistory>> {
   const query = rawFileQuery(opts.userId, opts.sessionId);
   const sep = query ? "&" : "?";
   const limit = opts.limit ? `${sep}limit=${opts.limit}` : "";
   return adminGet(
     `/admin/v1/memory/files/${encodeURIComponent(kind)}/history${query}${limit}`,
+    schemas.FileHistory,
   );
 }
 

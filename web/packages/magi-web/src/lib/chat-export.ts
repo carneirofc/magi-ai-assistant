@@ -4,6 +4,8 @@
 // so an exported chat reads like the conversation on screen; JSON is the raw
 // stored repository, branches and all.
 
+import { LooseThreadSchema } from "./wire-schemas";
+
 type StoredMessage = {
   id?: string;
   role?: string;
@@ -73,7 +75,12 @@ function download(filename: string, mime: string, body: string): void {
 }
 
 function safeFilename(title: string): string {
-  return title.replace(/[^\w\d-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "chat";
+  return (
+    title
+      .replace(/[^\w\d-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "chat"
+  );
 }
 
 /** Download one session's transcript. Resolves false when the session has no
@@ -89,7 +96,7 @@ export async function exportTranscript(
     const res = await fetch(`/api/chat/history/${encodeURIComponent(sessionId)}`, {
       cache: "no-store",
     });
-    if (res.ok) thread = (await res.json()) as StoredThread;
+    if (res.ok) thread = LooseThreadSchema.parse(await res.json());
   } catch {
     /* treated as no transcript below */
   }
@@ -98,7 +105,11 @@ export async function exportTranscript(
   if (format === "json") {
     download(`${safeFilename(title)}.json`, "application/json", JSON.stringify(thread, null, 2));
   } else {
-    download(`${safeFilename(title)}.md`, "text/markdown", toMarkdown(thread, title, assistantName));
+    download(
+      `${safeFilename(title)}.md`,
+      "text/markdown",
+      toMarkdown(thread, title, assistantName),
+    );
   }
   return true;
 }

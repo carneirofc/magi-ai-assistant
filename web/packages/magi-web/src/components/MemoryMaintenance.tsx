@@ -11,9 +11,10 @@
 //     touches what a turn changed, so sheets drift toward near-duplicates;
 //     this is the cleanup lever. 503 = no model wired, surfaced as a note.
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { OutlineButton, StatusMessage, TextInput } from "@carneirofc/ui";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { schemas } from "../lib/api-schemas";
 
 const SECTION_LABELS: Record<string, string> = {
   persona: "Persona",
@@ -43,7 +44,8 @@ export function MemoryMaintenance({ userId }: { userId: string }) {
         { cache: "no-store" },
       );
       if (!res.ok) throw new Error(`${res.status}`);
-      setPreview((await res.json()) as Preview);
+      const preview = schemas.RecallPreview.parse(await res.json());
+      setPreview({ query: preview.query, sections: preview.sections ?? {} });
     } catch {
       setStatus({ tone: "error", text: "Preview failed — is the admin API up?" });
     } finally {
@@ -65,7 +67,7 @@ export function MemoryMaintenance({ userId }: { userId: string }) {
         return;
       }
       if (!res.ok) throw new Error(`${res.status}`);
-      const data = (await res.json()) as { changed: boolean; detail: string };
+      const data = schemas.MemoryTriggerResult.parse(await res.json());
       setStatus({ tone: data.changed ? "success" : "warn", text: data.detail });
       if (data.changed) router.refresh();
     } catch {

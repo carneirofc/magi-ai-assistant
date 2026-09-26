@@ -5,13 +5,16 @@
 // forbids tools/media), so the body relays straight through.
 
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import { openGreetingStream } from "../../lib/chat-api";
+import { invalidBody, readJsonBody } from "../../lib/route-body";
 
-type Payload = { sessionId?: string; userId?: string };
+const PayloadSchema = z.object({ sessionId: z.string().optional(), userId: z.string().optional() });
 
 export async function POST(req: Request) {
-  const b = (await req.json().catch(() => ({}))) as Payload;
+  const b = await readJsonBody(req, PayloadSchema);
+  if (!b) return invalidBody();
   const sessionId = (b.sessionId ?? "").trim();
   const userId = (b.userId ?? "").trim();
   if (!sessionId || !userId) {

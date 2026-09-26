@@ -5,10 +5,11 @@
 import { NextResponse } from "next/server";
 
 import { adminGet, adminRequest } from "../../../lib/admin-api";
+import { schemas } from "../../../lib/api-schemas";
 
 export async function GET() {
   try {
-    return NextResponse.json(await adminGet("/admin/v1/settings/mcp"));
+    return NextResponse.json(await adminGet("/admin/v1/settings/mcp", schemas.McpSettingsOut));
   } catch {
     return NextResponse.json({ error: "admin-api unreachable" }, { status: 503 });
   }

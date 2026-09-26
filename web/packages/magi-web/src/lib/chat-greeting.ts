@@ -14,6 +14,7 @@
 
 import { parseFrame } from "./chat-adapter";
 import type { ChatLifecycle } from "./chat-mood";
+import { LooseThreadSchema } from "./wire-schemas";
 
 function historyUrl(sessionId: string): string {
   return `/api/chat/history/${encodeURIComponent(sessionId)}`;
@@ -26,8 +27,8 @@ export async function sessionTranscriptEmpty(sessionId: string): Promise<boolean
     const res = await fetch(historyUrl(sessionId), { cache: "no-store" });
     if (res.status === 404) return true;
     if (!res.ok) return false;
-    const body = (await res.json()) as { items?: unknown[] } | null;
-    return !body || !Array.isArray(body.items) || body.items.length === 0;
+    const body = LooseThreadSchema.nullable().parse(await res.json());
+    return !body || body.items.length === 0;
   } catch {
     return false;
   }
@@ -49,7 +50,13 @@ async function seedGreeting(sessionId: string, text: string): Promise<void> {
           content: [{ type: "text", text }],
           createdAt: new Date().toISOString(),
           status: { type: "complete", reason: "stop" },
-          metadata: { unstable_state: null, unstable_annotations: [], unstable_data: [], steps: [], custom: {} },
+          metadata: {
+            unstable_state: null,
+            unstable_annotations: [],
+            unstable_data: [],
+            steps: [],
+            custom: {},
+          },
         },
       },
     ],

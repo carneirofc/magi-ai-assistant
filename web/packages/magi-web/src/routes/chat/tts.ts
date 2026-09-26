@@ -4,11 +4,17 @@
 // ever adds to the text already on screen.
 
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import { openTtsAudio } from "../../lib/chat-api";
+import { invalidBody, readJsonBody } from "../../lib/route-body";
 
 export async function POST(req: Request) {
-  const b = (await req.json().catch(() => ({}))) as { text?: string; mood?: string | null };
+  const b = await readJsonBody(
+    req,
+    z.object({ text: z.string().optional(), mood: z.string().nullable().optional() }),
+  );
+  if (!b) return invalidBody();
   const text = (b.text ?? "").trim();
   if (!text) {
     return NextResponse.json({ error: "text required" }, { status: 400 });

@@ -3,19 +3,19 @@
 // bearer and relay its status. The browser never sees the token.
 
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import { deleteDocument, renameDocument } from "../../../../lib/admin-api";
+import { invalidBody, readJsonBody } from "../../../../lib/route-body";
 
 function docIdOf(parts: string[]): string {
   return parts.map(decodeURIComponent).join("/");
 }
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: Promise<{ docId: string[] }> },
-) {
+export async function PATCH(req: Request, { params }: { params: Promise<{ docId: string[] }> }) {
   const { docId } = await params;
-  const body = (await req.json().catch(() => ({}))) as { title?: string };
+  const body = await readJsonBody(req, z.object({ title: z.string().optional() }));
+  if (!body) return invalidBody();
   if (!body.title) {
     return NextResponse.json({ error: "title required" }, { status: 400 });
   }
@@ -27,10 +27,7 @@ export async function PATCH(
   });
 }
 
-export async function DELETE(
-  _req: Request,
-  { params }: { params: Promise<{ docId: string[] }> },
-) {
+export async function DELETE(_req: Request, { params }: { params: Promise<{ docId: string[] }> }) {
   const { docId } = await params;
   const res = await deleteDocument(docIdOf(docId));
   return new NextResponse(null, { status: res.status });

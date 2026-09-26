@@ -10,10 +10,12 @@
 // Must live inside the assistant-ui runtime (it writes through
 // useComposerRuntime); the Composer toolbar mounts it.
 
-import { useEffect, useRef, useState } from "react";
 import { useComposerRuntime } from "@assistant-ui/react";
+import { useEffect, useRef, useState } from "react";
 
 import type { ArchiveHit } from "../lib/chat-api";
+import { fetchJson } from "../lib/utils";
+import { ArchiveHitsSchema } from "../lib/wire-schemas";
 
 const KIND_LABEL: Record<string, string> = {
   transcript: "said in",
@@ -40,13 +42,12 @@ export function ArchiveReference({ userId }: { userId: string }) {
       return;
     }
     const timer = setTimeout(() => {
-      fetch(
-        `/api/chat/archive?q=${encodeURIComponent(q)}&userId=${encodeURIComponent(userId)}`,
-        { cache: "no-store" },
-      )
-        .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`${res.status}`))))
-        .then((body: { hits?: ArchiveHit[] }) => {
-          setHits(Array.isArray(body.hits) ? body.hits : []);
+      fetch(`/api/chat/archive?q=${encodeURIComponent(q)}&userId=${encodeURIComponent(userId)}`, {
+        cache: "no-store",
+      })
+        .then((res) => fetchJson(res, ArchiveHitsSchema))
+        .then((body) => {
+          setHits(body.hits);
           setFailed(false);
         })
         .catch(() => setFailed(true));
@@ -124,9 +125,9 @@ export function ArchiveReference({ userId }: { userId: string }) {
                 Nothing matching in past conversations.
               </p>
             ) : (
-              hits.map((hit, index) => (
+              hits.map((hit) => (
                 <button
-                  key={`${hit.kind}-${hit.session_id}-${index}`}
+                  key={`${hit.kind}-${hit.session_id}-${hit.ts}-${hit.snippet}`}
                   type="button"
                   onClick={() => insert(hit)}
                   className="rounded-lg border border-transparent px-2 py-1.5 text-left transition-colors hover:border-ui hover:bg-[color:var(--ui-bg-soft)]"
@@ -153,7 +154,17 @@ export function ArchiveReference({ userId }: { userId: string }) {
 
 function HistoryIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg
+      viewBox="0 0 24 24"
+      width="17"
+      height="17"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
       <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
       <path d="M3 3v5h5" />
       <path d="M12 7v5l3.5 2" />

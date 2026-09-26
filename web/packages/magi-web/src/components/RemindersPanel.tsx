@@ -6,8 +6,8 @@
 // pending — the stage column stays calm unless there's something to say.
 
 import { useEffect, useState } from "react";
-
-type Reminder = { id: string; text: string; due: string; done?: boolean };
+import { fetchJson } from "../lib/utils";
+import { type Reminder, RemindersBodySchema } from "../lib/wire-schemas";
 
 export function RemindersPanel({ userId }: { userId: string }) {
   const [reminders, setReminders] = useState<Reminder[]>([]);
@@ -15,10 +15,10 @@ export function RemindersPanel({ userId }: { userId: string }) {
   useEffect(() => {
     let active = true;
     fetch(`/api/chat/reminders?userId=${encodeURIComponent(userId)}`, { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((body: { reminders?: Reminder[] } | null) => {
-        if (!active || !body) return;
-        setReminders((body.reminders ?? []).filter((r) => !r.done));
+      .then((res) => fetchJson(res, RemindersBodySchema))
+      .then((body) => {
+        if (!active) return;
+        setReminders(body.reminders.filter((r) => !r.done));
       })
       .catch(() => {});
     return () => {

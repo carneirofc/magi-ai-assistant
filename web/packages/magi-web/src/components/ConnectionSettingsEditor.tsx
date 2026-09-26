@@ -11,10 +11,11 @@
 // such field is badged so the operator knows. Secret values are never sent to the
 // browser: a secret field shows only whether it's set, and typing replaces it.
 
-import { useMemo, useState } from "react";
 import { OutlineButton, StatusMessage, TextInput } from "@carneirofc/ui";
+import { useMemo, useState } from "react";
 
 import type { ConfigFieldState, ConfigKey, ConfigState } from "../lib/runtime-config";
+import { ConfigStateSchema } from "../lib/runtime-config-schema";
 
 const GROUP_LABELS: Record<ConfigFieldState["group"], string> = {
   connection: "Backend connection",
@@ -111,11 +112,9 @@ export function ConnectionSettingsEditor({ initial }: { initial: ConfigState }) 
       setError(body.error ?? `Request failed (${res.status}).`);
       return;
     }
-    const next = (await res.json()) as ConfigState;
+    const next = ConfigStateSchema.parse(await res.json());
     setFields(next.fields);
-    setDraft(
-      Object.fromEntries(next.fields.map((f) => [f.key, f.secret ? "" : (f.value ?? "")])),
-    );
+    setDraft(Object.fromEntries(next.fields.map((f) => [f.key, f.secret ? "" : (f.value ?? "")])));
     setCleared({});
     setDirty(false);
     setSaved(true);
@@ -124,11 +123,10 @@ export function ConnectionSettingsEditor({ initial }: { initial: ConfigState }) 
   return (
     <div className="flex flex-col gap-6">
       <StatusMessage role="status" tone="info">
-        These layer over the deployment’s environment variables — a saved value
-        wins over its env var, and clearing an override falls back to it. Live
-        fields apply on the next request; fields marked{" "}
-        <span className="font-semibold">restart required</span> only take effect
-        after the service restarts.
+        These layer over the deployment’s environment variables — a saved value wins over its env
+        var, and clearing an override falls back to it. Live fields apply on the next request;
+        fields marked <span className="font-semibold">restart required</span> only take effect after
+        the service restarts.
       </StatusMessage>
 
       {GROUP_ORDER.map((group) => {
@@ -152,11 +150,7 @@ export function ConnectionSettingsEditor({ initial }: { initial: ConfigState }) 
                   value={draft[f.key] ?? ""}
                   onChange={(e) => setValue(f.key, e.target.value)}
                   placeholder={
-                    f.secret
-                      ? f.isSet
-                        ? "•••••••• — set (type to replace)"
-                        : "not set"
-                      : f.env
+                    f.secret ? (f.isSet ? "•••••••• — set (type to replace)" : "not set") : f.env
                   }
                   className="max-w-xl font-mono"
                   spellCheck={false}
@@ -189,8 +183,8 @@ export function ConnectionSettingsEditor({ initial }: { initial: ConfigState }) 
 
       {restartPending ? (
         <StatusMessage role="status" tone="warn">
-          A restart-required field has changed — save persists it now, but restart
-          the service to apply it.
+          A restart-required field has changed — save persists it now, but restart the service to
+          apply it.
         </StatusMessage>
       ) : null}
 

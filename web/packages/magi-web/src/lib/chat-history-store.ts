@@ -10,11 +10,12 @@
 
 import "server-only";
 
-import { promises as fs } from "fs";
-import os from "os";
-import path from "path";
-
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import type { z } from "zod";
 import { getConfigValue } from "./runtime-config";
+import { LooseThreadSchema } from "./wire-schemas";
 
 // Resolved once at module load (file override → CHAT_HISTORY_DIR → OS temp dir):
 // the location is read at startup, so a Settings change here is restart-required —
@@ -74,9 +75,6 @@ export type TranscriptHit = {
   ts: number;
 };
 
-type SearchableMessage = { role?: string; content?: unknown };
-type SearchableItem = { message?: SearchableMessage };
-
 function textParts(content: unknown): string[] {
   if (!Array.isArray(content)) return [];
   const out: string[] = [];
@@ -121,13 +119,13 @@ export async function searchThreads(query: string, limit = 20): Promise<Transcri
     } catch {
       continue;
     }
-    let thread: { items?: SearchableItem[] };
+    let thread: z.infer<typeof LooseThreadSchema>;
     try {
-      thread = JSON.parse(raw) as { items?: SearchableItem[] };
+      thread = LooseThreadSchema.parse(JSON.parse(raw));
     } catch {
       continue;
     }
-    for (const item of thread.items ?? []) {
+    for (const item of thread.items) {
       const role = item.message?.role === "user" ? "user" : "assistant";
       let found = false;
       for (const text of textParts(item.message?.content)) {

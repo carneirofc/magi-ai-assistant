@@ -5,13 +5,9 @@
 // state so an edit in Raw is reflected in Rendered without a reload. Saves via the
 // BFF raw-file route with optimistic-concurrency; relays 409 / 422.
 
+import { OutlineButton, SegmentedControl, StatusMessage, TextAreaInput } from "@carneirofc/ui";
 import { useMemo, useState } from "react";
-import {
-  OutlineButton,
-  SegmentedControl,
-  StatusMessage,
-  TextAreaInput,
-} from "@carneirofc/ui";
+import { VersionBodySchema } from "../lib/wire-schemas";
 
 type Turn = { role?: string; content?: string; ts?: string };
 type ViewMode = "rendered" | "raw";
@@ -65,7 +61,7 @@ export function SessionFile({
     });
     setBusy(false);
     if (res.ok) {
-      const data = (await res.json()) as { version: string };
+      const data = VersionBodySchema.parse(await res.json());
       setVersion(data.version);
       setSaved(true);
       setDirty(false);
@@ -108,6 +104,7 @@ export function SessionFile({
           ) : (
             <ul className="flex flex-col gap-2">
               {turns.map((t, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: turns have no stable id; static, append-only transcript render
                 <TurnBubble key={i} turn={t} />
               ))}
             </ul>
@@ -133,7 +130,12 @@ export function SessionFile({
             className="font-mono text-ui-xs"
           />
           <div className="flex items-center gap-3">
-            <OutlineButton variant="accent" controlSize="md" onClick={save} disabled={busy || !dirty}>
+            <OutlineButton
+              variant="accent"
+              controlSize="md"
+              onClick={save}
+              disabled={busy || !dirty}
+            >
               {busy ? "Saving…" : "Save"}
             </OutlineButton>
             {saved ? (

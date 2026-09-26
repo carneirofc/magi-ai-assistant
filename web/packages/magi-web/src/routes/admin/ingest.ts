@@ -3,16 +3,22 @@
 // subject).
 
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import { ingestDocument } from "../../lib/admin-api";
+import { invalidBody, readJsonBody } from "../../lib/route-body";
 
 export async function POST(req: Request) {
-  const body = (await req.json().catch(() => ({}))) as {
-    title?: string;
-    text?: string;
-    subject?: string;
-    tags?: string[];
-  };
+  const body = await readJsonBody(
+    req,
+    z.object({
+      title: z.string().optional(),
+      text: z.string().optional(),
+      subject: z.string().optional(),
+      tags: z.array(z.string()).optional(),
+    }),
+  );
+  if (!body) return invalidBody();
   if (!body.title || !body.text) {
     return NextResponse.json({ error: "title and text required" }, { status: 400 });
   }

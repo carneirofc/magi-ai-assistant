@@ -11,10 +11,11 @@
 // `neutral` expression IS the profile picture above, so the grid offers a slot
 // for every other mood, plus any uploaded mood that later left the vocabulary.
 
-import { useRef, useState } from "react";
 import { OutlineButton, StatusMessage, TextAreaInput, TextInput } from "@carneirofc/ui";
-
+import { useRef, useState } from "react";
 import type { AdminExpression, AdminIdentity } from "../lib/admin-api";
+import { schemas } from "../lib/api-schemas";
+import { fetchJson } from "../lib/utils";
 
 // Guard against an accidental multi-MB upload replayed to the model every turn.
 const MAX_AVATAR_BYTES = 4 * 1024 * 1024;
@@ -53,10 +54,10 @@ function CameraIcon() {
 }
 
 export function IdentityEditor({ initial }: { initial: AdminIdentity }) {
-  const [displayName, setDisplayName] = useState(initial.display_name);
-  const [description, setDescription] = useState(initial.description);
-  const [version, setVersion] = useState(initial.version);
-  const [hasAvatar, setHasAvatar] = useState(initial.has_avatar);
+  const [displayName, setDisplayName] = useState(initial.display_name ?? "");
+  const [description, setDescription] = useState(initial.description ?? "");
+  const [version, setVersion] = useState(initial.version ?? "");
+  const [hasAvatar, setHasAvatar] = useState(initial.has_avatar ?? false);
   const [expressions, setExpressions] = useState<Record<string, AdminExpression>>(
     initial.expressions ?? {},
   );
@@ -69,10 +70,10 @@ export function IdentityEditor({ initial }: { initial: AdminIdentity }) {
   const fileInput = useRef<HTMLInputElement>(null);
 
   function applyIdentity(next: AdminIdentity) {
-    setVersion(next.version);
-    setHasAvatar(next.has_avatar);
-    setDisplayName(next.display_name);
-    setDescription(next.description);
+    setVersion(next.version ?? "");
+    setHasAvatar(next.has_avatar ?? false);
+    setDisplayName(next.display_name ?? "");
+    setDescription(next.description ?? "");
     setExpressions(next.expressions ?? {});
   }
 
@@ -97,7 +98,7 @@ export function IdentityEditor({ initial }: { initial: AdminIdentity }) {
     });
     setBusy(false);
     if (res.ok) {
-      applyIdentity((await res.json()) as AdminIdentity);
+      applyIdentity(await fetchJson(res, schemas.IdentityOut));
       setDirty(false);
       setSaved(true);
       return;
@@ -130,7 +131,7 @@ export function IdentityEditor({ initial }: { initial: AdminIdentity }) {
     });
     setBusy(false);
     if (res.ok) {
-      applyIdentity((await res.json()) as AdminIdentity);
+      applyIdentity(await fetchJson(res, schemas.IdentityOut));
       setSaved(true);
       return;
     }
@@ -147,7 +148,7 @@ export function IdentityEditor({ initial }: { initial: AdminIdentity }) {
     );
     setBusy(false);
     if (res.ok) {
-      applyIdentity((await res.json()) as AdminIdentity);
+      applyIdentity(await fetchJson(res, schemas.IdentityOut));
       setSaved(true);
       return;
     }
@@ -179,7 +180,7 @@ export function IdentityEditor({ initial }: { initial: AdminIdentity }) {
     });
     setBusy(false);
     if (res.ok) {
-      applyIdentity((await res.json()) as AdminIdentity);
+      applyIdentity(await fetchJson(res, schemas.IdentityOut));
       setSaved(true);
       return;
     }
@@ -196,7 +197,7 @@ export function IdentityEditor({ initial }: { initial: AdminIdentity }) {
     );
     setBusy(false);
     if (res.ok) {
-      applyIdentity((await res.json()) as AdminIdentity);
+      applyIdentity(await fetchJson(res, schemas.IdentityOut));
       setSaved(true);
       return;
     }
@@ -204,7 +205,9 @@ export function IdentityEditor({ initial }: { initial: AdminIdentity }) {
   }
 
   // Version is part of the query so a new upload/clear reloads the <img>.
-  const avatarSrc = hasAvatar ? `/api/admin/identity/avatar?v=${encodeURIComponent(version)}` : null;
+  const avatarSrc = hasAvatar
+    ? `/api/admin/identity/avatar?v=${encodeURIComponent(version)}`
+    : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -213,6 +216,8 @@ export function IdentityEditor({ initial }: { initial: AdminIdentity }) {
           {/* The avatar itself is the primary control: click or drop an image to
               set it, a hover/drag overlay spells that out, and a corner ✕ clears
               it. Explicit buttons below cover keyboard/discoverability. */}
+          {/* biome-ignore lint/a11y/useSemanticElements: a nested <button> (remove ✕) below rules out
+              a native <button> here — nested buttons are invalid HTML. */}
           <div
             role="button"
             tabIndex={0}
@@ -243,8 +248,8 @@ export function IdentityEditor({ initial }: { initial: AdminIdentity }) {
             } ${busy ? "cursor-not-allowed opacity-70" : ""}`}
           >
             {avatarSrc ? (
-              // eslint-disable-next-line @next/next/no-img-element -- BFF-served, dynamic; no loader needed
-              <img src={avatarSrc} alt="Profile picture" className="h-full w-full object-cover" />
+              // biome-ignore lint/performance/noImgElement: BFF-served, dynamic; no loader needed
+              <img src={avatarSrc} alt="Profile" className="h-full w-full object-cover" />
             ) : (
               <span aria-hidden>{(displayName.trim()[0] || "M").toUpperCase()}</span>
             )}
@@ -338,10 +343,9 @@ export function IdentityEditor({ initial }: { initial: AdminIdentity }) {
               Expressions
             </span>
             <p className="text-ui-xs text-[color:var(--ui-ink-muted)]">
-              One portrait per mood — the companion surface swaps between these as the
-              streamed mood changes. The profile picture above is the{" "}
-              <code className="font-mono">neutral</code> face; moods without a portrait
-              fall back to it.
+              One portrait per mood — the companion surface swaps between these as the streamed mood
+              changes. The profile picture above is the <code className="font-mono">neutral</code>{" "}
+              face; moods without a portrait fall back to it.
             </p>
             <div className="flex flex-wrap gap-3">
               {slots.map((mood) => (
@@ -361,7 +365,12 @@ export function IdentityEditor({ initial }: { initial: AdminIdentity }) {
       })()}
 
       <div className="flex items-center gap-3">
-        <OutlineButton variant="accent" controlSize="md" onClick={saveFields} disabled={busy || !dirty}>
+        <OutlineButton
+          variant="accent"
+          controlSize="md"
+          onClick={saveFields}
+          disabled={busy || !dirty}
+        >
           {busy ? "Saving…" : "Save"}
         </OutlineButton>
         {saved ? (
@@ -403,6 +412,8 @@ function ExpressionSlot({
 
   return (
     <div className="flex flex-col items-center gap-1.5">
+      {/* biome-ignore lint/a11y/useSemanticElements: a nested <button> (remove ✕) below rules out
+          a native <button> here — nested buttons are invalid HTML. */}
       <div
         role="button"
         tabIndex={0}
@@ -437,7 +448,7 @@ function ExpressionSlot({
         } ${busy ? "cursor-not-allowed opacity-70" : ""}`}
       >
         {src ? (
-          // eslint-disable-next-line @next/next/no-img-element -- BFF-served, dynamic; no loader needed
+          // biome-ignore lint/performance/noImgElement: BFF-served, dynamic; no loader needed
           <img src={src} alt={`${mood} portrait`} className="h-full w-full object-cover" />
         ) : (
           <span aria-hidden className="text-ui-2xs text-[color:var(--ui-ink-subtle)]">
@@ -449,9 +460,7 @@ function ExpressionSlot({
             dragging && expression ? "opacity-100" : "opacity-0"
           }`}
         >
-          <span className="text-ui-2xs font-medium">
-            {expression ? "Replace" : "Upload"}
-          </span>
+          <span className="text-ui-2xs font-medium">{expression ? "Replace" : "Upload"}</span>
         </div>
         {expression && !busy ? (
           <button

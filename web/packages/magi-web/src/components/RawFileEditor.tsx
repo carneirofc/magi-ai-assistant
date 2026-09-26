@@ -9,8 +9,11 @@
 // (restoring = loading + Save, so every restore is itself a versioned write).
 // With versioning off the drawer quietly hides — empty history is not an error.
 
-import { useEffect, useState } from "react";
 import { OutlineButton, StatusMessage, TextAreaInput } from "@carneirofc/ui";
+import { useEffect, useState } from "react";
+import { schemas } from "../lib/api-schemas";
+import { fetchJson } from "../lib/utils";
+import { VersionBodySchema } from "../lib/wire-schemas";
 
 type HistoryEntry = { sha: string; ts: string; message: string };
 
@@ -50,12 +53,13 @@ export function RawFileEditor({
     return p.toString();
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: identity is (kind,userId,sessionId)
   useEffect(() => {
     let active = true;
     fetch(`/api/admin/memory/file-history?${historyQuery()}`, { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((body: { entries?: HistoryEntry[] } | null) => {
-        if (active) setHistory(body && Array.isArray(body.entries) ? body.entries : []);
+      .then((res) => fetchJson(res, schemas.FileHistory))
+      .then((body) => {
+        if (active) setHistory(body.entries ?? []);
       })
       .catch(() => {
         if (active) setHistory([]);
@@ -63,7 +67,6 @@ export function RawFileEditor({
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- identity is (kind,userId,sessionId)
   }, [kind, userId, sessionId]);
 
   async function viewVersion(sha: string) {
@@ -75,8 +78,8 @@ export function RawFileEditor({
       setError(`Couldn't read that version (${res.status}).`);
       return;
     }
-    const body = (await res.json()) as { content?: string };
-    setViewing({ sha, content: body.content ?? "" });
+    const body = schemas.FileVersionOut.parse(await res.json());
+    setViewing({ sha, content: body.content });
   }
 
   async function save() {
@@ -90,7 +93,7 @@ export function RawFileEditor({
     });
     setBusy(false);
     if (res.ok) {
-      const data = (await res.json()) as { version: string };
+      const data = VersionBodySchema.parse(await res.json());
       setVersion(data.version);
       setSaved(true);
       setDirty(false);

@@ -19,10 +19,15 @@ building magi admin/chat UIs. Published to GitHub Packages; consumed from **sour
   (`admin-api.ts`, `chat-api.ts`) are server-only; never import them into client
   components. `middleware.ts` and `routes/*` run on the server.
 - **Runtime validation with zod.** Admin-api schemas are generated into
-  `src/lib/api-schemas.ts` alongside `api-types.ts`; parse responses with
-  `fetchJson(res, Schema)` (`src/lib/utils.ts`). Non-OpenAPI shapes (SSE events,
-  localStorage records, runtime config) get hand-written zod schemas next to
-  the code that owns them. `zod` is a runtime dependency.
+  `src/lib/api-schemas.ts` (`schemas.<Name>`) alongside `api-types.ts`. Shapes
+  outside that OpenAPI (chat-api responses, BFF route bodies, transcripts,
+  localStorage) live in `src/lib/wire-schemas.ts`; runtime-config shapes in
+  `src/lib/runtime-config-schema.ts` (client-safe, unlike `runtime-config.ts`).
+  A schema mirroring an exported interface is typed `z.ZodType<Interface>`.
+  Parse responses with `fetchJson(res, Schema)` (`src/lib/utils.ts`) or
+  `Schema.parse(await res.json())`; route handlers read bodies with
+  `readJsonBody` + `invalidBody()` (`src/lib/route-body.ts`) so a bad body is a
+  400, not a 500. `zod` is a runtime dependency.
 - The package is **presentational + runtime only** — the reference app owns route
   mounting, shell assembly, and env/secret wiring.
 

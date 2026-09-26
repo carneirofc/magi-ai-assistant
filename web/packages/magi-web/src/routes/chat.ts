@@ -7,17 +7,23 @@
 // the cacheable /api/chat/blobs/<id> endpoint instead of a one-shot data: URI.
 
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
-import { openMessageStream, type InboundAttachment } from "../lib/chat-api";
+import { type InboundAttachment, openMessageStream } from "../lib/chat-api";
 import { offloadReplyMedia } from "../lib/chat-media-offload";
+import { invalidBody, readJsonBody } from "../lib/route-body";
 
-type Payload = {
-  sessionId?: string;
-  userId?: string;
-  text?: string;
-  images?: InboundAttachment[];
-  files?: InboundAttachment[];
-};
+const AttachmentSchema = z
+  .object({ url: z.string().optional(), data_base64: z.string().optional() })
+  .passthrough();
+
+const PayloadSchema = z.object({
+  sessionId: z.string().optional(),
+  userId: z.string().optional(),
+  text: z.string().optional(),
+  images: z.array(AttachmentSchema).optional(),
+  files: z.array(AttachmentSchema).optional(),
+});
 
 /** Rewrite one SSE frame (the text between `\n\n` separators, separator re-added).
  * Only the `done` frame is touched — its reply media is offloaded to the blob
@@ -31,7 +37,9 @@ async function rewriteFrame(frame: string): Promise<string> {
   }
   if (dataLines.length === 0) return `${frame}\n\n`;
   try {
-    const data = JSON.parse(dataLines.join("\n")) as { media?: unknown };
+    const data = z
+      .object({ media: z.unknown().optional() })
+      .parse(JSON.parse(dataLines.join("\n")));
     await offloadReplyMedia(data.media);
     return `event: done\ndata: ${JSON.stringify(data)}\n\n`;
   } catch {
@@ -79,20 +87,16 @@ function offloadingRelay(upstream: ReadableStream<Uint8Array>): ReadableStream<U
 }
 
 /** Keep only well-formed attachments (something the agent can actually load). */
-function cleanAttachments(items: unknown): InboundAttachment[] {
-  if (!Array.isArray(items)) return [];
-  const out: InboundAttachment[] = [];
-  for (const raw of items) {
-    if (raw === null || typeof raw !== "object") continue;
-    const a = raw as InboundAttachment;
-    if (!a.url && !a.data_base64) continue;
-    out.push(a);
-  }
-  return out;
+function cleanAttachments(
+  items: z.infer<typeof AttachmentSchema>[] | undefined,
+): InboundAttachment[] {
+  if (!items) return [];
+  return items.filter((a) => a.url || a.data_base64) as InboundAttachment[];
 }
 
 export async function POST(req: Request) {
-  const b = (await req.json().catch(() => ({}))) as Payload;
+  const b = await readJsonBody(req, PayloadSchema);
+  if (!b) return invalidBody();
   const sessionId = (b.sessionId ?? "").trim();
   const userId = (b.userId ?? "").trim();
   const text = (b.text ?? "").trim();

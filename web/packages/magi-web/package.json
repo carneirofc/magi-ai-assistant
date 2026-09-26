@@ -1,6 +1,6 @@
 {
   "name": "@carneirofc/magi-web",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "MAGI frontend library — presentational React components and the SSE chat runtime for building magi-engine admin/chat UIs. Consumed from source via Next.js transpilePackages.",
   "license": "UNLICENSED",
   "type": "module",
@@ -68,13 +68,15 @@
     "react-markdown": "^9.0.0",
     "react-shiki": "^0.10.1",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.6.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "openapi-typescript": "^7.4.0",
+    "openapi-zod-client": "^1.18.3",
     "typescript": "^5.7.0"
   }
 }

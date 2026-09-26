@@ -8,6 +8,8 @@
 // All helpers are pure: they take the current registry and return a new one. The
 // component holds it in state and persists with `saveRegistry` after each change.
 
+import { SessionRegistrySchema } from "./wire-schemas";
+
 export interface ChatSession {
   id: string;
   title: string;
@@ -59,12 +61,13 @@ export function loadRegistry(): SessionRegistry {
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as Partial<SessionRegistry>;
-      if (parsed && Array.isArray(parsed.sessions) && parsed.sessions.length > 0) {
-        const sessions = parsed.sessions;
-        const activeId = sessions.some((s) => s.id === parsed.activeId)
-          ? (parsed.activeId as string)
-          : sessions[0].id;
+      const parsed = SessionRegistrySchema.safeParse(JSON.parse(raw));
+      if (parsed.success && parsed.data.sessions.length > 0) {
+        const { sessions, activeId: storedActive } = parsed.data;
+        const activeId =
+          storedActive !== undefined && sessions.some((s) => s.id === storedActive)
+            ? storedActive
+            : sessions[0].id;
         return { activeId, sessions };
       }
     }
@@ -164,7 +167,12 @@ export function toggleArchiveSession(reg: SessionRegistry, id: string): SessionR
   if (activeId === id && sessions.find((s) => s.id === id)?.archived) {
     const visible = sessions.filter((s) => !s.archived);
     if (visible.length === 0) {
-      const fresh = { id: newSessionId(), title: "New chat", createdAt: Date.now(), updatedAt: Date.now() };
+      const fresh = {
+        id: newSessionId(),
+        title: "New chat",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
       return { activeId: fresh.id, sessions: [fresh, ...sessions] };
     }
     activeId = visible[0].id;

@@ -13,6 +13,7 @@ import {
   type ThreadHistoryAdapter,
   type ThreadMessageLike,
 } from "@assistant-ui/react";
+import { StoredThreadSchema } from "./wire-schemas";
 
 // Stored form: ThreadMessageLike is the lenient shape assistant-ui can re-import
 // (dates/parts/attachments are all normalized by `fromBranchableArray` on load).
@@ -52,10 +53,13 @@ export function createSessionHistoryAdapter(sessionId: string): ThreadHistoryAda
       try {
         const res = await fetch(historyUrl(sessionId), { cache: "no-store" });
         if (res.ok) {
-          const data = (await res.json()) as Partial<StoredThread>;
+          const data = StoredThreadSchema.parse(await res.json());
           thread = {
             headId: data.headId ?? null,
-            items: Array.isArray(data.items) ? data.items : [],
+            items: data.items.map((item) => ({
+              message: item.message,
+              parentId: item.parentId ?? null,
+            })),
           };
         }
       } catch {
