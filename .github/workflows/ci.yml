@@ -31,7 +31,10 @@ jobs:
         run: uv sync --dev
 
       - name: Ruff lint
-        run: uv run ruff check src tests
+        run: uv run ruff check .
+
+      - name: Ruff format
+        run: uv run ruff format --check .
 
       - name: Tests
         run: uv run pytest -q
@@ -43,7 +46,7 @@ jobs:
           uvx pip-audit -r requirements.txt
 
   web:
-    name: frontend · typecheck · audit
+    name: frontend · lint · typecheck · audit
     runs-on: ubuntu-latest
     # Overrides the workflow default so the job token can read @carneirofc/ui
     # from GitHub Packages (same owner) during install.
@@ -77,6 +80,9 @@ jobs:
         run: npm install
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Biome lint + format
+        run: npx biome ci .
 
       - name: Typecheck app + library
         run: |
