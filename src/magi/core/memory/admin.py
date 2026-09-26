@@ -179,7 +179,9 @@ class MemoryAdmin:
             pending=[self._turn_record(t) for t in mem.pending.read()],
         )
 
-    async def summarize_session(self, manager: Optional[MemoryManager], user_id: str, session_id: str) -> TriggerSnapshot:
+    async def summarize_session(
+        self, manager: Optional[MemoryManager], user_id: str, session_id: str
+    ) -> TriggerSnapshot:
         mgr = self._require_manager(manager)
         if not mgr.session_summary_enabled:
             raise TriggerUnavailableError(
@@ -197,7 +199,9 @@ class MemoryAdmin:
             ),
         )
 
-    async def curate_session(self, manager: Optional[MemoryManager], user_id: str, session_id: str) -> TriggerSnapshot:
+    async def curate_session(
+        self, manager: Optional[MemoryManager], user_id: str, session_id: str
+    ) -> TriggerSnapshot:
         mgr = self._require_manager(manager)
         if not mgr.curation_enabled:
             raise TriggerUnavailableError(
@@ -217,7 +221,9 @@ class MemoryAdmin:
             ),
         )
 
-    async def flush_session(self, manager: Optional[MemoryManager], user_id: str, session_id: str) -> TriggerSnapshot:
+    async def flush_session(
+        self, manager: Optional[MemoryManager], user_id: str, session_id: str
+    ) -> TriggerSnapshot:
         mgr = self._require_manager(manager)
         mgr.set_scope(user_id, session_id)
         dropped = mgr.flush_session()
@@ -449,7 +455,9 @@ class MemoryAdmin:
             and self.retriever is not None
             and target.reindex_user_id is not None
         ):
-            mem = self.memory.scoped(target.reindex_user_id, target.reindex_session_id or _USER_SCOPE_SID)
+            mem = self.memory.scoped(
+                target.reindex_user_id, target.reindex_session_id or _USER_SCOPE_SID
+            )
             self.retriever.reset(target.reindex_user_id, _EPISODE_KIND)
             for body in mem.episodes.bodies():
                 self.retriever.index(target.reindex_user_id, _EPISODE_KIND, body)

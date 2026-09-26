@@ -18,7 +18,9 @@ from magi.core.config import config, configure
 
 def _tool_text(result: dict) -> str:
     data = result.get("data") or {}
-    return " ".join(str(part) for part in (result.get("message", ""), data.get("text", ""), data) if part)
+    return " ".join(
+        str(part) for part in (result.get("message", ""), data.get("text", ""), data) if part
+    )
 
 
 class _FakeResponse:
@@ -179,11 +181,7 @@ async def test_search_artists_reports_no_match(monkeypatch):
 async def test_wiki_normalizes_title_and_returns_body(monkeypatch):
     client = _patch_client(
         monkeypatch,
-        [
-            _FakeResponse(
-                json_data={"title": "list_of_uniforms", "body": "[[school_uniform]]"}
-            )
-        ],
+        [_FakeResponse(json_data={"title": "list_of_uniforms", "body": "[[school_uniform]]"})],
     )
 
     result = await danbooru.danbooru_wiki.entrypoint(title="List of Uniforms")
@@ -237,9 +235,7 @@ async def test_civitai_model_strips_html_and_lists_versions(monkeypatch):
                     "type": "Checkpoint",
                     "tags": ["illustrious"],
                     "description": "<p>Use <b>CFG 5</b> and Euler a.</p>",
-                    "modelVersions": [
-                        {"id": 2730987, "name": "v9", "baseModel": "Illustrious"}
-                    ],
+                    "modelVersions": [{"id": 2730987, "name": "v9", "baseModel": "Illustrious"}],
                 }
             )
         ],

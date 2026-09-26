@@ -148,9 +148,7 @@ async def test_italics_wraps_each_line():
     client = DiscordClient.__new__(DiscordClient)
     target = DummyTarget()
 
-    sent = await client._send_discord_messages(
-        thread=target, message="one\ntwo", italics=True
-    )
+    sent = await client._send_discord_messages(thread=target, message="one\ntwo", italics=True)
 
     assert sent is True
     assert target.sent == ["_one_\n_two_"]
@@ -294,9 +292,7 @@ async def test_extract_media_processes_all_attachments():
 async def test_extract_media_gates_audio_when_model_cannot_hear():
     client = DiscordClient.__new__(DiscordClient)
     client.supports_audio = False
-    message = FakeMessage(
-        attachments=[FakeAttachment(filename="v.ogg", content_type="audio/ogg")]
-    )
+    message = FakeMessage(attachments=[FakeAttachment(filename="v.ogg", content_type="audio/ogg")])
 
     media, notes = await client._extract_media(message)
 

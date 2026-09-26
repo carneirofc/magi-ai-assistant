@@ -89,7 +89,11 @@ def test_reply_from_wire_decodes_base64():
         "reasoning": None,
         "is_error": False,
         "media": [
-            {"kind": "image", "mime_type": "image/png", "data_base64": base64.b64encode(b"x").decode()},
+            {
+                "kind": "image",
+                "mime_type": "image/png",
+                "data_base64": base64.b64encode(b"x").decode(),
+            },
             {"kind": "audio", "url": "https://cdn/x.mp3"},
         ],
     }

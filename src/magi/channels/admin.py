@@ -110,7 +110,9 @@ class IngestDocument(BaseModel):
 
     title: str = Field(min_length=1, description="Display title (and source).")
     text: str = Field(min_length=1, description="The document's full text.")
-    doc_id: Optional[str] = Field(default=None, description="Identity; derived from title if absent.")
+    doc_id: Optional[str] = Field(
+        default=None, description="Identity; derived from title if absent."
+    )
     subject: str = Field(default="", description="Subject (must exist in the registry), or ''.")
     tags: list[str] = Field(default_factory=list)
 
@@ -330,7 +332,9 @@ class MemoryTriggerResult(BaseModel):
     """The outcome of an operator-triggered memory pass (summarize / curate /
     flush / consolidate)."""
 
-    action: str = Field(description="Which pass ran: 'summarize', 'curate', 'flush', or 'consolidate'.")
+    action: str = Field(
+        description="Which pass ran: 'summarize', 'curate', 'flush', or 'consolidate'."
+    )
     changed: bool = Field(description="Whether the pass actually changed anything.")
     detail: str = Field(description="A human-readable one-line summary of what happened.")
 
@@ -414,12 +418,20 @@ class MemorySettingsOut(BaseModel):
     `restart_required` is true — these settings apply at startup, not live. `version`
     is the optimistic-concurrency token; echo it on a write or risk a 409."""
 
-    memory_dir: str = Field(description="Where memory will live (as the operator typed it; ~ allowed).")
-    git_enabled: bool = Field(description="Whether the memory tree is a git repo committed on every write.")
+    memory_dir: str = Field(
+        description="Where memory will live (as the operator typed it; ~ allowed)."
+    )
+    git_enabled: bool = Field(
+        description="Whether the memory tree is a git repo committed on every write."
+    )
     git_author_name: str = Field(description="Commit author name for git-versioned memory.")
     git_author_email: str = Field(description="Commit author email for git-versioned memory.")
-    active_memory_dir: str = Field(description="The resolved dir the running process is using right now.")
-    restart_required: bool = Field(description="True when saved settings differ from the running process.")
+    active_memory_dir: str = Field(
+        description="The resolved dir the running process is using right now."
+    )
+    restart_required: bool = Field(
+        description="True when saved settings differ from the running process."
+    )
     version: str = ""
 
 
@@ -430,7 +442,9 @@ class UpdateMemorySettings(BaseModel):
     memory_dir: str = Field(default="", description="Memory directory ('' = use the code default).")
     git_enabled: bool = Field(default=False, description="Enable git-versioned memory.")
     git_author_name: str = Field(default="", description="Commit author name ('' = code default).")
-    git_author_email: str = Field(default="", description="Commit author email ('' = code default).")
+    git_author_email: str = Field(
+        default="", description="Commit author email ('' = code default)."
+    )
     expected_version: Optional[str] = Field(
         default=None, description="The version from the last read; rejected with 409 if stale."
     )
@@ -921,9 +935,7 @@ def create_admin_app(
     )
     def put_identity(body: UpdateIdentity) -> IdentityOut:
         _check_identity_version(body.expected_version)
-        memory.identity.set_fields(
-            display_name=body.display_name, description=body.description
-        )
+        memory.identity.set_fields(display_name=body.display_name, description=body.description)
         return _identity_out()
 
     def _decode_image(body: SetAvatar) -> bytes:
@@ -958,7 +970,9 @@ def create_admin_app(
         response_model=IdentityOut,
         dependencies=[Depends(require_auth)],
     )
-    def delete_identity_avatar(expected_version: Optional[str] = Query(default=None)) -> IdentityOut:
+    def delete_identity_avatar(
+        expected_version: Optional[str] = Query(default=None),
+    ) -> IdentityOut:
         _check_identity_version(expected_version)
         memory.identity.clear_avatar()
         return _identity_out()
@@ -1004,9 +1018,7 @@ def create_admin_app(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return _identity_out()
 
-    @app.get(
-        "/admin/v1/identity/expressions/{mood}", dependencies=[Depends(require_auth)]
-    )
+    @app.get("/admin/v1/identity/expressions/{mood}", dependencies=[Depends(require_auth)])
     def get_identity_expression(mood: str) -> Response:
         """One mood's portrait bytes (404 when the pack has no such portrait)."""
         try:
@@ -1221,6 +1233,8 @@ def create_admin_app(
         return RawFile(kind=file.kind, content=file.content, version=file.version)
 
     return app
+
+
 def _slug(title: str) -> str:
     """A filesystem/url-safe doc_id derived from a title (lowercased, hyphenated)."""
     import re

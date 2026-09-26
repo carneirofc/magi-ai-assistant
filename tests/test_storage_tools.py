@@ -46,7 +46,9 @@ class _FakeStore:
 
     def put_bytes(self, key, data, *, content_type=None, metadata=None):
         self.objects[key] = (data, content_type, dict(metadata or {}))
-        return StoredObject(key=key, size=len(data), content_type=content_type, metadata=metadata or {})
+        return StoredObject(
+            key=key, size=len(data), content_type=content_type, metadata=metadata or {}
+        )
 
     def get_bytes(self, key):
         if key not in self.objects:
@@ -75,7 +77,9 @@ class _FakeResponse:
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise httpx.HTTPStatusError("error", request=httpx.Request("GET", "http://x"), response=self)
+            raise httpx.HTTPStatusError(
+                "error", request=httpx.Request("GET", "http://x"), response=self
+            )
 
 
 class _FakeClient:
@@ -117,8 +121,17 @@ class _FakeArchive:
         self.searched: list[tuple] = []
         self._hits = list(hits)
 
-    def persist(self, kind, item_id, *, scope="global", data=None, text=None,
-                content_type=None, metadata=None):
+    def persist(
+        self,
+        kind,
+        item_id,
+        *,
+        scope="global",
+        data=None,
+        text=None,
+        content_type=None,
+        metadata=None,
+    ):
         self.persisted.append((kind, item_id, scope, text, metadata))
         return True
 
@@ -142,7 +155,9 @@ def _prefix(user_id="u1"):
 async def test_store_file_archives_sourced_url(monkeypatch):
     store, store_file, _, _ = _tools()
     url = "https://cdn.example/pic.png"
-    _patch_client(monkeypatch, response=_FakeResponse(content=b"png", headers={"content-type": "image/png"}))
+    _patch_client(
+        monkeypatch, response=_FakeResponse(content=b"png", headers={"content-type": "image/png"})
+    )
 
     token = open_allowed_media_urls(f"keep this {url}")
     try:
@@ -156,12 +171,18 @@ async def test_store_file_archives_sourced_url(monkeypatch):
     key = f"{_prefix()}{ref}"
     data, ctype, metadata = store.objects[key]
     assert data == b"png" and ctype == "image/png"
-    assert metadata["filename"] == "pic.png" and metadata["note"] == "a cat" and metadata["source-url"] == url
+    assert (
+        metadata["filename"] == "pic.png"
+        and metadata["note"] == "a cat"
+        and metadata["source-url"] == url
+    )
 
 
 async def test_store_file_refuses_unsourced_url(monkeypatch):
     _, store_file, _, _ = _tools()
-    _patch_client(monkeypatch, response=_FakeResponse(content=b"png", headers={"content-type": "image/png"}))
+    _patch_client(
+        monkeypatch, response=_FakeResponse(content=b"png", headers={"content-type": "image/png"})
+    )
     token = open_allowed_media_urls("a message that does not contain the url")
     try:
         result = await store_file.entrypoint(source_url="https://i.imgur.com/stale.png")
@@ -188,7 +209,9 @@ async def test_store_file_indexes_into_archive(monkeypatch):
     store, archive, tools = _tools_with_archive()
     store_file = tools[0]
     url = "https://cdn.example/pic.png"
-    _patch_client(monkeypatch, response=_FakeResponse(content=b"png", headers={"content-type": "image/png"}))
+    _patch_client(
+        monkeypatch, response=_FakeResponse(content=b"png", headers={"content-type": "image/png"})
+    )
     token = open_allowed_media_urls(f"keep this {url}")
     try:
         result = await store_file.entrypoint(source_url=url, note="a cat")
@@ -207,8 +230,14 @@ async def test_search_files_returns_matches():
     from magi.core.items import ItemHit
 
     hits = [
-        ItemHit(kind="file", item_id="ref1", scope="user:u1", text="a cat photo",
-                score=0.88, metadata={"filename": "cat.png", "note": "fluffy"}),
+        ItemHit(
+            kind="file",
+            item_id="ref1",
+            scope="user:u1",
+            text="a cat photo",
+            score=0.88,
+            metadata={"filename": "cat.png", "note": "fluffy"},
+        ),
     ]
     _, archive, tools = _tools_with_archive(hits)
     search_files = next(t for t in tools if t.name == "search_files")
@@ -238,7 +267,9 @@ async def test_store_file_refuses_non_http():
 async def test_store_file_surfaces_storage_error(monkeypatch):
     store, store_file, _, _ = _tools()
     url = "https://cdn.example/x.png"
-    _patch_client(monkeypatch, response=_FakeResponse(content=b"png", headers={"content-type": "image/png"}))
+    _patch_client(
+        monkeypatch, response=_FakeResponse(content=b"png", headers={"content-type": "image/png"})
+    )
 
     def _boom(*a, **k):
         raise StorageError("backend down")

@@ -56,9 +56,7 @@ def build_websearch_tools() -> list:
         show_result=True,
     )
     def web_search(
-        query: Annotated[
-            str, Field(min_length=2, description="What to search the web for.")
-        ],
+        query: Annotated[str, Field(min_length=2, description="What to search the web for.")],
         max_results: Annotated[
             int, Field(default=5, ge=1, le=10, description="How many results to return.")
         ] = 5,
@@ -76,7 +74,9 @@ def build_websearch_tools() -> list:
                 raw = list(engine.text(q, max_results=max_results))
         except Exception as exc:  # noqa: BLE001 — a search failure is a tool failure, not a crash.
             log_warning(f"websearch: {type(exc).__name__}: {exc}")
-            return fail(f"Web search failed ({type(exc).__name__}). Try again or answer without it.")
+            return fail(
+                f"Web search failed ({type(exc).__name__}). Try again or answer without it."
+            )
 
         results = [
             WebSearchResult(

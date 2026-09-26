@@ -44,6 +44,7 @@ def user_scope(user_id: object) -> str:
     apart on the format."""
     return f"user:{user_id}"
 
+
 # The item-archive kind tag for knowledge documents (see magi/core/items). doc_id is
 # globally unique in this store (index/delete key on it regardless of scope), so the
 # archived original is keyed by doc_id alone under the archive's global scope.
@@ -213,9 +214,7 @@ class KnowledgeStore:
             if not client.collection_exists(self.collection):
                 client.create_collection(
                     collection_name=self.collection,
-                    vectors_config=models.VectorParams(
-                        size=dim, distance=models.Distance.COSINE
-                    ),
+                    vectors_config=models.VectorParams(size=dim, distance=models.Distance.COSINE),
                 )
                 log_info(f"knowledge: created Qdrant collection '{self.collection}' (dim={dim})")
             self._client = client
@@ -304,10 +303,19 @@ class KnowledgeStore:
             ]
             client.upsert(collection_name=self.collection, points=points)
         except Exception as exc:  # noqa: BLE001
-            log_warning(f"knowledge: upsert failed for doc {doc_id!r} ({type(exc).__name__}: {exc})")
+            log_warning(
+                f"knowledge: upsert failed for doc {doc_id!r} ({type(exc).__name__}: {exc})"
+            )
             return 0
         log_info(f"knowledge: indexed {len(points)} chunk(s) for doc {doc_id!r} (source={source})")
-        self._archive_original(doc_id, text, source=source, title=title or source, subject=subject, tags=list(tags or []))
+        self._archive_original(
+            doc_id,
+            text,
+            source=source,
+            title=title or source,
+            subject=subject,
+            tags=list(tags or []),
+        )
         return len(points)
 
     def _archive_original(
@@ -426,7 +434,9 @@ class KnowledgeStore:
                 collection_name=self.collection, payload={"subject": subject}, points=ids
             )
         except Exception as exc:  # noqa: BLE001
-            log_warning(f"knowledge: set subject failed for {doc_id!r} ({type(exc).__name__}: {exc})")
+            log_warning(
+                f"knowledge: set subject failed for {doc_id!r} ({type(exc).__name__}: {exc})"
+            )
             return False
         log_info(f"knowledge: set doc {doc_id!r} subject -> {subject!r}")
         return True
@@ -453,7 +463,9 @@ class KnowledgeStore:
                     break
             if not ids:
                 return 0
-            client.set_payload(collection_name=self.collection, payload={"subject": new}, points=ids)
+            client.set_payload(
+                collection_name=self.collection, payload={"subject": new}, points=ids
+            )
         except Exception as exc:  # noqa: BLE001
             log_warning(f"knowledge: rename subject failed ({type(exc).__name__}: {exc})")
             return 0
@@ -693,7 +705,9 @@ class KnowledgeStore:
                 ),
             )
         except Exception as exc:  # noqa: BLE001
-            log_warning(f"knowledge: delete failed for doc {doc_id!r} ({type(exc).__name__}: {exc})")
+            log_warning(
+                f"knowledge: delete failed for doc {doc_id!r} ({type(exc).__name__}: {exc})"
+            )
 
     # --- retrieve -----------------------------------------------------------
     def search(

@@ -55,9 +55,15 @@ def test_recipe_validation_rails():
 
     for bad in (
         "not json",
-        json.dumps({"name": "x y", "description": "d", "method": "GET", "url_template": "http://a"}),
-        json.dumps({"name": "ok_name", "description": "d", "method": "YOLO", "url_template": "http://a"}),
-        json.dumps({"name": "ok_name", "description": "d", "method": "GET", "url_template": "ftp://a"}),
+        json.dumps(
+            {"name": "x y", "description": "d", "method": "GET", "url_template": "http://a"}
+        ),
+        json.dumps(
+            {"name": "ok_name", "description": "d", "method": "YOLO", "url_template": "http://a"}
+        ),
+        json.dumps(
+            {"name": "ok_name", "description": "d", "method": "GET", "url_template": "ftp://a"}
+        ),
     ):
         with pytest.raises(ProposalError):
             validate_recipe(bad)
@@ -68,7 +74,9 @@ def test_recipe_validation_rails():
 
 def test_approve_writes_the_runtime_overlay_and_is_one_shot(tmp_path):
     store = _store(tmp_path)
-    p = store.propose("prompt", "greet.md", "Greet warmly, mention due reminders.", "r", source="lead")
+    p = store.propose(
+        "prompt", "greet.md", "Greet warmly, mention due reminders.", "r", source="lead"
+    )
 
     decided = store.decide(p.id, approve=True)
 

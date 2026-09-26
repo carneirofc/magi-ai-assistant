@@ -137,7 +137,9 @@ def test_build_team_composes_skill_prompt_and_tools(tmp_path):
         """Roll a die."""
 
     register_skill(
-        Skill(name="dice", prompt="Roll dice when the user asks for randomness.", tools=(roll_dice,))
+        Skill(
+            name="dice", prompt="Roll dice when the user asks for randomness.", tools=(roll_dice,)
+        )
     )
 
     snapshot = {f.name: getattr(config, f.name) for f in fields(config)}

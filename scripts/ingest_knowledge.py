@@ -53,11 +53,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Ingest documents into the knowledge base.")
     parser.add_argument("paths", nargs="+", type=Path, help="Files and/or directories to ingest.")
     parser.add_argument(
-        "--root", type=Path, default=None,
+        "--root",
+        type=Path,
+        default=None,
         help="Base directory for computing each document's id (default: the path itself).",
     )
     parser.add_argument(
-        "--scope", default=GLOBAL_SCOPE,
+        "--scope",
+        default=GLOBAL_SCOPE,
         help=f"Scope to store chunks under (default: {GLOBAL_SCOPE!r}).",
     )
     args = parser.parse_args(argv)
@@ -85,9 +88,14 @@ def main(argv: list[str] | None = None) -> int:
             total_chunks += n
             print(f"ok: {doc_id} -> {n} chunk(s)")
         else:
-            print(f"warn: {doc_id} produced no chunks (empty, or backend unavailable)", file=sys.stderr)
+            print(
+                f"warn: {doc_id} produced no chunks (empty, or backend unavailable)",
+                file=sys.stderr,
+            )
 
-    print(f"\nIngested {indexed}/{len(files)} file(s), {total_chunks} chunk(s) into the knowledge base.")
+    print(
+        f"\nIngested {indexed}/{len(files)} file(s), {total_chunks} chunk(s) into the knowledge base."
+    )
     return 0 if indexed else 1
 
 

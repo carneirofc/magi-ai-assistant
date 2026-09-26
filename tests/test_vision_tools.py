@@ -46,9 +46,7 @@ class _FakeClient:
 
 
 def _patch_client(monkeypatch, **client_kwargs):
-    monkeypatch.setattr(
-        vision.httpx, "AsyncClient", lambda **_: _FakeClient(**client_kwargs)
-    )
+    monkeypatch.setattr(vision.httpx, "AsyncClient", lambda **_: _FakeClient(**client_kwargs))
 
 
 async def test_refuses_non_http_url():

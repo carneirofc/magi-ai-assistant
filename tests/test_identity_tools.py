@@ -14,9 +14,7 @@ from magi.agent.tools.identity import build_identity_tools
 from magi.core.identity import IdentityStore
 from magi.core.media import close_media_outbox, is_view_only, open_media_outbox
 
-_PNG = (
-    b"\x89PNG\r\n\x1a\n"  # a plausible png header; the tools never decode it
-)
+_PNG = b"\x89PNG\r\n\x1a\n"  # a plausible png header; the tools never decode it
 
 
 def _tools(with_avatar: bool):

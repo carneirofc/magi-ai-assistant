@@ -43,7 +43,9 @@ async def test_hook_materializes_async_generator_member_result():
 
         return events()
 
-    result = await tool_call_hook("delegate_task_to_member", delegate, {"member_id": "x", "task": "t"})
+    result = await tool_call_hook(
+        "delegate_task_to_member", delegate, {"member_id": "x", "task": "t"}
+    )
     assert result == "first\nsecond"
 
 
@@ -73,7 +75,9 @@ async def test_hook_reassembles_streamed_member_content_deltas():
 
         return events()
 
-    result = await tool_call_hook("delegate_task_to_member", delegate, {"member_id": "x", "task": "t"})
+    result = await tool_call_hook(
+        "delegate_task_to_member", delegate, {"member_id": "x", "task": "t"}
+    )
     assert result == "Hello, world"
 
 

@@ -64,11 +64,31 @@ def _store_with_client(client):
 
 def test_list_documents_groups_chunks_by_doc_id():
     points = [
-        _FakePoint({"doc_id": "a.md", "source": "a.md", "title": "A", "subject": "Infra",
-                    "tags": ["x"], "scope": "global", "ts": "2026-01-01T00:00:00"}),
-        _FakePoint({"doc_id": "a.md", "source": "a.md", "title": "A", "subject": "Infra",
-                    "tags": ["x"], "scope": "global", "ts": "2026-01-02T00:00:00"}),
-        _FakePoint({"doc_id": "b.md", "source": "b.md", "scope": "global", "ts": "2026-01-03T00:00:00"}),
+        _FakePoint(
+            {
+                "doc_id": "a.md",
+                "source": "a.md",
+                "title": "A",
+                "subject": "Infra",
+                "tags": ["x"],
+                "scope": "global",
+                "ts": "2026-01-01T00:00:00",
+            }
+        ),
+        _FakePoint(
+            {
+                "doc_id": "a.md",
+                "source": "a.md",
+                "title": "A",
+                "subject": "Infra",
+                "tags": ["x"],
+                "scope": "global",
+                "ts": "2026-01-02T00:00:00",
+            }
+        ),
+        _FakePoint(
+            {"doc_id": "b.md", "source": "b.md", "scope": "global", "ts": "2026-01-03T00:00:00"}
+        ),
     ]
     store = _store_with_client(_FakeClient([(points, None)]))
 
@@ -76,8 +96,14 @@ def test_list_documents_groups_chunks_by_doc_id():
 
     by_id = {d.doc_id: d for d in docs}
     assert by_id["a.md"] == DocumentSummary(
-        doc_id="a.md", source="a.md", title="A", subject="Infra", tags=["x"],
-        scope="global", chunk_count=2, latest_ts="2026-01-02T00:00:00",
+        doc_id="a.md",
+        source="a.md",
+        title="A",
+        subject="Infra",
+        tags=["x"],
+        scope="global",
+        chunk_count=2,
+        latest_ts="2026-01-02T00:00:00",
     )
     assert by_id["b.md"].chunk_count == 1
 
@@ -120,10 +146,30 @@ def test_list_documents_no_collection_returns_empty():
 
 def test_get_document_orders_chunks_and_reads_fields():
     points = [
-        _FakePoint({"doc_id": "a.md", "source": "a.md", "title": "A", "subject": "Infra",
-                    "tags": ["x", "y"], "scope": "global", "chunk_index": 1, "text": "second"}),
-        _FakePoint({"doc_id": "a.md", "source": "a.md", "title": "A", "subject": "Infra",
-                    "tags": ["x", "y"], "scope": "global", "chunk_index": 0, "text": "first"}),
+        _FakePoint(
+            {
+                "doc_id": "a.md",
+                "source": "a.md",
+                "title": "A",
+                "subject": "Infra",
+                "tags": ["x", "y"],
+                "scope": "global",
+                "chunk_index": 1,
+                "text": "second",
+            }
+        ),
+        _FakePoint(
+            {
+                "doc_id": "a.md",
+                "source": "a.md",
+                "title": "A",
+                "subject": "Infra",
+                "tags": ["x", "y"],
+                "scope": "global",
+                "chunk_index": 0,
+                "text": "first",
+            }
+        ),
     ]
     detail = _store_with_client(_FakeClient([(points, None)])).get_document("a.md")
     assert detail is not None
@@ -206,8 +252,13 @@ def test_list_tags_unions_distinct_sorted():
 
 def test_edit_document_tags_endpoint():
     detail = DocumentDetail(
-        doc_id="a.md", source="a.md", title="A", subject="", tags=["keep", "drop"],
-        scope="global", chunks=[DocumentChunk(chunk_index=0, text="x")],
+        doc_id="a.md",
+        source="a.md",
+        title="A",
+        subject="",
+        tags=["keep", "drop"],
+        scope="global",
+        chunks=[DocumentChunk(chunk_index=0, text="x")],
     )
     resp = _client(detail=detail).patch(
         "/admin/v1/knowledge/documents/a.md/tags", json={"add": ["new"], "remove": ["drop"]}
@@ -217,9 +268,12 @@ def test_edit_document_tags_endpoint():
 
 
 def test_edit_tags_missing_doc_is_404():
-    assert _client(detail=None).patch(
-        "/admin/v1/knowledge/documents/nope/tags", json={"add": ["x"]}
-    ).status_code == 404
+    assert (
+        _client(detail=None)
+        .patch("/admin/v1/knowledge/documents/nope/tags", json={"add": ["x"]})
+        .status_code
+        == 404
+    )
 
 
 def test_list_tags_endpoint():
@@ -230,7 +284,11 @@ def test_list_tags_endpoint():
 
 def test_ingest_derives_doc_id_from_title():
     fake = _FakeKnowledge([])
-    app = create_admin_app(fake, FileMemoryStore(Path(tempfile.mkdtemp())), SubjectRegistry(Path(tempfile.mkdtemp()) / "s.json"))
+    app = create_admin_app(
+        fake,
+        FileMemoryStore(Path(tempfile.mkdtemp())),
+        SubjectRegistry(Path(tempfile.mkdtemp()) / "s.json"),
+    )
     resp = TestClient(app).post(
         "/admin/v1/knowledge/documents",
         json={"title": "My Great Doc!", "text": "hello world"},
@@ -337,8 +395,14 @@ class _FakeRetriever:
 
 
 def _client(
-    documents=(), auth_token=None, memory=None, detail=None, retriever=None, subjects=None,
-    tags=(), settings_store=None,
+    documents=(),
+    auth_token=None,
+    memory=None,
+    detail=None,
+    retriever=None,
+    subjects=None,
+    tags=(),
+    settings_store=None,
 ):
     if memory is None:
         memory = FileMemoryStore(Path(tempfile.mkdtemp()))  # empty: no users on disk
@@ -362,26 +426,58 @@ def test_healthz_is_open():
 
 def test_list_documents_endpoint_returns_rows():
     docs = [
-        DocumentSummary(doc_id="a.md", source="a.md", title="A", subject="Infra",
-                        tags=["x"], scope="global", chunk_count=2, latest_ts="t2"),
+        DocumentSummary(
+            doc_id="a.md",
+            source="a.md",
+            title="A",
+            subject="Infra",
+            tags=["x"],
+            scope="global",
+            chunk_count=2,
+            latest_ts="t2",
+        ),
     ]
     resp = _client(documents=docs).get("/admin/v1/knowledge/documents")
 
     assert resp.status_code == 200
     assert resp.json() == {
         "documents": [
-            {"doc_id": "a.md", "source": "a.md", "title": "A", "subject": "Infra",
-             "tags": ["x"], "scope": "global", "chunk_count": 2, "latest_ts": "t2"},
+            {
+                "doc_id": "a.md",
+                "source": "a.md",
+                "title": "A",
+                "subject": "Infra",
+                "tags": ["x"],
+                "scope": "global",
+                "chunk_count": 2,
+                "latest_ts": "t2",
+            },
         ]
     }
 
 
 def test_list_documents_endpoint_filters_by_scope():
     docs = [
-        DocumentSummary(doc_id="a.md", source="a.md", title="A", subject="",
-                        tags=[], scope="global", chunk_count=1, latest_ts="t1"),
-        DocumentSummary(doc_id="b.md", source="b.md", title="B", subject="",
-                        tags=[], scope="user:42", chunk_count=1, latest_ts="t2"),
+        DocumentSummary(
+            doc_id="a.md",
+            source="a.md",
+            title="A",
+            subject="",
+            tags=[],
+            scope="global",
+            chunk_count=1,
+            latest_ts="t1",
+        ),
+        DocumentSummary(
+            doc_id="b.md",
+            source="b.md",
+            title="B",
+            subject="",
+            tags=[],
+            scope="user:42",
+            chunk_count=1,
+            latest_ts="t2",
+        ),
     ]
     client = _client(documents=docs)
 
@@ -403,9 +499,7 @@ def test_list_documents_requires_bearer_when_token_set():
         ).status_code
         == 401
     )
-    ok = client.get(
-        "/admin/v1/knowledge/documents", headers={"Authorization": "Bearer secret"}
-    )
+    ok = client.get("/admin/v1/knowledge/documents", headers={"Authorization": "Bearer secret"})
     assert ok.status_code == 200
 
 
@@ -416,9 +510,16 @@ def test_no_token_means_open():
 
 def test_get_document_endpoint_returns_chunks():
     detail = DocumentDetail(
-        doc_id="a.md", source="a.md", title="A", subject="Infra", tags=["x"],
+        doc_id="a.md",
+        source="a.md",
+        title="A",
+        subject="Infra",
+        tags=["x"],
         scope="global",
-        chunks=[DocumentChunk(chunk_index=0, text="first"), DocumentChunk(chunk_index=1, text="second")],
+        chunks=[
+            DocumentChunk(chunk_index=0, text="first"),
+            DocumentChunk(chunk_index=1, text="second"),
+        ],
     )
     resp = _client(detail=detail).get("/admin/v1/knowledge/documents/a.md")
     assert resp.status_code == 200
@@ -433,8 +534,13 @@ def test_get_document_missing_is_404():
 
 def _detail(doc_id="a.md", title="A"):
     return DocumentDetail(
-        doc_id=doc_id, source="a.md", title=title, subject="", tags=[],
-        scope="global", chunks=[DocumentChunk(chunk_index=0, text="x")],
+        doc_id=doc_id,
+        source="a.md",
+        title=title,
+        subject="",
+        tags=[],
+        scope="global",
+        chunks=[DocumentChunk(chunk_index=0, text="x")],
     )
 
 
@@ -447,16 +553,12 @@ def test_rename_document_endpoint_updates_title():
 
 
 def test_rename_document_missing_is_404():
-    resp = _client(detail=None).patch(
-        "/admin/v1/knowledge/documents/nope.md", json={"title": "X"}
-    )
+    resp = _client(detail=None).patch("/admin/v1/knowledge/documents/nope.md", json={"title": "X"})
     assert resp.status_code == 404
 
 
 def test_rename_document_rejects_empty_title():
-    resp = _client(detail=_detail()).patch(
-        "/admin/v1/knowledge/documents/a.md", json={"title": ""}
-    )
+    resp = _client(detail=_detail()).patch("/admin/v1/knowledge/documents/a.md", json={"title": ""})
     assert resp.status_code == 422  # min_length=1
 
 
@@ -516,22 +618,31 @@ def test_subject_rename_cascades_to_corpus(tmp_path):
 def test_set_document_subject_requires_known_subject(tmp_path):
     reg = SubjectRegistry(tmp_path / "subjects.json")
     detail = DocumentDetail(
-        doc_id="a.md", source="a.md", title="A", subject="", tags=[], scope="global",
+        doc_id="a.md",
+        source="a.md",
+        title="A",
+        subject="",
+        tags=[],
+        scope="global",
         chunks=[DocumentChunk(chunk_index=0, text="x")],
     )
     client = _client(detail=detail, subjects=reg)
     # Unknown subject rejected...
-    assert client.put(
-        "/admin/v1/knowledge/documents/a.md/subject", json={"subject": "Ghost"}
-    ).status_code == 422
+    assert (
+        client.put(
+            "/admin/v1/knowledge/documents/a.md/subject", json={"subject": "Ghost"}
+        ).status_code
+        == 422
+    )
     # ...known subject accepted.
     reg.create("Infra")
     ok = client.put("/admin/v1/knowledge/documents/a.md/subject", json={"subject": "Infra"})
     assert ok.status_code == 200 and ok.json()["subject"] == "Infra"
     # Clearing ('') is always allowed.
-    assert client.put(
-        "/admin/v1/knowledge/documents/a.md/subject", json={"subject": ""}
-    ).status_code == 200
+    assert (
+        client.put("/admin/v1/knowledge/documents/a.md/subject", json={"subject": ""}).status_code
+        == 200
+    )
 
 
 # --- memory viewer (read-only) ----------------------------------------------
@@ -555,9 +666,7 @@ def test_list_users_aggregates_counts(tmp_path):
     client = _client(memory=_seed_memory(tmp_path))
     data = client.get("/admin/v1/memory/users").json()
     assert data == {
-        "users": [
-            {"user_id": "u1", "fact_count": 2, "episode_count": 1, "session_count": 1}
-        ]
+        "users": [{"user_id": "u1", "fact_count": 2, "episode_count": 1, "session_count": 1}]
     }
 
 
@@ -718,7 +827,9 @@ def test_flush_trigger_carries_summary_into_episode(tmp_path):
 
 # --- bot identity CRUD + optimistic concurrency -----------------------------
 # The base64 of a 1x1 transparent PNG — sent straight as the `data_base64` field.
-_PNG_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+_PNG_1x1 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+)
 
 
 def test_get_identity_defaults_to_empty(tmp_path):
@@ -734,7 +845,11 @@ def test_put_identity_sets_fields_and_moves_version(tmp_path):
 
     resp = client.put(
         "/admin/v1/identity",
-        json={"display_name": "Alyssa", "description": "calm", "expected_version": before["version"]},
+        json={
+            "display_name": "Alyssa",
+            "description": "calm",
+            "expected_version": before["version"],
+        },
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -757,8 +872,12 @@ def test_identity_avatar_upload_serve_and_clear(tmp_path):
 
     up = client.put(
         "/admin/v1/identity/avatar",
-        json={"data_base64": _PNG_1x1, "mime_type": "image/png", "filename": "me.png",
-              "expected_version": version},
+        json={
+            "data_base64": _PNG_1x1,
+            "mime_type": "image/png",
+            "filename": "me.png",
+            "expected_version": version,
+        },
     )
     assert up.status_code == 200
     body = up.json()
@@ -912,24 +1031,28 @@ def test_episodes_raw_edit_reindexes(tmp_path):
     retriever = _FakeRetriever()
     client = _client(memory=_seed_memory(tmp_path), retriever=retriever)
     body = "# Episodic memory\n\n- 2026-01-01 :: talked about k8s\n"
-    resp = client.put(
-        "/admin/v1/memory/files/episodes?user_id=u1", json={"content": body}
-    )
+    resp = client.put("/admin/v1/memory/files/episodes?user_id=u1", json={"content": body})
     assert resp.status_code == 200
     assert retriever.reset_calls == [("u1", "episode")]
     assert ("u1", "episode", "talked about k8s") in retriever.index_calls
 
 
 def test_unknown_file_kind_404(tmp_path):
-    assert _client(memory=_seed_memory(tmp_path)).get(
-        "/admin/v1/memory/files/bogus?user_id=u1"
-    ).status_code == 404
+    assert (
+        _client(memory=_seed_memory(tmp_path))
+        .get("/admin/v1/memory/files/bogus?user_id=u1")
+        .status_code
+        == 404
+    )
 
 
 def test_session_kind_requires_session_id(tmp_path):
-    assert _client(memory=_seed_memory(tmp_path)).get(
-        "/admin/v1/memory/files/session_window?user_id=u1"
-    ).status_code == 422
+    assert (
+        _client(memory=_seed_memory(tmp_path))
+        .get("/admin/v1/memory/files/session_window?user_id=u1")
+        .status_code
+        == 422
+    )
 
 
 # --- operator settings: memory location + git-versioning --------------------
@@ -995,8 +1118,11 @@ def test_memory_settings_restart_required_reflects_drift(tmp_path):
     # Point somewhere else -> a restart is needed to pick it up.
     moved = client.put(
         "/admin/v1/settings/memory",
-        json={"memory_dir": str(tmp_path / "elsewhere"), "git_enabled": False,
-              "expected_version": aligned["version"]},
+        json={
+            "memory_dir": str(tmp_path / "elsewhere"),
+            "git_enabled": False,
+            "expected_version": aligned["version"],
+        },
     ).json()
     assert moved["restart_required"] is True
 
@@ -1025,8 +1151,12 @@ def test_expression_upload_serve_list_and_delete(tmp_path):
 
     up = client.put(
         "/admin/v1/identity/expressions/wry",
-        json={"data_base64": _PNG_1x1, "mime_type": "image/png", "filename": "wry.png",
-              "expected_version": version},
+        json={
+            "data_base64": _PNG_1x1,
+            "mime_type": "image/png",
+            "filename": "wry.png",
+            "expected_version": version,
+        },
     )
     assert up.status_code == 200
     body = up.json()
@@ -1038,9 +1168,7 @@ def test_expression_upload_serve_list_and_delete(tmp_path):
     served = client.get("/admin/v1/identity/expressions/wry")
     assert served.status_code == 200 and served.headers["content-type"].startswith("image/png")
 
-    gone = client.delete(
-        f"/admin/v1/identity/expressions/wry?expected_version={body['version']}"
-    )
+    gone = client.delete(f"/admin/v1/identity/expressions/wry?expected_version={body['version']}")
     assert gone.status_code == 200 and gone.json()["expressions"] == {}
     assert client.get("/admin/v1/identity/expressions/wry").status_code == 404
 
@@ -1051,8 +1179,7 @@ def test_neutral_expression_upload_is_the_avatar(tmp_path):
 
     up = client.put(
         "/admin/v1/identity/expressions/neutral",
-        json={"data_base64": _PNG_1x1, "mime_type": "image/png",
-              "expected_version": version},
+        json={"data_base64": _PNG_1x1, "mime_type": "image/png", "expected_version": version},
     )
     assert up.status_code == 200
     body = up.json()

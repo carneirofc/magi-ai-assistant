@@ -85,7 +85,9 @@ def build_memory_tools(memory: MemoryManager) -> list:
     def recall_conversation(
         query: Annotated[
             str,
-            Field(min_length=2, description="The phrase or topic to look for in past conversations."),
+            Field(
+                min_length=2, description="The phrase or topic to look for in past conversations."
+            ),
         ],
         limit: Annotated[
             int,

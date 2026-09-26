@@ -27,12 +27,12 @@ GUILD_ID = 1511488658350542878
 def _build_intents() -> discord.Intents:
     intents = discord.Intents.default()
     intents.guilds = True
-    intents.members = True           # see member joins/leaves
+    intents.members = True  # see member joins/leaves
     intents.messages = True
-    intents.message_content = True   # privileged — Dev Portal → Bot → Privileged Gateway Intents
+    intents.message_content = True  # privileged — Dev Portal → Bot → Privileged Gateway Intents
     intents.reactions = True
     intents.voice_states = True
-    intents.presences = False        # not needed; requires extra permission if enabled
+    intents.presences = False  # not needed; requires extra permission if enabled
     return intents
 
 
@@ -102,14 +102,15 @@ def _on_attachment(attachment: discord.Attachment) -> None:
     _log("attach", f"  url={attachment.url}")
 
 
-async def _on_reaction_add(
-    reaction: discord.Reaction, user: discord.User | discord.Member
-) -> None:
+async def _on_reaction_add(reaction: discord.Reaction, user: discord.User | discord.Member) -> None:
     if isinstance(reaction.emoji, str):
         _log("react", f"{user} added Unicode emoji {reaction.emoji!r} on msg {reaction.message.id}")
     else:
         animated = "animated " if getattr(reaction.emoji, "animated", False) else ""
-        _log("react", f"{user} added {animated}custom emoji :{reaction.emoji.name}: (id={reaction.emoji.id})")
+        _log(
+            "react",
+            f"{user} added {animated}custom emoji :{reaction.emoji.name}: (id={reaction.emoji.id})",
+        )
 
 
 async def _on_voice_state_update(

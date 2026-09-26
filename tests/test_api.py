@@ -64,14 +64,16 @@ def test_healthz_is_open():
 def test_post_message_runs_a_turn_and_returns_the_reply():
     client, conversation = _client()
 
-    resp = client.post(
-        "/v1/sessions/win-1/messages", json={"user_id": "u1", "text": "hi"}
-    )
+    resp = client.post("/v1/sessions/win-1/messages", json={"user_id": "u1", "text": "hi"})
 
     assert resp.status_code == 200
     assert resp.json() == {
-        "text": "the answer", "reasoning": None, "is_error": False, "media": [],
-        "usage": None, "mood": None,
+        "text": "the answer",
+        "reasoning": None,
+        "is_error": False,
+        "media": [],
+        "usage": None,
+        "mood": None,
     }
     assert conversation.calls == [("handle", "api:u1", "win-1", "hi")]
 
@@ -214,16 +216,24 @@ def _parse_sse(body: str) -> list[tuple[str, dict]]:
 def test_stream_emits_deltas_then_done():
     client, conversation = _client()
 
-    resp = client.post(
-        "/v1/sessions/win-1/messages/stream", json={"user_id": "u1", "text": "hi"}
-    )
+    resp = client.post("/v1/sessions/win-1/messages/stream", json={"user_id": "u1", "text": "hi"})
 
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
     assert _parse_sse(resp.text) == [
         ("delta", {"text": "the "}),
         ("delta", {"text": "answer"}),
-        ("done", {"text": "the answer", "reasoning": None, "is_error": False, "media": [], "usage": None, "mood": None}),
+        (
+            "done",
+            {
+                "text": "the answer",
+                "reasoning": None,
+                "is_error": False,
+                "media": [],
+                "usage": None,
+                "mood": None,
+            },
+        ),
     ]
     assert conversation.calls == [("handle_stream", "api:u1", "win-1", "hi")]
 
@@ -245,9 +255,7 @@ def test_stream_emits_reasoning_and_tool_frames():
     conversation = _RichStreamConversation()
     client = TestClient(create_app(conversation))
 
-    resp = client.post(
-        "/v1/sessions/s/messages/stream", json={"user_id": "u1", "text": "hi"}
-    )
+    resp = client.post("/v1/sessions/s/messages/stream", json={"user_id": "u1", "text": "hi"})
 
     assert resp.status_code == 200
     assert _parse_sse(resp.text) == [
@@ -255,16 +263,24 @@ def test_stream_emits_reasoning_and_tool_frames():
         ("tool_call", {"id": "c1", "name": "web_search", "args": {"q": "x"}}),
         ("tool_result", {"id": "c1", "result": "hit", "is_error": False}),
         ("delta", {"text": "the answer"}),
-        ("done", {"text": "the answer", "reasoning": None, "is_error": False, "media": [], "usage": None, "mood": None}),
+        (
+            "done",
+            {
+                "text": "the answer",
+                "reasoning": None,
+                "is_error": False,
+                "media": [],
+                "usage": None,
+                "mood": None,
+            },
+        ),
     ]
 
 
 def test_stream_requires_bearer_token_when_configured():
     client, conversation = _client(auth_token="secret")
 
-    resp = client.post(
-        "/v1/sessions/s/messages/stream", json={"user_id": "u1", "text": "hi"}
-    )
+    resp = client.post("/v1/sessions/s/messages/stream", json={"user_id": "u1", "text": "hi"})
 
     assert resp.status_code == 401
     assert conversation.calls == []
@@ -472,11 +488,7 @@ def test_chat_completions_array_content_is_flattened():
 
     client.post(
         "/v1/chat/completions",
-        json={
-            "messages": [
-                {"role": "user", "content": [{"type": "text", "text": "from parts"}]}
-            ]
-        },
+        json={"messages": [{"role": "user", "content": [{"type": "text", "text": "from parts"}]}]},
     )
 
     assert conversation.calls[0][3] == "from parts"
@@ -489,9 +501,7 @@ def test_chat_completions_derives_a_stable_session_from_the_first_message():
 
     def session_of(messages, headers=None):
         conversation.calls.clear()
-        client.post(
-            "/v1/chat/completions", json={"messages": messages}, headers=headers or {}
-        )
+        client.post("/v1/chat/completions", json={"messages": messages}, headers=headers or {})
         return conversation.calls[0][2]
 
     first = session_of([{"role": "user", "content": "open"}])
@@ -505,17 +515,17 @@ def test_chat_completions_derives_a_stable_session_from_the_first_message():
     assert first == again  # stable across the chat's turns
     other = session_of([{"role": "user", "content": "different opener"}])
     assert other != first
-    forced = session_of(
-        [{"role": "user", "content": "open"}], headers={"X-Session-Id": "exact"}
-    )
+    forced = session_of([{"role": "user", "content": "open"}], headers={"X-Session-Id": "exact"})
     assert forced == "exact"
 
 
 def test_chat_completions_scopes_user_from_field_and_header():
     client, conversation = _client()
 
-    client.post("/v1/chat/completions", json={"user": "field-user", "messages": [
-        {"role": "user", "content": "hi"}]})
+    client.post(
+        "/v1/chat/completions",
+        json={"user": "field-user", "messages": [{"role": "user", "content": "hi"}]},
+    )
     assert conversation.calls[0][1] == "api:field-user"
 
     conversation.calls.clear()
@@ -588,9 +598,7 @@ def test_chat_completions_streams_openai_chunks():
     assert frames[-1] == "[DONE]"
     assert frames[0]["choices"][0]["delta"] == {"role": "assistant"}
     contents = [
-        f["choices"][0]["delta"].get("content")
-        for f in frames[1:-1]
-        if isinstance(f, dict)
+        f["choices"][0]["delta"].get("content") for f in frames[1:-1] if isinstance(f, dict)
     ]
     assert "".join(c for c in contents if c) == "the answer"
     assert frames[-2]["choices"][0]["finish_reason"] == "stop"
@@ -690,9 +698,7 @@ def test_native_message_accepts_inbound_file_base64():
         json={
             "user_id": "u1",
             "text": "read this",
-            "files": [
-                {"data_base64": _TXT_B64, "mime_type": "text/plain", "filename": "note.txt"}
-            ],
+            "files": [{"data_base64": _TXT_B64, "mime_type": "text/plain", "filename": "note.txt"}],
         },
     )
 
@@ -820,9 +826,7 @@ def test_stream_mood_rides_an_early_meta_frame_and_the_done_frame():
     conversation = _MoodStreamConversation()
     client = TestClient(create_app(conversation))
 
-    resp = client.post(
-        "/v1/sessions/s/messages/stream", json={"user_id": "u1", "text": "hi"}
-    )
+    resp = client.post("/v1/sessions/s/messages/stream", json={"user_id": "u1", "text": "hi"})
 
     assert resp.status_code == 200
     frames = _parse_sse(resp.text)
@@ -834,9 +838,7 @@ def test_stream_mood_rides_an_early_meta_frame_and_the_done_frame():
 def test_post_message_reply_carries_mood_on_the_wire():
     client, _ = _client(reply=ConversationReply(text="ok", mood="warm"))
 
-    body = client.post(
-        "/v1/sessions/s/messages", json={"user_id": "u1", "text": "hi"}
-    ).json()
+    body = client.post("/v1/sessions/s/messages", json={"user_id": "u1", "text": "hi"}).json()
 
     assert body["mood"] == "warm"
 
@@ -1017,9 +1019,7 @@ def test_tts_503_when_no_sidecar_is_wired():
 
 
 def test_tts_requires_bearer_token_when_configured():
-    client = TestClient(
-        create_app(_FakeConversation(), auth_token="secret", voice=_FakeVoice())
-    )
+    client = TestClient(create_app(_FakeConversation(), auth_token="secret", voice=_FakeVoice()))
     assert client.post("/v1/tts", json={"text": "hi"}).status_code == 401
 
 
@@ -1045,9 +1045,7 @@ def test_stt_transcribes_an_uploaded_recording():
     voice = _FakeVoice()
     client = TestClient(create_app(_FakeConversation(), voice=voice))
 
-    resp = client.post(
-        "/v1/stt", files={"file": ("clip.ogg", b"opus-bytes", "audio/ogg")}
-    )
+    resp = client.post("/v1/stt", files={"file": ("clip.ogg", b"opus-bytes", "audio/ogg")})
 
     assert resp.status_code == 200
     assert resp.json() == {"text": "heard you", "language": "en", "duration": 1.5}

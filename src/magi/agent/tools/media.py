@@ -39,12 +39,18 @@ _HEADERS: Final[dict] = {
 class MediaFetchData(BaseModel):
     url: str = Field(description="Source URL that was fetched or rejected.")
     filename: str | None = Field(default=None, description="Attachment filename, when known.")
-    kind: str | None = Field(default=None, description="Delivered media kind: image, audio, video, or file.")
+    kind: str | None = Field(
+        default=None, description="Delivered media kind: image, audio, video, or file."
+    )
     content_type: str | None = Field(default=None, description="Detected MIME type, when known.")
     bytes: int | None = Field(default=None, description="Fetched byte count, when known.")
-    limit: int | None = Field(default=None, description="Maximum allowed byte count, for oversized files.")
+    limit: int | None = Field(
+        default=None, description="Maximum allowed byte count, for oversized files."
+    )
     status_code: int | None = Field(default=None, description="HTTP status code, when relevant.")
-    delivered: bool | None = Field(default=None, description="Whether the file was staged for delivery.")
+    delivered: bool | None = Field(
+        default=None, description="Whether the file was staged for delivery."
+    )
 
 
 def _filename(url: str, ctype: str, explicit: Optional[str]) -> str:
@@ -144,8 +150,7 @@ async def send_media_from_url(
         # No outbox open (bare run outside ConversationService) — be honest.
         log_warning("send_media_from_url: no media outbox open; nothing delivered")
         return fail(
-            "Media delivery is not available in this run. "
-            f"Share the URL as text instead: {url}",
+            f"Media delivery is not available in this run. Share the URL as text instead: {url}",
             MediaFetchData(url=url, filename=name, content_type=ctype, bytes=len(data)),
         )
 

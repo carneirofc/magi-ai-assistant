@@ -107,9 +107,7 @@ class FramelessWindow(QWidget):
         # Floor the window size; an app with a fixed-frame desktop-only web layout
         # raises this (via config) to its supported minimum so the shell never
         # shrinks into a "window too small" state.
-        self.setMinimumSize(
-            config.desktop_window_min_width, config.desktop_window_min_height
-        )
+        self.setMinimumSize(config.desktop_window_min_width, config.desktop_window_min_height)
         if self._frameless:
             self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -232,9 +230,8 @@ class FramelessWindow(QWidget):
         else:  # Qt < 6.8
 
             def _on_feature(origin, feature) -> None:
-                allowed = (
-                    feature == QWebEnginePage.Feature.MediaAudioCapture
-                    and _is_loopback(origin)
+                allowed = feature == QWebEnginePage.Feature.MediaAudioCapture and _is_loopback(
+                    origin
                 )
                 page.setFeaturePermission(
                     origin,
@@ -291,7 +288,9 @@ class FramelessWindow(QWidget):
         # Pin the close button to the top-right of the content, the grip to bottom-right.
         self._close_btn.move(inner.right() - self._close_btn.width() - 4, inner.top() + 4)
         self._close_btn.raise_()
-        self._grip.move(self.rect().right() - self._grip.width(), self.rect().bottom() - self._grip.height())
+        self._grip.move(
+            self.rect().right() - self._grip.width(), self.rect().bottom() - self._grip.height()
+        )
         self._grip.raise_()
         super().resizeEvent(event)
 

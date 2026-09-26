@@ -216,9 +216,7 @@ async def test_maybe_curate_delete_drops_a_fact(tmp_path):
 
 async def test_maybe_curate_unknown_id_is_skipped(tmp_path):
     async def fake(inp: CurationInput) -> CurationResult:
-        return CurationResult(
-            operations=(FactOp(op="update", fact_id="deadbeef", text="ghost"),)
-        )
+        return CurationResult(operations=(FactOp(op="update", fact_id="deadbeef", text="ghost"),))
 
     mgr = _manager(tmp_path, fake)
     # Nothing existed to update; the op is skipped and nothing is recorded.

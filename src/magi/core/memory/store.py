@@ -47,19 +47,25 @@ class ScopedMemory:
         sessions = users / "sessions"
         sid = slug(session_id)
         self.long_term = BulletLog(
-            users / "long_term.md", f"Long-term memory — user {user_id}",
-            note_type="long-term", tags=["memory/long-term"],
+            users / "long_term.md",
+            f"Long-term memory — user {user_id}",
+            note_type="long-term",
+            tags=["memory/long-term"],
         )
         # The curated profile: id-addressable facts the curator mutates per-fact.
         self.long_term_facts = JsonFacts(users / "long_term_facts.json")
         self.episodes = BulletLog(
-            users / "episodic.md", f"Episodic memory — user {user_id}",
-            note_type="episodic", tags=["memory/episodic"],
+            users / "episodic.md",
+            f"Episodic memory — user {user_id}",
+            note_type="episodic",
+            tags=["memory/episodic"],
         )
         self.live_turns = JsonWindow(sessions / f"{sid}.json")
         self.session_summary = Blob(
-            sessions / f"{sid}.summary.md", f"Session summary — session {session_id}",
-            note_type="session-summary", tags=["memory/session"],
+            sessions / f"{sid}.summary.md",
+            f"Session summary — session {session_id}",
+            note_type="session-summary",
+            tags=["memory/session"],
         )
         self.pending = JsonWindow(sessions / f"{sid}.pending.json")
 
@@ -70,8 +76,10 @@ class FileMemoryStore:
     def __init__(self, root: Path):
         self.root = Path(root)
         self.persona = BulletLog(
-            self.root / "persona.md", _PERSONA_HEADER,
-            note_type="persona", tags=["memory/persona"],
+            self.root / "persona.md",
+            _PERSONA_HEADER,
+            note_type="persona",
+            tags=["memory/persona"],
         )
         # The global bot identity (name, description, profile picture) — the
         # presented self, distinct from the persona's evolving behavior. Sits on
@@ -206,8 +214,7 @@ class FileMemoryStore:
     def seed_persona(self, text: str) -> None:
         """Write the base persona once, if no persona file exists yet."""
         self.persona.seed(
-            f"# {_PERSONA_HEADER}\n\n{text.strip()}\n\n"
-            "## Adjustments (evolve over time)\n\n"
+            f"# {_PERSONA_HEADER}\n\n{text.strip()}\n\n## Adjustments (evolve over time)\n\n"
         )
 
     def compact_persona(self, max_adjustments: int = 0) -> int:
@@ -230,8 +237,11 @@ class FileMemoryStore:
             return 0
         lines = body.splitlines()
         start = next(
-            (i + 1 for i, ln in enumerate(lines)
-             if ln.lstrip().startswith("## ") and "adjustment" in ln.lower()),
+            (
+                i + 1
+                for i, ln in enumerate(lines)
+                if ln.lstrip().startswith("## ") and "adjustment" in ln.lower()
+            ),
             None,
         )
         if start is None:  # legacy file: no marker, no prose — dedupe from the first bullet

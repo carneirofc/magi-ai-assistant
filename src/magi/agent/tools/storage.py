@@ -55,11 +55,17 @@ class StoredFileData(BaseModel):
 class RetrievedFileData(BaseModel):
     reference: str = Field(description="Reference that was recalled.")
     filename: str | None = Field(default=None, description="Recalled filename, when known.")
-    kind: str | None = Field(default=None, description="Delivered media kind: image, audio, video, or file.")
+    kind: str | None = Field(
+        default=None, description="Delivered media kind: image, audio, video, or file."
+    )
     content_type: str | None = Field(default=None, description="Detected MIME type, when known.")
     bytes: int | None = Field(default=None, description="Recalled byte count, when known.")
-    delivered: bool | None = Field(default=None, description="Whether the file was attached to the reply.")
-    url: str | None = Field(default=None, description="Time-limited URL, when the file was too big to attach.")
+    delivered: bool | None = Field(
+        default=None, description="Whether the file was attached to the reply."
+    )
+    url: str | None = Field(
+        default=None, description="Time-limited URL, when the file was too big to attach."
+    )
 
 
 class StoredFileEntry(BaseModel):
@@ -171,7 +177,9 @@ def build_storage_tools(
         """
         url = (source_url or "").strip()
         if not url.lower().startswith(("http://", "https://")):
-            return fail(f"Refusing to fetch non-http(s) URL: {url!r}", StoredFileData(source_url=url))
+            return fail(
+                f"Refusing to fetch non-http(s) URL: {url!r}", StoredFileData(source_url=url)
+            )
         if not is_media_url_allowed(url):
             return fail(
                 "Refusing to archive an unsourced URL. Use a URL from the user or from a "
@@ -191,7 +199,9 @@ def build_storage_tools(
                 StoredFileData(source_url=url),
             )
         except httpx.HTTPError as exc:
-            return fail(f"Could not fetch the file from {url}: {exc}", StoredFileData(source_url=url))
+            return fail(
+                f"Could not fetch the file from {url}: {exc}", StoredFileData(source_url=url)
+            )
 
         data = resp.content
         if not data:
@@ -290,13 +300,19 @@ def build_storage_tools(
             try:
                 link = await asyncio.to_thread(store.presigned_url, key)
             except StorageError as exc:
-                return fail(f"File is too large to attach and a link could not be made: {exc}",
-                            RetrievedFileData(reference=ref, filename=name, bytes=len(data)))
+                return fail(
+                    f"File is too large to attach and a link could not be made: {exc}",
+                    RetrievedFileData(reference=ref, filename=name, bytes=len(data)),
+                )
             return ok(
                 f"'{name}' is too large to attach ({len(data)} bytes); here is a time-limited link.",
                 RetrievedFileData(
-                    reference=ref, filename=name, content_type=ctype, bytes=len(data),
-                    delivered=False, url=link,
+                    reference=ref,
+                    filename=name,
+                    content_type=ctype,
+                    bytes=len(data),
+                    delivered=False,
+                    url=link,
                 ),
             )
 
@@ -309,16 +325,26 @@ def build_storage_tools(
                 link = None
             return fail(
                 "File delivery is not available in this run. " + (f"Link: {link}" if link else ""),
-                RetrievedFileData(reference=ref, filename=name, content_type=ctype,
-                                  bytes=len(data), delivered=False, url=link),
+                RetrievedFileData(
+                    reference=ref,
+                    filename=name,
+                    content_type=ctype,
+                    bytes=len(data),
+                    delivered=False,
+                    url=link,
+                ),
             )
 
         log_info(f"storage: recalled {ref} ('{name}', {len(data)} bytes, {kind}) for delivery")
         return ok(
             f"Attached the {kind} '{name}' ({len(data)} bytes) to your reply from the user's archive.",
             RetrievedFileData(
-                reference=ref, filename=name, kind=kind, content_type=ctype,
-                bytes=len(data), delivered=True,
+                reference=ref,
+                filename=name,
+                kind=kind,
+                content_type=ctype,
+                bytes=len(data),
+                delivered=True,
             ),
         )
 
@@ -338,11 +364,13 @@ def build_storage_tools(
             objects: list[ObjectInfo] = await asyncio.to_thread(store.list, prefix)
         except StorageError as exc:
             log_warning(f"list_files: {exc}")
-            return fail(f"Could not list archived files: {exc}", StoredFileListData(files=[], count=0))
+            return fail(
+                f"Could not list archived files: {exc}", StoredFileListData(files=[], count=0)
+            )
 
         entries = [
             StoredFileEntry(
-                reference=obj.key[len(prefix):] or obj.key,
+                reference=obj.key[len(prefix) :] or obj.key,
                 filename=obj.metadata.get("filename"),
                 note=obj.metadata.get("note"),
                 content_type=obj.content_type,
@@ -420,7 +448,9 @@ def build_storage_tools(
         ],
         max_chars: Annotated[
             int,
-            Field(default=20_000, ge=1_000, le=100_000, description="Truncate the text beyond this."),
+            Field(
+                default=20_000, ge=1_000, le=100_000, description="Truncate the text beyond this."
+            ),
         ] = 20_000,
     ) -> ToolOutput[ReadDocumentData]:
         """Extract an archived document's text (txt/md/code directly; PDF via
@@ -446,8 +476,7 @@ def build_storage_tools(
                 text = "\n\n".join((page.extract_text() or "") for page in reader.pages)
             except ImportError:
                 return fail(
-                    "PDF reading needs the optional 'pypdf' dependency "
-                    "(`uv sync --extra docs`)."
+                    "PDF reading needs the optional 'pypdf' dependency (`uv sync --extra docs`)."
                 )
             except Exception as exc:  # noqa: BLE001 — a broken PDF is a tool failure.
                 return fail(f"Couldn't extract text from '{name}': {type(exc).__name__}.")
@@ -466,7 +495,9 @@ def build_storage_tools(
         truncated = len(text) > max_chars
         if truncated:
             text = text[:max_chars] + f"\n…[truncated {len(text) - max_chars}+ chars]"
-        log_info(f"storage: read_document {ref} ('{name}', {len(data)} bytes, truncated={truncated})")
+        log_info(
+            f"storage: read_document {ref} ('{name}', {len(data)} bytes, truncated={truncated})"
+        )
         return ok(
             f"Read '{name}' ({'truncated' if truncated else 'whole'}).",
             ReadDocumentData(reference=ref, filename=name, text=text, truncated=truncated),

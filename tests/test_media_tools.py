@@ -60,9 +60,7 @@ class _FakeClient:
 
 
 def _patch_client(monkeypatch, **client_kwargs):
-    monkeypatch.setattr(
-        media_tools.httpx, "AsyncClient", lambda **_: _FakeClient(**client_kwargs)
-    )
+    monkeypatch.setattr(media_tools.httpx, "AsyncClient", lambda **_: _FakeClient(**client_kwargs))
 
 
 async def test_image_is_staged_in_outbox_not_returned(monkeypatch):
@@ -105,7 +103,9 @@ async def test_no_outbox_is_an_honest_failure(monkeypatch):
         response=_FakeResponse(content=b"png", headers={"content-type": "image/png"}),
     )
     result = await send_media_from_url.entrypoint(url="https://cdn.example/icon.png")
-    assert "not available" in _tool_text(result) and "https://cdn.example/icon.png" in _tool_text(result)
+    assert "not available" in _tool_text(result) and "https://cdn.example/icon.png" in _tool_text(
+        result
+    )
 
 
 async def test_refuses_non_http_url():

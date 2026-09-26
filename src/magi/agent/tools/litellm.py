@@ -51,9 +51,7 @@ def _headers() -> dict:
 
 
 def _get(path: str, timeout: float = _TIMEOUT) -> dict:
-    r = httpx.get(
-        f"{config.litellm_base_url}{path}", headers=_headers(), timeout=timeout
-    )
+    r = httpx.get(f"{config.litellm_base_url}{path}", headers=_headers(), timeout=timeout)
     r.raise_for_status()
     return r.json()
 
@@ -106,13 +104,18 @@ def litellm_model_info(
     if model:
         rows = [r for r in rows if r.get("model_name") == model]
     if not rows:
-        return ok(f"No LiteLLM model info{f' for {model!r}' if model else ''}.", LiteLLMModelInfoData(models=[]))
+        return ok(
+            f"No LiteLLM model info{f' for {model!r}' if model else ''}.",
+            LiteLLMModelInfoData(models=[]),
+        )
     models = []
     for r in rows:
         backend = (r.get("litellm_params") or {}).get("model", "?")
         info = r.get("model_info") or {}
         ctx = info.get("max_input_tokens") or info.get("max_tokens")
-        models.append(LiteLLMModelInfoRow(model_name=r.get("model_name"), backend=backend, max_tokens=ctx))
+        models.append(
+            LiteLLMModelInfoRow(model_name=r.get("model_name"), backend=backend, max_tokens=ctx)
+        )
     return ok("LiteLLM model mapping.", LiteLLMModelInfoData(models=models))
 
 

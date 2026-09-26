@@ -231,7 +231,9 @@ class ItemArchive:
                 points_selector=[self._point_id(kind, item_id, scope)],
             )
         except Exception as exc:  # noqa: BLE001
-            log_warning(f"items: vector delete failed for {kind}/{item_id} ({type(exc).__name__}: {exc})")
+            log_warning(
+                f"items: vector delete failed for {kind}/{item_id} ({type(exc).__name__}: {exc})"
+            )
 
     # --- search -------------------------------------------------------------
     def search(
@@ -258,9 +260,13 @@ class ItemArchive:
 
             must = []
             if kinds:
-                must.append(models.FieldCondition(key="kind", match=models.MatchAny(any=list(kinds))))
+                must.append(
+                    models.FieldCondition(key="kind", match=models.MatchAny(any=list(kinds)))
+                )
             if scopes:
-                must.append(models.FieldCondition(key="scope", match=models.MatchAny(any=list(scopes))))
+                must.append(
+                    models.FieldCondition(key="scope", match=models.MatchAny(any=list(scopes)))
+                )
             points = client.query_points(
                 collection_name=self.collection,
                 query=vector,

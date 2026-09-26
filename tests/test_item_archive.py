@@ -138,8 +138,17 @@ class FakeArchive:
         self.removed: list[tuple] = []
         self._bytes: dict[tuple, bytes] = {}
 
-    def persist(self, kind, item_id, *, scope=GLOBAL_SCOPE, data=None, text=None,
-                content_type=None, metadata=None):
+    def persist(
+        self,
+        kind,
+        item_id,
+        *,
+        scope=GLOBAL_SCOPE,
+        data=None,
+        text=None,
+        content_type=None,
+        metadata=None,
+    ):
         self.persisted.append((kind, item_id, scope, data, text, metadata))
         if data is not None:
             self._bytes[(kind, item_id, scope)] = data
@@ -165,8 +174,9 @@ def _kstore(**kw):
 def test_knowledge_archive_original_persists_source_and_doc_vector():
     fake = FakeArchive()
     ks = _kstore(archive=fake)
-    ks._archive_original("guide.md", "the body", source="guide.md", title="Guide",
-                         subject="ops", tags=["a", "b"])
+    ks._archive_original(
+        "guide.md", "the body", source="guide.md", title="Guide", subject="ops", tags=["a", "b"]
+    )
     assert len(fake.persisted) == 1
     kind, item_id, _scope, data, text, meta = fake.persisted[0]
     assert kind == "knowledge" and item_id == "guide.md" and data == b"the body"
@@ -200,7 +210,9 @@ def test_knowledge_reindex_from_archived_original(monkeypatch):
     seen = {}
 
     def _spy(doc_id, text, *, source, title, subject, tags):
-        seen.update(doc_id=doc_id, text=text, source=source, title=title, subject=subject, tags=tags)
+        seen.update(
+            doc_id=doc_id, text=text, source=source, title=title, subject=subject, tags=tags
+        )
         return 3
 
     monkeypatch.setattr(ks, "index_document", _spy)

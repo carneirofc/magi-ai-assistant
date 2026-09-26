@@ -33,7 +33,9 @@ def test_bullet_log_appends_bullets_and_reads_bodies(tmp_path):
 
 def test_bullet_log_file_carries_obsidian_frontmatter(tmp_path):
     path = tmp_path / "long_term.md"
-    log = BulletLog(path, header="Long-term memory", note_type="long-term", tags=["memory/long-term"])
+    log = BulletLog(
+        path, header="Long-term memory", note_type="long-term", tags=["memory/long-term"]
+    )
     log.append("likes tea")
 
     raw = path.read_text(encoding="utf-8")
@@ -88,7 +90,9 @@ def test_overwrite_replaces_body_and_preserves_frontmatter(tmp_path):
     path = tmp_path / "persona.md"
     log = BulletLog(path, header="Persona", note_type="persona", tags=["memory/persona"])
     log.append("one")  # creates the file with frontmatter
-    created_line = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.startswith("created:")][0]
+    created_line = [
+        ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.startswith("created:")
+    ][0]
 
     log.overwrite("# Persona\n\n- two")
 

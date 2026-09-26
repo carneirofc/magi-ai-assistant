@@ -18,8 +18,12 @@ class ToolOutput(BaseModel, Generic[DataT]):
     success: bool = Field(description="Whether the tool completed successfully.")
     status: Literal["ok", "error"] = Field(description="Machine-readable result status.")
     message: str = Field(description="Human-readable summary of the result.")
-    data: DataT | None = Field(default=None, description="Structured payload returned by the tool, if any.")
-    warnings: list[str] = Field(default_factory=list, description="Non-fatal warnings from the tool.")
+    data: DataT | None = Field(
+        default=None, description="Structured payload returned by the tool, if any."
+    )
+    warnings: list[str] = Field(
+        default_factory=list, description="Non-fatal warnings from the tool."
+    )
 
     @field_validator("data")
     @classmethod

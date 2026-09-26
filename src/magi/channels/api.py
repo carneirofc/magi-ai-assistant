@@ -432,9 +432,7 @@ def _inbound_file(
         if decoded is not None:
             content, mime = decoded
             mime = mime_type or mime
-            return File(
-                content=content, mime_type=mime, format=_subtype(mime), filename=filename
-            )
+            return File(content=content, mime_type=mime, format=_subtype(mime), filename=filename)
         if url.lower().startswith(("http://", "https://")):
             return File(url=url, mime_type=mime_type, filename=filename)
     return None
@@ -450,9 +448,7 @@ def _inbound_media(images: Sequence[InboundImage], files: Sequence[InboundFile] 
     ]
     built_files = [
         f
-        for f in (
-            _inbound_file(i.url, i.data_base64, i.mime_type, i.filename) for i in files
-        )
+        for f in (_inbound_file(i.url, i.data_base64, i.mime_type, i.filename) for i in files)
         if f is not None
     ]
     media: dict = {}
@@ -476,9 +472,7 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _greeting_instruction(
-    now: Optional[datetime] = None, due_reminders: str = ""
-) -> str:
+def _greeting_instruction(now: Optional[datetime] = None, due_reminders: str = "") -> str:
     """The greeting turn's run input: the greet policy prompt (overlay-able per
     persona — prompts/greet.md) plus the local time of day, read per request so
     every greeting gets the real clock. Due reminders, when the deployment
@@ -787,9 +781,7 @@ def create_app(
             from magi.agent.tools.reminders import due_reminders_text
 
             try:
-                due = due_reminders_text(
-                    conversation.memory.store.root, _scoped(body.user_id)
-                )
+                due = due_reminders_text(conversation.memory.store.root, _scoped(body.user_id))
             except Exception:  # noqa: BLE001 — reminders must never break a greeting.
                 due = ""
         return _stream_response(
@@ -1149,7 +1141,9 @@ def build_api_app(db: Optional[BaseDb] = None) -> FastAPI:
     if config.admin_enabled:
         from magi.channels.admin import build_admin_app
 
-        log_info("api: admin surface ALSO mounted on this app, under /admin/v1/* (config.admin_enabled)")
+        log_info(
+            "api: admin surface ALSO mounted on this app, under /admin/v1/* (config.admin_enabled)"
+        )
         # Hand the admin app the same memory orchestrator this app's chat path uses,
         # so its operator triggers (summarize / curate / flush) run the real
         # model-backed passes instead of 503-ing.

@@ -108,7 +108,9 @@ def build_identity_tools(memory: MemoryManager) -> list:
             return ToolResult(
                 content="Picture delivery isn't available in this run, so nothing was sent."
             )
-        log_info(f"send_profile_picture: staged own avatar '{filename}' ({len(data)} bytes, {mime})")
+        log_info(
+            f"send_profile_picture: staged own avatar '{filename}' ({len(data)} bytes, {mime})"
+        )
         return ToolResult(
             content=(
                 f"Attached your profile picture ('{filename}') to your reply — it will be "

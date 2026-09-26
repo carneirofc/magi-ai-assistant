@@ -149,7 +149,9 @@ def _expand_tools(tools: object, member: str = "") -> tuple[list[ToolInfo], list
         functions = getattr(tool, "functions", None)
         if isinstance(functions, dict) and functions:
             toolkit_name = _text(getattr(tool, "name", None)) or type(tool).__name__
-            infos.extend(_function_info(fn, source=f"toolkit:{toolkit_name}") for fn in functions.values())
+            infos.extend(
+                _function_info(fn, source=f"toolkit:{toolkit_name}") for fn in functions.values()
+            )
             continue
         infos.append(_function_info(tool))
     return infos, mcps

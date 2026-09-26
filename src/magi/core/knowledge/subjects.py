@@ -43,7 +43,9 @@ class SubjectRegistry:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
-            log_warning(f"subjects: unreadable registry {self.path.name} ({type(exc).__name__}: {exc})")
+            log_warning(
+                f"subjects: unreadable registry {self.path.name} ({type(exc).__name__}: {exc})"
+            )
             return []
         return data if isinstance(data, list) else []
 
@@ -53,7 +55,11 @@ class SubjectRegistry:
 
     def list(self) -> list[Subject]:
         return [
-            Subject(id=str(s.get("id", "")), name=str(s.get("name", "")), description=str(s.get("description", "")))
+            Subject(
+                id=str(s.get("id", "")),
+                name=str(s.get("name", "")),
+                description=str(s.get("description", "")),
+            )
             for s in self._read()
             if s.get("id") and s.get("name")
         ]
@@ -71,7 +77,9 @@ class SubjectRegistry:
         if any(str(s.get("name", "")).lower() == name.lower() for s in subjects):
             return None
         subject = Subject(id=uuid.uuid4().hex[:8], name=name, description=description.strip())
-        subjects.append({"id": subject.id, "name": subject.name, "description": subject.description})
+        subjects.append(
+            {"id": subject.id, "name": subject.name, "description": subject.description}
+        )
         self._write(subjects)
         return subject
 
@@ -88,7 +96,9 @@ class SubjectRegistry:
                 if description is not None:
                     s["description"] = description.strip()
                 self._write(subjects)
-                return Subject(id=subject_id, name=str(s["name"]), description=str(s.get("description", "")))
+                return Subject(
+                    id=subject_id, name=str(s["name"]), description=str(s.get("description", ""))
+                )
         return None
 
     def delete(self, subject_id: str) -> bool:

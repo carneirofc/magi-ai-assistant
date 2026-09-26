@@ -28,9 +28,7 @@ from magi.core.media import is_media_url_allowed, view_only_id
 _MAX_IMAGE_BYTES = 20 * 1024 * 1024
 _FETCH_TIMEOUT_S = 20.0
 # A browser-ish UA: some CDNs (Discord's included) 403 the default httpx agent.
-_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; AlyssaBot/1.0; +https://discord.com)"
-}
+_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; AlyssaBot/1.0; +https://discord.com)"}
 
 
 @tool(
@@ -125,9 +123,7 @@ async def view_image_from_url(
         content=f"Loaded the image from {url} ({ctype}, {len(data)} bytes). It is now visible to you.",
         # view-only id: this image is model input, not a deliverable — reply
         # media collection (magi/core/media.py) must not repost it to the user.
-        images=[
-            Image(id=view_only_id(), content=data, mime_type=ctype, format=subtype)
-        ],
+        images=[Image(id=view_only_id(), content=data, mime_type=ctype, format=subtype)],
     )
 
 

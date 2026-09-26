@@ -98,14 +98,16 @@ def _parse(text: str) -> CurationResult:
         return CurationResult()
     try:
         data = json.loads(match.group(0))
-    except (json.JSONDecodeError, ValueError):
+    except json.JSONDecodeError, ValueError:
         return CurationResult()
     if not isinstance(data, dict):
         return CurationResult()
     raw_ops = data.get("operations")
-    operations = tuple(
-        op for op in (_parse_op(item) for item in raw_ops) if op is not None
-    ) if isinstance(raw_ops, list) else ()
+    operations = (
+        tuple(op for op in (_parse_op(item) for item in raw_ops) if op is not None)
+        if isinstance(raw_ops, list)
+        else ()
+    )
     return CurationResult(
         operations=operations,
         episode=_str_field(data, "episode"),

@@ -167,8 +167,7 @@ async def danbooru_wiki(
         close = await asyncio.to_thread(local.search_wiki_titles, slug, 10)
         if close:
             log_info(
-                f"danbooru_wiki '{slug}': no exact local page, "
-                f"suggesting {len(close)} close titles"
+                f"danbooru_wiki '{slug}': no exact local page, suggesting {len(close)} close titles"
             )
             text = (
                 f"No wiki page titled '{slug}'. Closest local titles "
@@ -222,7 +221,13 @@ async def danbooru_wiki_search(
     if titles:
         log_info(f"danbooru_wiki_search '{q}': {len(titles)} local titles (top: {titles[0]})")
         text = f"Wiki pages matching '{q}' (local):\n" + "\n".join(f"- {t}" for t in titles)
-        return _text_ok(f"Found {len(titles)} local wiki title(s).", text, query=q, source="local", titles=titles)
+        return _text_ok(
+            f"Found {len(titles)} local wiki title(s).",
+            text,
+            query=q,
+            source="local",
+            titles=titles,
+        )
     log_info(f"danbooru_wiki_search '{q}': local miss → live API")
     pattern = q if "*" in q else f"*{q}*"
     try:
@@ -234,10 +239,14 @@ async def danbooru_wiki_search(
     except Exception as e:
         return _text_fail(f"Wiki search for '{q}' failed: {e}", query=q)
     if not data:
-        return _text_ok(f"No wiki pages match '{q}'.", f"No wiki pages match '{q}'.", query=q, titles=[])
+        return _text_ok(
+            f"No wiki pages match '{q}'.", f"No wiki pages match '{q}'.", query=q, titles=[]
+        )
     titles = [p.get("title") for p in data]
     text = f"Wiki pages matching '{q}':\n" + "\n".join(f"- {t}" for t in titles)
-    return _text_ok(f"Found {len(titles)} wiki title(s).", text, query=q, source="live", titles=titles)
+    return _text_ok(
+        f"Found {len(titles)} wiki title(s).", text, query=q, source="live", titles=titles
+    )
 
 
 @tool(
@@ -281,7 +290,10 @@ async def danbooru_search_tags(
             f"Tags matching '{q}' (local):\n" + "\n".join(lines),
             query=q,
             source="local",
-            tags=[{"name": name, "category": _TAG_CATEGORIES.get(cat, "?"), "post_count": count} for name, cat, count in hits],
+            tags=[
+                {"name": name, "category": _TAG_CATEGORIES.get(cat, "?"), "post_count": count}
+                for name, cat, count in hits
+            ],
         )
     log_info(f"danbooru_search_tags '{q}': local miss → live API")
     try:
@@ -304,7 +316,14 @@ async def danbooru_search_tags(
         f"Tags matching '{q}':\n" + "\n".join(_tag_line(t) for t in data),
         query=q,
         source="live",
-        tags=[{"name": t.get("name"), "category": _TAG_CATEGORIES.get(t.get("category"), "?"), "post_count": t.get("post_count", 0)} for t in data],
+        tags=[
+            {
+                "name": t.get("name"),
+                "category": _TAG_CATEGORIES.get(t.get("category"), "?"),
+                "post_count": t.get("post_count", 0),
+            }
+            for t in data
+        ],
     )
 
 
@@ -505,8 +524,7 @@ async def civitai_model(
         return _text_fail(f"Could not fetch Civitai model {model_id}: {e}", model_id=model_id)
     versions = data.get("modelVersions") or []
     version_lines = [
-        f"- {v.get('id')}: {v.get('name')} (base: {v.get('baseModel', '?')})"
-        for v in versions[:10]
+        f"- {v.get('id')}: {v.get('name')} (base: {v.get('baseModel', '?')})" for v in versions[:10]
     ]
     description = _strip_html(data.get("description", ""))[:_DESCRIPTION_LIMIT]
     text = (
@@ -547,11 +565,11 @@ async def civitai_model_version(
     where authors put recommended sampler, steps, CFG, and prompt templates.
     """
     try:
-        data = await _get_json(
-            _civitai_throttle, f"{_CIVITAI}/model-versions/{int(version_id)}"
-        )
+        data = await _get_json(_civitai_throttle, f"{_CIVITAI}/model-versions/{int(version_id)}")
     except Exception as e:
-        return _text_fail(f"Could not fetch Civitai model version {version_id}: {e}", version_id=version_id)
+        return _text_fail(
+            f"Could not fetch Civitai model version {version_id}: {e}", version_id=version_id
+        )
     model = data.get("model") or {}
     words = ", ".join(data.get("trainedWords") or []) or "-"
     description = _strip_html(data.get("description", ""))[:_DESCRIPTION_LIMIT]

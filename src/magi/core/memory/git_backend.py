@@ -143,7 +143,7 @@ class MemoryGit:
         p = Path(path)
         try:
             rel = p.resolve().relative_to(self._root)
-        except (ValueError, OSError):
+        except ValueError, OSError:
             # A write outside our repo root (defensive — the observer is process-wide).
             return
         with self._lock:
@@ -156,8 +156,7 @@ class MemoryGit:
                     self._commit(repo, f"memory: update {rel.as_posix()}")
             except Exception as exc:  # noqa: BLE001 — git must never break a memory write.
                 log_warning(
-                    f"memory: git commit failed for {rel.as_posix()}: "
-                    f"{type(exc).__name__}: {exc}"
+                    f"memory: git commit failed for {rel.as_posix()}: {type(exc).__name__}: {exc}"
                 )
 
     def _staged(self, repo: "Repo") -> bool:

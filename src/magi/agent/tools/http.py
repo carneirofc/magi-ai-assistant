@@ -59,11 +59,17 @@ _ECHO_HEADERS: Final[tuple[str, ...]] = ("content-type", "content-length", "loca
 class HttpGetData(BaseModel):
     url: str = Field(description="Fetched or rejected URL.")
     status_code: int | None = Field(default=None, description="HTTP status code, when available.")
-    content_type: str | None = Field(default=None, description="Response MIME type, when available.")
+    content_type: str | None = Field(
+        default=None, description="Response MIME type, when available."
+    )
     bytes: int | None = Field(default=None, description="Response byte count, when available.")
-    limit: int | None = Field(default=None, description="Maximum allowed byte count, for oversized responses.")
+    limit: int | None = Field(
+        default=None, description="Maximum allowed byte count, for oversized responses."
+    )
     body: str | None = Field(default=None, description="Response body text, when returned.")
-    reason: str | None = Field(default=None, description="Reason the request was refused, when relevant.")
+    reason: str | None = Field(
+        default=None, description="Reason the request was refused, when relevant."
+    )
 
 
 class HttpRequestData(BaseModel):
@@ -71,12 +77,18 @@ class HttpRequestData(BaseModel):
     url: str | None = Field(default=None, description="Requested URL.")
     status_code: int | None = Field(default=None, description="HTTP status code, when available.")
     reason: str | None = Field(default=None, description="HTTP reason phrase or refusal reason.")
-    headers: dict[str, str] = Field(default_factory=dict, description="Selected response headers echoed back.")
+    headers: dict[str, str] = Field(
+        default_factory=dict, description="Selected response headers echoed back."
+    )
     bytes: int | None = Field(default=None, description="Response byte count, when available.")
-    body_omitted: bool | None = Field(default=None, description="Whether the body was omitted due to size.")
+    body_omitted: bool | None = Field(
+        default=None, description="Whether the body was omitted due to size."
+    )
     body: str | None = Field(default=None, description="Response body text, when returned.")
     text: str | None = Field(default=None, description="Compact model-readable HTTP report.")
-    allowed: list[str] = Field(default_factory=list, description="Allowed methods, for unsupported method errors.")
+    allowed: list[str] = Field(
+        default_factory=list, description="Allowed methods, for unsupported method errors."
+    )
 
 
 def _scheme_ok(url: str) -> bool:
@@ -288,7 +300,9 @@ async def http_request(
     method = (method or "GET").strip().upper()
 
     if not _scheme_ok(url):
-        return fail(f"Refusing to call non-http(s) URL: {url!r}", HttpRequestData(url=url, method=method))
+        return fail(
+            f"Refusing to call non-http(s) URL: {url!r}", HttpRequestData(url=url, method=method)
+        )
     if method not in _ALLOWED_METHODS:
         return fail(
             f"Unsupported HTTP method {method!r}. Allowed: {', '.join(sorted(_ALLOWED_METHODS))}.",
@@ -298,7 +312,10 @@ async def http_request(
     allowed, reason = await _host_allowed(url, method=method)
     if not allowed:
         log_warning(f"http_request: blocked {method} {url} ({reason})")
-        return fail(f"Refusing to call {url}: {reason}.", HttpRequestData(url=url, method=method, reason=reason))
+        return fail(
+            f"Refusing to call {url}: {reason}.",
+            HttpRequestData(url=url, method=method, reason=reason),
+        )
 
     req_headers = _normalize_headers(headers)
     content: bytes | None = body.encode("utf-8") if body is not None else None
@@ -308,9 +325,7 @@ async def http_request(
     )
 
     try:
-        async with httpx.AsyncClient(
-            timeout=_FETCH_TIMEOUT_S, follow_redirects=True
-        ) as client:
+        async with httpx.AsyncClient(timeout=_FETCH_TIMEOUT_S, follow_redirects=True) as client:
             resp = await client.request(method, url, headers=req_headers, content=content)
     except httpx.HTTPError as exc:
         log_warning(f"http_request: {method} {url} failed: {exc}")
@@ -318,7 +333,9 @@ async def http_request(
 
     log_info(f"http_request: {method} {url} -> {resp.status_code} ({len(resp.content)} bytes)")
     body_omitted = len(resp.content) > _MAX_BYTES
-    echoed_headers = {name: resp.headers.get(name) for name in _ECHO_HEADERS if resp.headers.get(name)}
+    echoed_headers = {
+        name: resp.headers.get(name) for name in _ECHO_HEADERS if resp.headers.get(name)
+    }
     return ok(
         f"HTTP {method} {url} returned {resp.status_code}.",
         HttpRequestData(

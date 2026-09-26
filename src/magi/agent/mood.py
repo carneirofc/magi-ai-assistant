@@ -53,7 +53,7 @@ def _extract_mood(content: object, valid: frozenset[str]) -> str | None:
         if match:
             try:
                 data = json.loads(match.group(0))
-            except (json.JSONDecodeError, ValueError):
+            except json.JSONDecodeError, ValueError:
                 return None
             value = data.get("mood") if isinstance(data, dict) else None
             if isinstance(value, str) and value in valid:

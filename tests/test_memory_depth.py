@@ -185,8 +185,6 @@ def test_save_knowledge_reports_a_failed_ingest():
     tools = build_knowledge_tools(_DownStore(), None, _DownStore())
     save = next(t for t in tools if getattr(t, "name", "") == "save_knowledge")
 
-    out = save.entrypoint(
-        text="Some reference material that is long enough to save.", title="t"
-    )
+    out = save.entrypoint(text="Some reference material that is long enough to save.", title="t")
 
     assert not out.success

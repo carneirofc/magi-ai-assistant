@@ -16,7 +16,9 @@ from magi.core.config import config, configure
 
 def _tool_text(result: dict) -> str:
     data = result.get("data") or {}
-    return " ".join(str(part) for part in (result.get("message", ""), data.get("text", ""), data) if part)
+    return " ".join(
+        str(part) for part in (result.get("message", ""), data.get("text", ""), data) if part
+    )
 
 
 TAGS_CSV = """tag,category,count,alias

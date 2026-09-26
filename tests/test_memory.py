@@ -378,9 +378,7 @@ class _FakeRetriever:
 
 def test_retriever_indexes_and_overrides_context(tmp_path):
     retriever = _FakeRetriever({"long_term": ["relevant fact"], "episode": ["relevant episode"]})
-    mgr = MemoryManager(
-        FileMemoryStore(tmp_path / "mem"), short_term_max=5, retriever=retriever
-    )
+    mgr = MemoryManager(FileMemoryStore(tmp_path / "mem"), short_term_max=5, retriever=retriever)
     mgr.set_scope(user_id="u1", session_id="s1")
     mgr.remember("some stored fact")
     assert ("u1", "long_term", "some stored fact") in retriever.indexed
@@ -392,9 +390,7 @@ def test_retriever_indexes_and_overrides_context(tmp_path):
 
 def test_retriever_empty_falls_back_to_whole_file(tmp_path):
     retriever = _FakeRetriever({})  # search returns []
-    mgr = MemoryManager(
-        FileMemoryStore(tmp_path / "mem"), short_term_max=5, retriever=retriever
-    )
+    mgr = MemoryManager(FileMemoryStore(tmp_path / "mem"), short_term_max=5, retriever=retriever)
     mgr.set_scope(user_id="u1", session_id="s1")
     mgr.remember("the whole-file fact")
     ctx = mgr.build_context(query="anything")

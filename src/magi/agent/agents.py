@@ -34,8 +34,7 @@ def build_agent(
     resolved_model = model or build_member_model()
     resolved_system = system_message or config.system_prompt
     tool_names = [
-        getattr(t, "name", getattr(t, "__name__", type(t).__name__))
-        for t in resolved_tools
+        getattr(t, "name", getattr(t, "__name__", type(t).__name__)) for t in resolved_tools
     ]
     log_info(
         f"building agent: system_prompt={len(resolved_system)} chars, tools={tool_names or 'none'}, "

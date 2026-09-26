@@ -45,8 +45,7 @@ class _FakeMemory:
     def __init__(self, identity=None):
         self.assistant_turns = []
         self.store = SimpleNamespace(
-            identity=identity
-            or SimpleNamespace(context_text=lambda: "", avatar_bytes=lambda: None)
+            identity=identity or SimpleNamespace(context_text=lambda: "", avatar_bytes=lambda: None)
         )
 
     def set_scope(self, user_id, session_id):
@@ -250,8 +249,10 @@ def test_context_stats_reports_knowledge_auto_injection():
     """`!ctx` surfaces the knowledge knob + an upper-bound token budget when
     auto-injection is on (actual per-turn size is query-dependent, logged at run time)."""
     service = ConversationService(
-        runner=_FakeRunner(None), memory=_FakeMemory(),
-        knowledge=_FakeKnowledge([]), knowledge_top_k=3,
+        runner=_FakeRunner(None),
+        memory=_FakeMemory(),
+        knowledge=_FakeKnowledge([]),
+        knowledge_top_k=3,
     )
 
     stats = service.context_stats(user_id=1, session_id="s")
@@ -426,10 +427,7 @@ class _FakeStreamRunner:
 
 
 async def _collect(service):
-    return [
-        item
-        async for item in service.handle_stream(user_id=1, session_id="s", text="hi")
-    ]
+    return [item async for item in service.handle_stream(user_id=1, session_id="s", text="hi")]
 
 
 async def test_stream_yields_deltas_then_final_reply_and_records_once():
@@ -566,9 +564,7 @@ async def test_stream_mood_failure_falls_back_and_never_breaks_the_turn():
 async def test_handle_reply_carries_mood():
     response = SimpleNamespace(status="COMPLETED", content="the answer", reasoning_content=None)
     mem = _FakeMemory()
-    service = ConversationService(
-        runner=_FakeRunner(response), memory=mem, mood_fn=_wry_mood
-    )
+    service = ConversationService(runner=_FakeRunner(response), memory=mem, mood_fn=_wry_mood)
 
     reply = await service.handle(user_id=1, session_id="s", text="hi")
 
@@ -589,9 +585,7 @@ async def test_handle_without_mood_fn_leaves_mood_none():
 async def _collect_greeting(service, instruction="Say hello."):
     return [
         item
-        async for item in service.greet_stream(
-            user_id=1, session_id="s", instruction=instruction
-        )
+        async for item in service.greet_stream(user_id=1, session_id="s", instruction=instruction)
     ]
 
 

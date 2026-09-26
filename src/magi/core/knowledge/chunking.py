@@ -46,14 +46,14 @@ def chunk_text(text: str, *, size: int, overlap: int) -> list[str]:
     start = 0
     n = len(cleaned)
     while start < n:
-        window = cleaned[start:start + size]
+        window = cleaned[start : start + size]
         if start + size >= n:
             chunk = window.strip()
             if chunk:
                 chunks.append(chunk)
             break
         cut = _split_point(window, size)
-        chunk = cleaned[start:start + cut].strip()
+        chunk = cleaned[start : start + cut].strip()
         if chunk:
             chunks.append(chunk)
         # Advance past the chunk, then step back `overlap` for continuity. `max`

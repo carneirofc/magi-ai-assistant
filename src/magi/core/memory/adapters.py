@@ -68,9 +68,7 @@ def emit_write(path: Path) -> None:
     try:
         observer(path)
     except Exception as exc:  # noqa: BLE001 — a write observer must never break a memory write.
-        log_warning(
-            f"memory: write observer failed for {path.name}: {type(exc).__name__}: {exc}"
-        )
+        log_warning(f"memory: write observer failed for {path.name}: {type(exc).__name__}: {exc}")
 
 
 # --- Obsidian frontmatter ---------------------------------------------------
@@ -83,13 +81,7 @@ def _frontmatter(note_type: str, tags: list[str]) -> str:
     Tags use inline (flow) `[a, b]` style deliberately: a block list would emit
     `- tag` lines, which the bullet parsers below would mistake for content.
     """
-    return (
-        "---\n"
-        f"type: {note_type}\n"
-        f"tags: [{', '.join(tags)}]\n"
-        f"created: {_now()}\n"
-        "---\n"
-    )
+    return f"---\ntype: {note_type}\ntags: [{', '.join(tags)}]\ncreated: {_now()}\n---\n"
 
 
 def strip_frontmatter(text: str) -> str:
@@ -124,7 +116,9 @@ def strip_legacy_ts(text: str) -> str:
 class BulletLog:
     """Append-only Obsidian note: frontmatter, a `# header`, then `- <content>` bullets."""
 
-    def __init__(self, path: Path, header: str, note_type: str = "note", tags: list[str] | None = None):
+    def __init__(
+        self, path: Path, header: str, note_type: str = "note", tags: list[str] | None = None
+    ):
         self.path = Path(path)
         self.header = header
         self.note_type = note_type
@@ -228,7 +222,9 @@ class Blob:
     stripped, so the metadata reaches Obsidian but not the model context.
     """
 
-    def __init__(self, path: Path, header: str, note_type: str = "note", tags: list[str] | None = None):
+    def __init__(
+        self, path: Path, header: str, note_type: str = "note", tags: list[str] | None = None
+    ):
         self.path = Path(path)
         self.header = header
         self.note_type = note_type

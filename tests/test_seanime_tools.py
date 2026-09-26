@@ -103,7 +103,9 @@ async def test_status_unwraps_and_compacts(monkeypatch):
     result = await seanime.seanime_status.entrypoint()
     assert "2.0.0" in _tool_text(result) and "carneirofc" in _tool_text(result)
     assert "Adult content: enabled" in _tool_text(result)
-    assert "noise" not in _tool_text(result) and len(_tool_text(result)) < 500  # trimmed, not dumped
+    assert (
+        "noise" not in _tool_text(result) and len(_tool_text(result)) < 500
+    )  # trimmed, not dumped
 
 
 async def test_server_error_becomes_readable_string(monkeypatch):
@@ -360,7 +362,7 @@ async def test_browse_anime_compacts_page(monkeypatch):
         }
     }
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    result = await seanime.seanime_browse.entrypoint(kind="anime",search="titan")
+    result = await seanime.seanime_browse.entrypoint(kind="anime", search="titan")
     assert "16498" in _tool_text(result) and "Attack on Titan" in _tool_text(result)
     method, url, body = client.calls[0]
     assert method == "POST" and url.endswith("/api/v1/anilist/list-anime")
@@ -378,7 +380,7 @@ async def test_browse_anime_adult_include_omits_filter_and_flags_results(monkeyp
         }
     }
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    result = await seanime.seanime_browse.entrypoint(kind="anime",search="title", adult="include")
+    result = await seanime.seanime_browse.entrypoint(kind="anime", search="title", adult="include")
     _, _, body = client.calls[0]
     # Key omitted entirely: AniList then returns both adult and non-adult
     # (isAdult=true would mean adult-ONLY and is coerced by a server setting).
@@ -390,7 +392,7 @@ async def test_browse_anime_adult_include_omits_filter_and_flags_results(monkeyp
 async def test_browse_anime_adult_only_sends_true(monkeypatch):
     page = {"Page": {"media": [{"id": 99, "title": {"romaji": "X"}, "isAdult": True}]}}
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    await seanime.seanime_browse.entrypoint(kind="anime",search="x", adult="only")
+    await seanime.seanime_browse.entrypoint(kind="anime", search="x", adult="only")
     _, _, body = client.calls[0]
     assert body["isAdult"] is True
 
@@ -400,7 +402,8 @@ async def test_browse_anime_filters_ride_in_the_body(monkeypatch):
     AniList casing, status/sort as arrays, empty search omitted)."""
     page = {"Page": {"media": []}}
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    await seanime.seanime_browse.entrypoint(kind="anime",
+    await seanime.seanime_browse.entrypoint(
+        kind="anime",
         search="",
         genres=["Romance", "Sci-Fi"],
         season="WINTER",
@@ -422,15 +425,15 @@ async def test_browse_anime_filters_ride_in_the_body(monkeypatch):
 async def test_browse_anime_rejects_unknown_filter_values(monkeypatch):
     _patch_client(monkeypatch, [])
     with pytest.raises(ValidationError, match="genres"):
-        await seanime.seanime_browse.entrypoint(kind="anime",search="x", genres=["isekai"])
+        await seanime.seanime_browse.entrypoint(kind="anime", search="x", genres=["isekai"])
     with pytest.raises(ValidationError, match="season"):
-        await seanime.seanime_browse.entrypoint(kind="anime",search="x", season="autumn")
+        await seanime.seanime_browse.entrypoint(kind="anime", search="x", season="autumn")
     with pytest.raises(ValidationError, match="sort"):
-        await seanime.seanime_browse.entrypoint(kind="anime",search="x", sort="BEST_FIRST")
+        await seanime.seanime_browse.entrypoint(kind="anime", search="x", sort="BEST_FIRST")
     with pytest.raises(ValidationError, match="adult"):
-        await seanime.seanime_browse.entrypoint(kind="anime",search="x", adult="maybe")
+        await seanime.seanime_browse.entrypoint(kind="anime", search="x", adult="maybe")
     # Hentai while excluding adult contradicts itself — the tool says how to fix it.
-    result = await seanime.seanime_browse.entrypoint(kind="anime",search="", genres=["Hentai"])
+    result = await seanime.seanime_browse.entrypoint(kind="anime", search="", genres=["Hentai"])
     assert 'adult="only"' in _tool_text(result)
 
 
@@ -449,7 +452,7 @@ async def test_browse_results_carry_genres_year_and_cover(monkeypatch):
         }
     }
     _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    result = await seanime.seanime_browse.entrypoint(kind="manga",search="t")
+    result = await seanime.seanime_browse.entrypoint(kind="manga", search="t")
     assert f'"cover":"{_proxy("https://img/cover.jpg")}"' in _tool_text(result)
     assert '"cover_original":"https://img/cover.jpg"' in _tool_text(result)
     assert '"year":2019' in _tool_text(result)
@@ -458,7 +461,7 @@ async def test_browse_results_carry_genres_year_and_cover(monkeypatch):
 
 async def test_browse_empty_page_suggests_widening(monkeypatch):
     _patch_client(monkeypatch, [_FakeResponse(json_data={"data": {"Page": {"media": []}}})])
-    result = await seanime.seanime_browse.entrypoint(kind="anime",search="zzz")
+    result = await seanime.seanime_browse.entrypoint(kind="anime", search="zzz")
     assert "no results" in _tool_text(result)
 
 
@@ -478,7 +481,7 @@ async def test_browse_manga_defaults_filter_adult_and_compact_chapters(monkeypat
         }
     }
     client = _patch_client(monkeypatch, [_FakeResponse(json_data={"data": page})])
-    result = await seanime.seanime_browse.entrypoint(kind="manga",search="berserk")
+    result = await seanime.seanime_browse.entrypoint(kind="manga", search="berserk")
     method, url, body = client.calls[0]
     assert method == "POST" and url.endswith("/api/v1/manga/anilist/list")
     assert body == {"search": "berserk", "page": 1, "perPage": 10, "isAdult": False}
@@ -544,9 +547,12 @@ async def test_find_lists_multiple_library_matches_with_ids(monkeypatch):
     assert "2 matches in the user's library" in _tool_text(result)
     assert (
         "- [anime] Sousou no Frieren (id 154587, CURRENT): 10/28, score 9, "
-        f"cover {_proxy('https://img/frieren.jpg')}, original cover https://img/frieren.jpg" in _tool_text(result)
+        f"cover {_proxy('https://img/frieren.jpg')}, original cover https://img/frieren.jpg"
+        in _tool_text(result)
     )
-    assert "- [manga] Frieren: Beyond Journey's End (id 118586, PLANNING): 0/130" in _tool_text(result)
+    assert "- [manga] Frieren: Beyond Journey's End (id 118586, PLANNING): 0/130" in _tool_text(
+        result
+    )
     assert "seanime_media_info" in _tool_text(result)  # the follow-up is spelled out
     assert "One Piece" not in _tool_text(result)  # non-matching entries stay out
     assert client.calls[0][1].endswith("/api/v1/library/collection")
@@ -589,9 +595,7 @@ async def test_find_single_library_match_returns_full_picture(monkeypatch):
 async def test_find_falls_back_to_anilist_labeled_not_in_library(monkeypatch):
     page = {
         "Page": {
-            "media": [
-                {"id": 154587, "title": {"romaji": "Sousou no Frieren"}, "format": "TV"}
-            ]
+            "media": [{"id": 154587, "title": {"romaji": "Sousou no Frieren"}, "format": "TV"}]
         }
     }
     client = _patch_client(
@@ -716,7 +720,11 @@ async def test_media_info_anime_joins_entry_and_details(monkeypatch):
             "genres": ["Action", "Adventure"],
         },
         "listData": {"status": "CURRENT", "progress": 1090, "score": 9},
-        "libraryData": {"mainFileCount": 2, "unwatchedCount": 1, "sharedPath": "J:/anime/one-piece"},
+        "libraryData": {
+            "mainFileCount": 2,
+            "unwatchedCount": 1,
+            "sharedPath": "J:/anime/one-piece",
+        },
         "nextEpisode": {"episodeNumber": 1091},
         "downloadInfo": {"episodesToDownload": [{"episodeNumber": 1092}]},
         "episodes": [
@@ -751,12 +759,19 @@ async def test_media_info_anime_joins_entry_and_details(monkeypatch):
         ],
         "relations": {
             "edges": [
-                {"relationType": "SOURCE", "node": {"id": 7, "title": {"romaji": "M"}, "format": "MANGA"}}
+                {
+                    "relationType": "SOURCE",
+                    "node": {"id": 7, "title": {"romaji": "M"}, "format": "MANGA"},
+                }
             ]
         },
         "recommendations": {
             "edges": [
-                {"node": {"mediaRecommendation": {"id": 9, "title": {"romaji": "R"}, "meanScore": 85}}}
+                {
+                    "node": {
+                        "mediaRecommendation": {"id": 9, "title": {"romaji": "R"}, "meanScore": 85}
+                    }
+                }
             ]
         },
         "siteUrl": "https://anilist.co/anime/1",
@@ -781,7 +796,9 @@ async def test_media_info_anime_joins_entry_and_details(monkeypatch):
     assert "score 91/100" in _tool_text(result) and "24 min/ep" in _tool_text(result)
     assert "MADHOUSE" in _tool_text(result) and "https://youtu.be/abc123" in _tool_text(result)
     assert "Ranked #1 highest rated all time" in _tool_text(result)
-    assert "Magic" in _tool_text(result) and "Spoilery" not in _tool_text(result)  # spoiler tags dropped
+    assert "Magic" in _tool_text(result) and "Spoilery" not in _tool_text(
+        result
+    )  # spoiler tags dropped
     assert "Lewd [adult]" in _tool_text(result)  # adult tags flagged
     assert "- SOURCE: M (MANGA, id 7)" in _tool_text(result)
     assert "- R (id 9, score 85)" in _tool_text(result)
@@ -925,7 +942,9 @@ async def test_missing_episodes_groups_per_anime(monkeypatch):
     _patch_client(monkeypatch, [_FakeResponse(json_data={"data": payload})])
     result = await seanime.seanime_missing_episodes.entrypoint()
     assert "2 missing episode(s):" in _tool_text(result)
-    assert "- El Hazard 2 (id 118): Ep 4 (aired 1997-10-25), Ep 5 (aired 1997-11-25)" in _tool_text(result)
+    assert "- El Hazard 2 (id 118): Ep 4 (aired 1997-10-25), Ep 5 (aired 1997-11-25)" in _tool_text(
+        result
+    )
     assert "1 silenced episode(s)" in _tool_text(result)
     assert "noise" not in _tool_text(result)  # metadata prose trimmed
 

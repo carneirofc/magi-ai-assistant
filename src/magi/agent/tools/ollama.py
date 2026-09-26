@@ -166,5 +166,7 @@ def list_running_ollama_models() -> ToolOutput[RunningOllamaModelsData]:
     for m in models:
         vram_gb = (m.get("size_vram", 0) or 0) / 1e9
         ctx = m.get("context_length")
-        items.append(RunningOllamaModelRow(name=m.get("name"), loaded_context=ctx, vram_gb=round(vram_gb, 1)))
+        items.append(
+            RunningOllamaModelRow(name=m.get("name"), loaded_context=ctx, vram_gb=round(vram_gb, 1))
+        )
     return ok("Loaded Ollama models.", RunningOllamaModelsData(models=items))

@@ -90,9 +90,15 @@ def test_snapshot_falls_back_to_show_result_tools_when_unconnected():
     """An unconnected MCP toolkit has no discovered functions yet — the tools we
     asked it to surface stand in so the roster isn't blank before first connect."""
     mcp = MCPTools(url="http://x/mcp", connected=False, show_result_tools=["search_anime"])
-    snap = build_snapshot(_team(members=[
-        SimpleNamespace(name="Anime", role="anime", model=SimpleNamespace(id="m"), tools=[mcp]),
-    ]))
+    snap = build_snapshot(
+        _team(
+            members=[
+                SimpleNamespace(
+                    name="Anime", role="anime", model=SimpleNamespace(id="m"), tools=[mcp]
+                ),
+            ]
+        )
+    )
 
     assert snap.mcp_servers[0].connected is False
     assert snap.mcp_servers[0].tools == ["search_anime"]
@@ -113,7 +119,9 @@ def test_snapshot_expands_generic_toolkit_into_its_functions():
 
 def test_snapshot_handles_bare_single_agent_runner():
     # No `members` attribute at all → treated as a single agent.
-    agent = SimpleNamespace(name="Solo", model=SimpleNamespace(id="agent-model"), tools=[_fn("ping")])
+    agent = SimpleNamespace(
+        name="Solo", model=SimpleNamespace(id="agent-model"), tools=[_fn("ping")]
+    )
     snap = build_snapshot(agent)
 
     assert snap.is_team is False
@@ -175,7 +183,9 @@ def test_snapshot_reads_origin_stamps():
 
     mark_origin([approved_recipe], "recipe")
     runner = SimpleNamespace(
-        name="T", model=SimpleNamespace(id="lead"), tools=[approved_recipe, engine_tool],
+        name="T",
+        model=SimpleNamespace(id="lead"),
+        tools=[approved_recipe, engine_tool],
         members=None,
     )
 

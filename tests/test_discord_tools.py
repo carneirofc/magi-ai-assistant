@@ -145,7 +145,9 @@ async def test_delete_discord_messages_bulk_deletes_each_id(discord_context):
 
 
 @pytest.mark.asyncio
-async def test_delete_recent_discord_messages_skips_current_request_and_deletes_count(discord_context):
+async def test_delete_recent_discord_messages_skips_current_request_and_deletes_count(
+    discord_context,
+):
     result = await delete_recent_discord_messages.entrypoint(count=2)
     assert "Deleted 2 recent message(s)" in _tool_text(result)
     assert discord_context._messages[30].deleted is True

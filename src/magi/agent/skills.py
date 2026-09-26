@@ -83,9 +83,7 @@ def register_skill(skill: Union[Skill, Callable[[], Skill]]):
     if not isinstance(resolved, Skill):
         raise ValueError(f"register_skill expects a Skill, got {type(resolved).__name__}")
     if not _NAME_RE.match(resolved.name):
-        raise ValueError(
-            f"skill name {resolved.name!r} must be a lowercase slug (a-z, 0-9, _, -)"
-        )
+        raise ValueError(f"skill name {resolved.name!r} must be a lowercase slug (a-z, 0-9, _, -)")
     if not any(s.name == resolved.name for s in SKILLS):
         SKILLS.append(resolved)
     return skill

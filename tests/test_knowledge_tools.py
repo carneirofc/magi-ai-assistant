@@ -43,7 +43,9 @@ def _tool(hits):
 
 def test_search_returns_snippets_with_sources():
     hits = [
-        KnowledgeHit(text="Pemmican keeps for months.", source="food.md", score=0.9, doc_id="food.md"),
+        KnowledgeHit(
+            text="Pemmican keeps for months.", source="food.md", score=0.9, doc_id="food.md"
+        ),
         KnowledgeHit(text="Store it cold.", source="food.md", score=0.5, doc_id="food.md"),
     ]
     searcher, search_knowledge = _tool(hits)
@@ -147,7 +149,16 @@ class _FakeIndexer:
         self._chunks = chunks
 
     def index_document(
-        self, doc_id, text, *, source, title=None, subject="", tags=None, scope="global", metadata=None
+        self,
+        doc_id,
+        text,
+        *,
+        source,
+        title=None,
+        subject="",
+        tags=None,
+        scope="global",
+        metadata=None,
     ):
         self.calls.append({"doc_id": doc_id, "source": source, "scope": scope})
         return self._chunks
@@ -228,7 +239,9 @@ class _ScopedCorpus:
 def test_two_users_cannot_see_each_others_personal_knowledge():
     corpus = _ScopedCorpus()
     corpus.add(GLOBAL_SCOPE, KnowledgeHit(text="shared fact", source="wiki", score=0.9, doc_id="g"))
-    corpus.add("user:alice", KnowledgeHit(text="alice's note", source="chat", score=0.8, doc_id="a"))
+    corpus.add(
+        "user:alice", KnowledgeHit(text="alice's note", source="chat", score=0.8, doc_id="a")
+    )
 
     (as_alice,) = build_knowledge_tools(corpus, memory=_ScopeMemory("alice"))
     texts = [s["text"] for s in as_alice.entrypoint(query="q").get("data")["snippets"]]

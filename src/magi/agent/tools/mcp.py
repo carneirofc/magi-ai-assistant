@@ -70,8 +70,7 @@ def build_mcp_toolkit(spec: dict) -> "MCPTools":
         from agno.tools.mcp.params import SSEClientParams, StreamableHTTPClientParams
     except ImportError as exc:  # pragma: no cover - exercised only without the extra
         raise RuntimeError(
-            "config.mcp_servers needs the optional 'mcp' dependency "
-            "(`uv sync --extra mcp`)."
+            "config.mcp_servers needs the optional 'mcp' dependency (`uv sync --extra mcp`)."
         ) from exc
 
     name = str(spec.get("name") or "").strip()

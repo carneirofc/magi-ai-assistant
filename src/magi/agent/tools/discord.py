@@ -14,12 +14,14 @@ from magi.core.discord_context import get_current_discord_context
 try:
     import discord
 
-except (ImportError, ModuleNotFoundError):
+except ImportError, ModuleNotFoundError:
     raise ImportError("`discord.py` not installed. Please install using `pip install discord.py`")
 
 _DELETE_VERB_RE = re.compile(r"\b(delete|remove|purge|erase)\b", re.IGNORECASE)
 _CLEAR_VERB_RE = re.compile(r"\bclear\b", re.IGNORECASE)
-_CLEAR_SCOPE_RE = re.compile(r"\b(message|messages|post|posts|chat|history|recent|last)\b", re.IGNORECASE)
+_CLEAR_SCOPE_RE = re.compile(
+    r"\b(message|messages|post|posts|chat|history|recent|last)\b", re.IGNORECASE
+)
 
 
 class DiscordContextData(BaseModel):
@@ -180,7 +182,10 @@ async def delete_discord_message(
         )
     except discord.NotFound:
         log_warning(f"delete_discord_message: {message_id} not found in {target}")
-        return fail(f"Message {message_id} was not found in {target}.", DiscordDeleteData(message_id=message_id))
+        return fail(
+            f"Message {message_id} was not found in {target}.",
+            DiscordDeleteData(message_id=message_id),
+        )
     except discord.Forbidden as exc:
         log_warning(f"delete_discord_message: forbidden for {message_id} in {target} ({exc})")
         return fail(f"Cannot delete message {message_id}: missing Discord permissions ({exc}).")
@@ -222,11 +227,15 @@ async def delete_discord_messages(
             f"delete_discord_messages: refused non-delete request in {target}: "
             f"{context.message_text!r}"
         )
-        return fail(error, DiscordDeleteData(message_ids=message_ids, channel_id=context.channel_id))
+        return fail(
+            error, DiscordDeleteData(message_ids=message_ids, channel_id=context.channel_id)
+        )
     ids = ", ".join(str(mid) for mid in message_ids)
     messages = [context.channel.get_partial_message(int(mid)) for mid in message_ids]
     try:
-        log_info(f"delete_discord_messages: deleting {len(messages)} message(s) from {target}: {ids}")
+        log_info(
+            f"delete_discord_messages: deleting {len(messages)} message(s) from {target}: {ids}"
+        )
         await context.delete_messages(messages)
     except discord.Forbidden as exc:
         log_warning(f"delete_discord_messages: forbidden in {target} ({exc})")
@@ -237,7 +246,11 @@ async def delete_discord_messages(
     log_info(f"delete_discord_messages: deleted {len(messages)} message(s) from {target}: {ids}")
     return ok(
         f"Deleted {len(messages)} message(s) from {target}: {ids}",
-        DiscordDeleteData(message_ids=[str(mid) for mid in message_ids], channel_id=context.channel_id, deleted=True),
+        DiscordDeleteData(
+            message_ids=[str(mid) for mid in message_ids],
+            channel_id=context.channel_id,
+            deleted=True,
+        ),
     )
 
 
@@ -286,7 +299,10 @@ async def delete_recent_discord_messages(
             break
 
     if not candidates:
-        return fail("No recent deletable messages were found in the current conversation.", DiscordDeleteData(count=count))
+        return fail(
+            "No recent deletable messages were found in the current conversation.",
+            DiscordDeleteData(count=count),
+        )
 
     ids = ", ".join(str(message.id) for message in candidates)
     try:

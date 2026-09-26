@@ -170,9 +170,7 @@ class LocalStore:
             if with_metadata:
                 ctype, metadata = self._read_sidecar(path)
             out.append(
-                ObjectInfo(
-                    key=key, size=path.stat().st_size, content_type=ctype, metadata=metadata
-                )
+                ObjectInfo(key=key, size=path.stat().st_size, content_type=ctype, metadata=metadata)
             )
             if len(out) >= max_keys:
                 break
@@ -183,7 +181,7 @@ class LocalStore:
         """Read a blob's `.meta.json` sidecar; tolerate a missing/corrupt one."""
         try:
             raw = json.loads(self._meta_path(path).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except OSError, json.JSONDecodeError:
             return None, {}
         ctype = raw.get("content_type")
         metadata = {str(k): str(v) for k, v in (raw.get("metadata") or {}).items()}

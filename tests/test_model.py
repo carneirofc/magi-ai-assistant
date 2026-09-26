@@ -122,9 +122,7 @@ def test_format_messages_tolerates_missing_arguments():
 def test_unsupported_provider_raises():
     with pytest.raises(ValueError):
         build_model(
-            ModelDefinition.model_construct(
-                provider="made-up", model_id="x", has_tools=False
-            )
+            ModelDefinition.model_construct(provider="made-up", model_id="x", has_tools=False)
         )
 
 

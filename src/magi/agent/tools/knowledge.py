@@ -36,9 +36,12 @@ class KnowledgeSnippet(BaseModel):
     text: str = Field(description="The retrieved passage, verbatim from the source.")
     source: str = Field(description="Where the passage came from (document name / origin).")
     score: float = Field(description="Relevance score (higher is closer); for ranking only.")
-    subject: str = Field(default="", description="The passage's subject (a coarse filter you can pass).")
+    subject: str = Field(
+        default="", description="The passage's subject (a coarse filter you can pass)."
+    )
     tags: list[str] = Field(
-        default_factory=list, description="The passage's tags (labels you can pass to bias results)."
+        default_factory=list,
+        description="The passage's tags (labels you can pass to bias results).",
     )
 
 
@@ -110,7 +113,9 @@ def build_knowledge_tools(
         ],
         subject: Annotated[
             str,
-            Field(default="", description="Restrict to this subject (hard filter); '' = any subject."),
+            Field(
+                default="", description="Restrict to this subject (hard filter); '' = any subject."
+            ),
         ] = "",
         tags: Annotated[
             list[str],
@@ -146,7 +151,9 @@ def build_knowledge_tools(
             if snippets
             else "No relevant passages in the knowledge base."
         )
-        return ok(msg, KnowledgeSearchData(query=query.strip(), snippets=snippets, count=len(snippets)))
+        return ok(
+            msg, KnowledgeSearchData(query=query.strip(), snippets=snippets, count=len(snippets))
+        )
 
     tools: list = [search_knowledge]
 
@@ -182,7 +189,10 @@ def build_knowledge_tools(
             ],
             subject: Annotated[
                 str,
-                Field(default="", description="Optional subject grouping (see search results for the vocabulary)."),
+                Field(
+                    default="",
+                    description="Optional subject grouping (see search results for the vocabulary).",
+                ),
             ] = "",
             tags: Annotated[
                 list[str], Field(default_factory=list, description="Optional free-form labels.")
@@ -208,8 +218,7 @@ def build_knowledge_tools(
                 uid = _current_user()
                 if uid is None:
                     return fail(
-                        "Cannot save personal knowledge: no user scope is active "
-                        "for this message."
+                        "Cannot save personal knowledge: no user scope is active for this message."
                     )
                 scope = user_scope(uid)
             doc_id = f"chat-{uuid.uuid4().hex[:12]}"
@@ -259,9 +268,7 @@ def build_knowledge_tools(
         doc_id: Annotated[
             str, Field(min_length=1, description="The document's id (from a search result).")
         ],
-        add: Annotated[
-            list[str], Field(default_factory=list, description="Tags to add.")
-        ] = [],  # noqa: B006 — agno reads the annotation default; never mutated.
+        add: Annotated[list[str], Field(default_factory=list, description="Tags to add.")] = [],  # noqa: B006 — agno reads the annotation default; never mutated.
         remove: Annotated[
             list[str], Field(default_factory=list, description="Tags to remove.")
         ] = [],  # noqa: B006
@@ -282,7 +289,10 @@ def build_knowledge_tools(
             log_info(f"knowledge: tag {doc_id.strip()!r} -> not found")
             return fail(f"No knowledge document with id {doc_id.strip()!r}.")
         log_info(f"knowledge: tag {doc_id.strip()!r} -> {result}")
-        return ok(f"Tags now: {', '.join(result) or '(none)'}.", TagData(doc_id=doc_id.strip(), tags=result))
+        return ok(
+            f"Tags now: {', '.join(result) or '(none)'}.",
+            TagData(doc_id=doc_id.strip(), tags=result),
+        )
 
     tools.append(tag_knowledge)
     return tools

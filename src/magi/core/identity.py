@@ -115,7 +115,7 @@ class IdentityStore:
             return {}
         try:
             parsed = json.loads(self.meta_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             return {}
         return parsed if isinstance(parsed, dict) else {}
 
@@ -288,9 +288,7 @@ class IdentityStore:
         self._write_json(data)
         return self.read()
 
-    def set_avatar(
-        self, data: bytes, mime: str, filename: Optional[str] = None
-    ) -> BotIdentity:
+    def set_avatar(self, data: bytes, mime: str, filename: Optional[str] = None) -> BotIdentity:
         """Replace the profile picture. Raises ValueError on an unsupported mime."""
         mime = (mime or "").strip().lower()
         ext = _MIME_EXT.get(mime)

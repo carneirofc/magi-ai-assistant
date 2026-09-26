@@ -70,19 +70,46 @@ _STATUSES: Final[frozenset[str]] = frozenset(
 )
 _SORTS: Final[frozenset[str]] = frozenset(
     {
-        "SCORE_DESC", "SCORE", "POPULARITY_DESC", "POPULARITY", "TRENDING_DESC",
-        "FAVOURITES_DESC", "START_DATE_DESC", "START_DATE", "END_DATE_DESC",
-        "EPISODES_DESC", "CHAPTERS_DESC", "VOLUMES_DESC",
-        "TITLE_ROMAJI", "TITLE_ENGLISH", "UPDATED_AT_DESC",
+        "SCORE_DESC",
+        "SCORE",
+        "POPULARITY_DESC",
+        "POPULARITY",
+        "TRENDING_DESC",
+        "FAVOURITES_DESC",
+        "START_DATE_DESC",
+        "START_DATE",
+        "END_DATE_DESC",
+        "EPISODES_DESC",
+        "CHAPTERS_DESC",
+        "VOLUMES_DESC",
+        "TITLE_ROMAJI",
+        "TITLE_ENGLISH",
+        "UPDATED_AT_DESC",
     }
 )
 # AniList's fixed genre list, keyed by lowercase for normalization.
 _GENRES: Final[dict[str, str]] = {
     g.lower(): g
     for g in (
-        "Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy", "Hentai",
-        "Horror", "Mahou Shoujo", "Mecha", "Music", "Mystery", "Psychological",
-        "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller",
+        "Action",
+        "Adventure",
+        "Comedy",
+        "Drama",
+        "Ecchi",
+        "Fantasy",
+        "Hentai",
+        "Horror",
+        "Mahou Shoujo",
+        "Mecha",
+        "Music",
+        "Mystery",
+        "Psychological",
+        "Romance",
+        "Sci-Fi",
+        "Slice of Life",
+        "Sports",
+        "Supernatural",
+        "Thriller",
     )
 }
 _GENRE_ALIASES: Final[dict[str, str]] = {
@@ -145,8 +172,13 @@ def _tool_result(message: str, value: Any) -> SeanimeOutput:
             parsed = json.loads(value)
         except json.JSONDecodeError:
             parsed = {"text": value}
-        return ok(message, SeanimeData(**parsed) if isinstance(parsed, dict) else _data(text=_render(parsed)))
-    return ok(message, SeanimeData(**value) if isinstance(value, dict) else _data(text=_render(value)))
+        return ok(
+            message,
+            SeanimeData(**parsed) if isinstance(parsed, dict) else _data(text=_render(parsed)),
+        )
+    return ok(
+        message, SeanimeData(**value) if isinstance(value, dict) else _data(text=_render(value))
+    )
 
 
 async def _call(method: str, path: str, body: Optional[dict] = None) -> Any | str:
@@ -160,8 +192,7 @@ async def _call(method: str, path: str, body: Optional[dict] = None) -> Any | st
     except httpx.HTTPError as exc:
         log_warning(f"seanime: {method} {path} failed: {exc}")
         return (
-            f"Seanime is unreachable at {config.seanime_base_url} ({exc}). "
-            "Is the server running?"
+            f"Seanime is unreachable at {config.seanime_base_url} ({exc}). Is the server running?"
         )
 
     try:
@@ -305,8 +336,7 @@ def _build_search_body(
         return None, 'Unknown adult mode; use "exclude" (default), "include", or "only".'
     if "Hentai" in genre_list and mode == "exclude":
         return None, (
-            'The Hentai genre is adult-only and excluded by default; '
-            'call again with adult="only".'
+            'The Hentai genre is adult-only and excluded by default; call again with adult="only".'
         )
     if mode == "exclude":
         # Explicit false = non-adult only.
@@ -339,8 +369,7 @@ def _entry_records(data: dict, unit: str) -> list[dict]:
                     "score": list_data.get("score") or 0,
                     "genres": media.get("genres") or [],
                     "format": media.get("format") or "UNKNOWN",
-                    "year": media.get("seasonYear")
-                    or (media.get("startDate") or {}).get("year"),
+                    "year": media.get("seasonYear") or (media.get("startDate") or {}).get("year"),
                     "total": media.get(unit),
                 }
             )
@@ -443,7 +472,9 @@ def _overview(records: list[dict], group_by: str, unit: str) -> str:
                 "omitted": more if more > 0 else None,
             }
         )
-    return _json_result(type="library_overview", group_by=group_by, summary=summary, groups=result_groups)
+    return _json_result(
+        type="library_overview", group_by=group_by, summary=summary, groups=result_groups
+    )
 
 
 # --- entry / episode rendering ------------------------------------------------
@@ -576,7 +607,9 @@ def _compact_details(data: dict, media_id: int, kind: str) -> str:
     if facts:
         lines.append("Facts: " + ", ".join(facts))
 
-    studios = [s.get("name") for s in ((data.get("studios") or {}).get("nodes") or []) if s.get("name")]
+    studios = [
+        s.get("name") for s in ((data.get("studios") or {}).get("nodes") or []) if s.get("name")
+    ]
     if studios:
         lines.append("Studios: " + ", ".join(studios))
     trailer = data.get("trailer") or {}
@@ -607,7 +640,7 @@ def _compact_details(data: dict, media_id: int, kind: str) -> str:
             lines.append(f"  … +{len(relations) - _RELATION_LIMIT} more")
 
     recs = []
-    for edge in ((data.get("recommendations") or {}).get("edges") or []):
+    for edge in (data.get("recommendations") or {}).get("edges") or []:
         rec = (edge.get("node") or {}).get("mediaRecommendation") or {}
         if rec.get("id"):
             score_part = f", score {rec['meanScore']}" if rec.get("meanScore") else ""
@@ -638,7 +671,9 @@ def _compact_status(data: dict) -> str:
         f"AniList user: {viewer.get('name') or '(not logged in)'}",
         "Adult content: "
         + ("enabled" if anilist_settings.get("enableAdultContent") else "disabled (server setting)")
-        + (", profile shows it" if (viewer.get("options") or {}).get("displayAdultContent") else ""),
+        + (
+            ", profile shows it" if (viewer.get("options") or {}).get("displayAdultContent") else ""
+        ),
         f"Server ready: {bool(data.get('serverReady'))}, offline mode: {bool(data.get('isOffline'))}, "
         f"password-protected: {bool(data.get('serverHasPassword'))}",
     ]
@@ -685,7 +720,9 @@ def _compact_schedule(data: list) -> str:
     past = len(items) - len(upcoming)
     if not upcoming:
         return f"(no upcoming episodes on the schedule; {past} already-aired item(s))"
-    lines = [f"{len(upcoming)} upcoming episode(s)" + (f" ({past} past not listed):" if past else ":")]
+    lines = [
+        f"{len(upcoming)} upcoming episode(s)" + (f" ({past} past not listed):" if past else ":")
+    ]
     for item in upcoming:
         flags = []
         if item.get("isMovie"):
@@ -771,7 +808,7 @@ def _compact_search_results(result: Any, kind: str) -> Optional[str]:
             entry["isAdult"] = True
         compact.append(entry)
     if not compact:
-        return "(no results — try different filters, another spelling, or adult=\"include\")"
+        return '(no results — try different filters, another spelling, or adult="include")'
     return _render(compact)
 
 
@@ -813,8 +850,16 @@ MangaFormat = Literal["MANGA", "NOVEL", "ONE_SHOT"]
 # Union the kind-specific formats for the one browse tool's schema; `_build_search_body`
 # validates the value against the right vocabulary for the chosen kind.
 AnyFormat = Literal[
-    "TV", "TV_SHORT", "MOVIE", "SPECIAL", "OVA", "ONA", "MUSIC",
-    "MANGA", "NOVEL", "ONE_SHOT",
+    "TV",
+    "TV_SHORT",
+    "MOVIE",
+    "SPECIAL",
+    "OVA",
+    "ONA",
+    "MUSIC",
+    "MANGA",
+    "NOVEL",
+    "ONE_SHOT",
 ]
 MediaStatus = Literal["FINISHED", "RELEASING", "NOT_YET_RELEASED", "CANCELLED", "HIATUS"]
 MediaSort = Literal[
@@ -887,7 +932,10 @@ async def seanime_library(
         return fail('Unknown kind; use "anime" or "manga".', _data(kind=kind))
     group_by = (group_by or "none").strip().lower()
     if group_by not in ("none", "status", "genre", "format", "year", "score"):
-        return fail("Unknown group_by; use one of: none, status, genre, format, year, score.", _data(group_by=group_by))
+        return fail(
+            "Unknown group_by; use one of: none, status, genre, format, year, score.",
+            _data(group_by=group_by),
+        )
     path, unit = _COLLECTION_PATHS[kind]
     result = await _call("GET", path)
     if _is_error(result):
@@ -896,7 +944,9 @@ async def seanime_library(
         return _tool_result("Seanime library.", _render(result))
     if group_by == "none":
         return _tool_result("Seanime library.", _compact_collection(result, unit))
-    return _tool_result("Seanime library overview.", _overview(_entry_records(result, unit), group_by, unit))
+    return _tool_result(
+        "Seanime library overview.", _overview(_entry_records(result, unit), group_by, unit)
+    )
 
 
 # --- tools: one title, the full picture ------------------------------------------
@@ -993,7 +1043,10 @@ async def seanime_episode_collection(
         lines += [_compact_episode_line(ep) for ep in episodes]
         if result.get("hasMappingError"):
             lines.append("(warning: metadata mapping error — episode data may be incomplete)")
-        return ok("Seanime episode collection.", _data(media_id=media_id, text=_clip("\n".join(lines)), episodes=episodes))
+        return ok(
+            "Seanime episode collection.",
+            _data(media_id=media_id, text=_clip("\n".join(lines)), episodes=episodes),
+        )
     return _tool_result("Seanime episode collection.", _render(result))
 
 
@@ -1041,7 +1094,11 @@ async def seanime_continuity_history() -> SeanimeOutput:
     if _is_error(result):
         return fail(result)
     text = _compact_continuity(result)
-    return ok("Seanime continuity history.", _data(text=text, raw=result)) if text else _tool_result("Seanime continuity history.", _render(result))
+    return (
+        ok("Seanime continuity history.", _data(text=text, raw=result))
+        if text
+        else _tool_result("Seanime continuity history.", _render(result))
+    )
 
 
 # --- tools: resolve a named title (the find workflow) ----------------------------
@@ -1078,9 +1135,7 @@ def _local_matches(data: dict, term_words: list[str], kind: str, unit: str) -> l
             score = list_data.get("score")
             score_part = f", score {score}" if score else ""
             cover, original_cover = _cover_delivery_urls(media)
-            cover_part = (
-                f", cover {cover}, original cover {original_cover}" if cover else ""
-            )
+            cover_part = f", cover {cover}, original cover {original_cover}" if cover else ""
             matches.append(
                 {
                     "kind": kind,
@@ -1171,7 +1226,10 @@ async def seanime_find(
         lines = [f"{len(matches)} matches in the user's library for {title!r}:"]
         lines += [str(m["line"]) for m in matches]
         lines.append("Call seanime_media_info(media_id, kind) for the one the user means.")
-        return ok("Found multiple title matches in the user's library.", _data(text=_clip("\n".join(lines)), matches=matches))
+        return ok(
+            "Found multiple title matches in the user's library.",
+            _data(text=_clip("\n".join(lines)), matches=matches),
+        )
 
     # Nothing local — fall back to the global AniList catalog. isAdult is
     # omitted on purpose: the user named this title, so an adult title must be
@@ -1224,7 +1282,10 @@ async def seanime_browse(
     ] = "anime",
     search: Annotated[
         str,
-        Field(default="", description="Optional keyword search term; leave empty for filter-only browsing."),
+        Field(
+            default="",
+            description="Optional keyword search term; leave empty for filter-only browsing.",
+        ),
     ] = "",
     page: Annotated[int, Field(default=1, ge=1, description="AniList result page number.")] = 1,
     per_page: Annotated[
@@ -1241,7 +1302,12 @@ async def seanime_browse(
     ] = None,
     year: Annotated[
         int | None,
-        Field(default=None, ge=1900, le=2100, description="Optional year: airing season (anime) or publication start (manga)."),
+        Field(
+            default=None,
+            ge=1900,
+            le=2100,
+            description="Optional year: airing season (anime) or publication start (manga).",
+        ),
     ] = None,
     format: Annotated[
         AnyFormat | None,
@@ -1290,16 +1356,26 @@ async def seanime_browse(
     if kind not in ("anime", "manga"):
         return fail('Unknown kind; use "anime" or "manga".', _data(kind=kind))
     body, error = _build_search_body(
-        kind=kind, search=search, page=page, per_page=per_page, genres=genres,
-        season=season if kind == "anime" else None, year=year,
-        media_format=format, status=status, sort=sort, adult=adult,
+        kind=kind,
+        search=search,
+        page=page,
+        per_page=per_page,
+        genres=genres,
+        season=season if kind == "anime" else None,
+        year=year,
+        media_format=format,
+        status=status,
+        sort=sort,
+        adult=adult,
     )
     if error:
         return fail(error)
     result = await _call("POST", _BROWSE_PATHS[kind], body)
     if _is_error(result):
         return fail(result)
-    return _tool_result(f"Seanime {kind} browse results.", _compact_search_results(result, kind) or _render(result))
+    return _tool_result(
+        f"Seanime {kind} browse results.", _compact_search_results(result, kind) or _render(result)
+    )
 
 
 @tool(

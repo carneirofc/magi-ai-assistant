@@ -85,8 +85,7 @@ class S3Store:
             import boto3  # noqa: PLC0415 — optional dependency, imported on demand.
         except ImportError as exc:  # pragma: no cover - exercised via the factory.
             raise StorageError(
-                "object storage needs boto3 — install the optional extra: "
-                "`uv sync --extra s3`"
+                "object storage needs boto3 — install the optional extra: `uv sync --extra s3`"
             ) from exc
         self._client_cached = boto3.client(
             "s3",
@@ -181,7 +180,9 @@ class S3Store:
         except Exception as exc:  # noqa: BLE001
             raise StorageError(f"presign failed for {key!r}: {exc}") from exc
 
-    def list(self, prefix: str, *, with_metadata: bool = True, max_keys: int = 100) -> list[ObjectInfo]:
+    def list(
+        self, prefix: str, *, with_metadata: bool = True, max_keys: int = 100
+    ) -> list[ObjectInfo]:
         """List objects under `prefix`. HEADs each for metadata when asked."""
         client = self._client()
         try:

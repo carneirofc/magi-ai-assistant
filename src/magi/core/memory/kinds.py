@@ -149,7 +149,11 @@ class LongTerm:
     def render(self, mem: ScopedMemory, query: Optional[str]) -> str:
         facts = mem.long_term_facts.texts()
         core = retrieved_or(
-            self.retriever, mem.user_id, query, self.retriever_key, self.top_k,
+            self.retriever,
+            mem.user_id,
+            query,
+            self.retriever_key,
+            self.top_k,
             lambda: self._whole(mem, facts),
         )
         # Surface the most-recent raw facts by *recency* alongside the curated sheet,
@@ -254,7 +258,11 @@ class Episodes:
         # (`bodies()` strips the note header + any legacy timestamp) rather than the
         # raw `tail()` file text, so only episode content reaches the context.
         return retrieved_or(
-            self.retriever, mem.user_id, query, self.retriever_key, self.top_k,
+            self.retriever,
+            mem.user_id,
+            query,
+            self.retriever_key,
+            self.top_k,
             lambda: "\n".join(f"- {b}" for b in mem.episodes.recent(self.tail_limit)),
         )
 
@@ -343,8 +351,7 @@ class Session:
             if pending:
                 prior = mem.session_summary.read()
                 payload = (
-                    f"Prior summary:\n{prior or '(none)'}\n\n"
-                    f"New turns:\n{render_turns(pending)}"
+                    f"Prior summary:\n{prior or '(none)'}\n\nNew turns:\n{render_turns(pending)}"
                 )
 
         def write_back(summary: str) -> None:

@@ -40,7 +40,9 @@ def _to_agno_media(images: Sequence[InboundImage]) -> dict[str, list[Image]]:
     built: list[Image] = []
     for img in images:
         if img.data is not None:
-            built.append(Image(content=img.data, mime_type=img.mime_type, format=_subtype(img.mime_type)))
+            built.append(
+                Image(content=img.data, mime_type=img.mime_type, format=_subtype(img.mime_type))
+            )
         elif img.url:
             built.append(Image(url=img.url, mime_type=img.mime_type))
     return {"images": built} if built else {}

@@ -88,7 +88,9 @@ def resolve_memory_settings(overrides: MemoryOverrides) -> EffectiveMemorySettin
     return EffectiveMemorySettings(
         memory_dir=os.path.expanduser(raw_dir),
         raw_memory_dir=raw_dir,
-        git_enabled=config.memory_git_enabled if overrides.git_enabled is None else overrides.git_enabled,
+        git_enabled=config.memory_git_enabled
+        if overrides.git_enabled is None
+        else overrides.git_enabled,
         git_author_name=overrides.git_author_name or config.memory_git_author_name,
         git_author_email=overrides.git_author_email or config.memory_git_author_email,
     )

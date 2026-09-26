@@ -37,6 +37,9 @@ def test_media_tool_contract_is_delivery_only_not_search():
     doc = send_media_from_url.entrypoint.__doc__ or ""
     text = f"{instructions}\n{doc}"
 
-    assert "Only use URLs supplied by the user or returned by a successful source-specific tool" in text
+    assert (
+        "Only use URLs supplied by the user or returned by a successful source-specific tool"
+        in text
+    )
     assert "never invent, guess, repair, or reuse a stale media URL" in text
     assert "Do not use this to search for media" in text

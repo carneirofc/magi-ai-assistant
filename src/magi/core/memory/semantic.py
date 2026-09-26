@@ -57,9 +57,7 @@ class SemanticIndex:
             if not client.collection_exists(self.collection):
                 client.create_collection(
                     collection_name=self.collection,
-                    vectors_config=models.VectorParams(
-                        size=dim, distance=models.Distance.COSINE
-                    ),
+                    vectors_config=models.VectorParams(size=dim, distance=models.Distance.COSINE),
                 )
                 log_info(f"semantic: created Qdrant collection '{self.collection}' (dim={dim})")
             self._client = client
@@ -142,7 +140,9 @@ class SemanticIndex:
                 points_selector=models.FilterSelector(
                     filter=models.Filter(
                         must=[
-                            models.FieldCondition(key="user_id", match=models.MatchValue(value=str(user_id))),
+                            models.FieldCondition(
+                                key="user_id", match=models.MatchValue(value=str(user_id))
+                            ),
                             models.FieldCondition(key="kind", match=models.MatchValue(value=kind)),
                         ]
                     )
@@ -166,7 +166,9 @@ class SemanticIndex:
 
             flt = models.Filter(
                 must=[
-                    models.FieldCondition(key="user_id", match=models.MatchValue(value=str(user_id))),
+                    models.FieldCondition(
+                        key="user_id", match=models.MatchValue(value=str(user_id))
+                    ),
                     models.FieldCondition(key="kind", match=models.MatchValue(value=kind)),
                 ]
             )

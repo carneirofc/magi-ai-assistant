@@ -70,7 +70,7 @@ class OperatorSettingsStore:
             return {}
         try:
             parsed = json.loads(self.path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             return {}
         return parsed if isinstance(parsed, dict) else {}
 
@@ -99,7 +99,9 @@ class OperatorSettingsStore:
         section = self._read_json().get("mcp")
         if not isinstance(section, list):
             return []
-        return [dict(e) for e in section if isinstance(e, dict) and str(e.get("name") or "").strip()]
+        return [
+            dict(e) for e in section if isinstance(e, dict) and str(e.get("name") or "").strip()
+        ]
 
     def version(self) -> str:
         """Optimistic-concurrency token over the raw file bytes (empty token when

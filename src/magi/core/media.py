@@ -50,14 +50,12 @@ class MediaOutbox:
 
 
 _OUTBOX: ContextVar[Optional[MediaOutbox]] = ContextVar("media_outbox", default=None)
-_ALLOWED_MEDIA_URLS: ContextVar[Optional[set[str]]] = ContextVar(
-    "allowed_media_urls", default=None
-)
+_ALLOWED_MEDIA_URLS: ContextVar[Optional[set[str]]] = ContextVar("allowed_media_urls", default=None)
 _HTTP_URL_RE = re.compile(r"https?://[^\s<>()\[\]{}\"']+", re.IGNORECASE)
 
 
 def _clean_url(url: str) -> str:
-    return (url or "").strip().rstrip(".,;:!?)\"]}")
+    return (url or "").strip().rstrip('.,;:!?)"]}')
 
 
 def extract_http_urls(text: str) -> set[str]:
@@ -65,9 +63,7 @@ def extract_http_urls(text: str) -> set[str]:
     return {_clean_url(m.group(0)) for m in _HTTP_URL_RE.finditer(text or "")}
 
 
-def open_allowed_media_urls(
-    user_text: str = "", extra_urls: Iterable[str] = ()
-) -> Token:
+def open_allowed_media_urls(user_text: str = "", extra_urls: Iterable[str] = ()) -> Token:
     """Start this run's allowlist for media URLs a tool may fetch.
 
     Tools may add source-provided URLs as they run. Direct user URLs are seeded

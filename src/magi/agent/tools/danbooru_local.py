@@ -174,8 +174,7 @@ class LocalDanbooru:
                 if (row.get("is_deleted") or "").strip().lower() in _TRUE:
                     return None
                 log_debug(
-                    f"danbooru local: wiki '{wanted}' found in "
-                    f"{time.perf_counter() - started:.2f}s"
+                    f"danbooru local: wiki '{wanted}' found in {time.perf_counter() - started:.2f}s"
                 )
                 return (row.get("body") or "").strip()
         log_debug(

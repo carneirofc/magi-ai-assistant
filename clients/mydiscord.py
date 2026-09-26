@@ -35,7 +35,7 @@ from magi.core.discord_context import (
 try:
     import discord
 
-except (ImportError, ModuleNotFoundError):
+except ImportError, ModuleNotFoundError:
     raise ImportError("`discord.py` not installed. Please install using `pip install discord.py`")
 
 
@@ -174,7 +174,9 @@ class DiscordClient:
             # Default keeps the conversation in the SAME chat (channel / current
             # thread / DM). A brand-new thread is only created in a TextChannel,
             # on explicit user request, and after a confirmation prompt.
-            target, session_id = await self._resolve_target(message, channel, message_text, message_user)
+            target, session_id = await self._resolve_target(
+                message, channel, message_text, message_user
+            )
             if target is None:
                 log_info(
                     f"received {message.content!r} but not in a supported channel "
@@ -205,9 +207,9 @@ class DiscordClient:
                 )
                 extra_context = self._build_additional_context(run_context)
                 if media_notes:
-                    extra_context += "\nMedia notes:\n" + "\n".join(
-                        f"- {note}" for note in media_notes
-                    ) + "\n"
+                    extra_context += (
+                        "\nMedia notes:\n" + "\n".join(f"- {note}" for note in media_notes) + "\n"
+                    )
                 if created_thread:
                     extra_context += (
                         "\nNote: a new thread was just opened for this user at their "
@@ -258,9 +260,7 @@ class DiscordClient:
             ctype = (att.content_type or "").split(";", 1)[0].strip().lower()
             if not ctype:
                 ctype = mimetypes.guess_type(att.filename or "")[0] or ""
-            log_info(
-                f"attachment: name={att.filename} type={ctype or '?'} size={att.size} bytes"
-            )
+            log_info(f"attachment: name={att.filename} type={ctype or '?'} size={att.size} bytes")
             if att.size and att.size > _MAX_INBOUND_BYTES:
                 notes.append(
                     f"Attachment '{att.filename}' ({att.size} bytes) is too large to process."
@@ -290,9 +290,7 @@ class DiscordClient:
                 videos.append(Video(content=data, format=subtype, mime_type=ctype))
                 notes.append(f"The user attached the video '{att.filename}'.")
             else:
-                files.append(
-                    File(content=data, mime_type=ctype or None, filename=att.filename)
-                )
+                files.append(File(content=data, mime_type=ctype or None, filename=att.filename))
                 notes.append(f"The user attached the file '{att.filename}' ({ctype or '?'}).")
 
         images, notes = await self._extract_emoji(message, images, notes)
@@ -402,7 +400,9 @@ class DiscordClient:
             lines.append(f"Discord guild id: {context.guild_id}")
         if context.guild_name:
             lines.append(f"Discord guild name: {context.guild_name}")
-        lines.append("Never invent Discord ids or placeholder channel names; use only the exact ids above.")
+        lines.append(
+            "Never invent Discord ids or placeholder channel names; use only the exact ids above."
+        )
         return dedent("\n".join(lines))
 
     @asynccontextmanager
@@ -520,7 +520,9 @@ class DiscordClient:
         # off into a new thread on explicit request + confirmation.
         if isinstance(channel, discord.TextChannel):
             if _wants_new_thread(message_text):
-                log_info(f"new-thread request detected from {message_user}; asking for confirmation")
+                log_info(
+                    f"new-thread request detected from {message_user}; asking for confirmation"
+                )
                 view = RequiresConfirmationView()
                 await channel.send(
                     f"{message_user}, start a **new thread** for this conversation? "
@@ -597,9 +599,7 @@ class DiscordClient:
                     continue
                 if len(data) > _MAX_UPLOAD_BYTES:
                     if getattr(item, "url", None):
-                        fallback_lines.append(
-                            f"{name} is too large to upload — link: {item.url}"
-                        )
+                        fallback_lines.append(f"{name} is too large to upload — link: {item.url}")
                     else:
                         fallback_lines.append(
                             f"{name} ({len(data)} bytes) is too large to upload to Discord."
@@ -613,7 +613,9 @@ class DiscordClient:
             try:
                 await target.send(files=batch)
                 sent_any = True
-                log_info(f"uploaded {len(batch)} attachment(s) to target id={getattr(target, 'id', '?')}")
+                log_info(
+                    f"uploaded {len(batch)} attachment(s) to target id={getattr(target, 'id', '?')}"
+                )
             except discord.HTTPException as exc:
                 log_warning(f"attachment upload failed: {exc}")
                 fallback_lines.append("Some attachments failed to upload.")

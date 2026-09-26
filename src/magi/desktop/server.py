@@ -140,7 +140,7 @@ class FrontendServer:
 
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-            except (ProcessLookupError, PermissionError):
+            except ProcessLookupError, PermissionError:
                 proc.terminate()
 
         try:

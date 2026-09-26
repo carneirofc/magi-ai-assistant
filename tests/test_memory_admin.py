@@ -61,7 +61,9 @@ def test_put_episode_file_reindexes_episode_slice(tmp_path):
     retriever = _FakeRetriever()
     admin = MemoryAdmin(store, retriever=retriever)
 
-    result = admin.put_raw_file("episodes", "# Episodic memory\n\n- shipped feature", None, user_id="u1")
+    result = admin.put_raw_file(
+        "episodes", "# Episodic memory\n\n- shipped feature", None, user_id="u1"
+    )
 
     assert "shipped feature" in result.content
     assert retriever.reset_calls == [("u1", "episode")]
@@ -123,7 +125,9 @@ async def test_curate_session_reconciles_profile_changes(tmp_path):
         seen["user_message"] = inp.user_message
         from magi.core.memory import CurationResult, FactOp
 
-        return CurationResult(operations=(FactOp(op="add", text="prefers dark mode"),), episode=None)
+        return CurationResult(
+            operations=(FactOp(op="add", text="prefers dark mode"),), episode=None
+        )
 
     store = FileMemoryStore(tmp_path)
     mem = store.scoped("u1", "s1")

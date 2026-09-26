@@ -210,9 +210,7 @@ class Config:
     # identity prompts do not belong in the allowlist — tone bends, identity
     # doesn't. ---
     evolution_enabled: bool = False
-    evolution_proposable: list[str] = field(
-        default_factory=lambda: ["curation.md", "greet.md"]
-    )
+    evolution_proposable: list[str] = field(default_factory=lambda: ["curation.md", "greet.md"])
     evolution_queue_max: int = 20
 
     # --- Team behavior / robustness ---
@@ -513,7 +511,22 @@ class Config:
         backend urls, model ids, context windows, paths — in one place.
         """
         # Secrets that must never hit the log verbatim.
-        masked = {"litellm_api_key", "llamacpp_api_key", "openai_api_key", "DISCORD_BOT_TOKEN", "qdrant_api_key", "api_auth_token", "admin_auth_token", "seanime_token", "s3_access_key_id", "s3_secret_access_key", "admin_password", "session_secret", "tts_api_key", "stt_api_key"}
+        masked = {
+            "litellm_api_key",
+            "llamacpp_api_key",
+            "openai_api_key",
+            "DISCORD_BOT_TOKEN",
+            "qdrant_api_key",
+            "api_auth_token",
+            "admin_auth_token",
+            "seanime_token",
+            "s3_access_key_id",
+            "s3_secret_access_key",
+            "admin_password",
+            "session_secret",
+            "tts_api_key",
+            "stt_api_key",
+        }
         # Long prose: log the length, not the body.
         prose = {"system_prompt", "persona_seed"}
 

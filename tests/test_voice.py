@@ -105,7 +105,10 @@ async def test_synthesize_posts_the_speech_request_and_returns_audio(monkeypatch
     assert (audio, mime) == (b"mp3-bytes", "audio/mpeg")
     assert calls[0]["url"] == "http://tts:1/v1/audio/speech"
     assert calls[0]["json"] == {
-        "model": "tts-1", "voice": "af_heart", "input": "hello there", "response_format": "mp3",
+        "model": "tts-1",
+        "voice": "af_heart",
+        "input": "hello there",
+        "response_format": "mp3",
     }
 
 
@@ -170,7 +173,10 @@ async def test_transcribe_posts_multipart_and_reads_verbose_json(monkeypatch):
 async def test_transcribe_falls_back_to_plain_json_once(monkeypatch):
     calls = _install(
         monkeypatch,
-        [_FakeResponse(status_code=422, content=b"no verbose"), _FakeResponse(json_body={"text": "ok"})],
+        [
+            _FakeResponse(status_code=422, content=b"no verbose"),
+            _FakeResponse(json_body={"text": "ok"}),
+        ],
     )
 
     result = await _stt_service().transcribe(b"webm")

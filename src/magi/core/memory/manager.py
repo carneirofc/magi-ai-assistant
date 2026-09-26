@@ -102,13 +102,17 @@ class MemoryManager:
         # The scoped kinds. Each owns its IO + render + write + (if foldable) fold
         # policy; this manager orchestrates them and handles the global persona.
         self.long_term = LongTerm(
-            retriever, semantic_top_k, max(0, long_term_recent_raw),
+            retriever,
+            semantic_top_k,
+            max(0, long_term_recent_raw),
             fact_max_chars=long_term_fact_max_chars,
             facts_max=long_term_facts_max,
         )
         self.episodes = Episodes(retriever, semantic_top_k, short_term_max)
         self.session = Session(
-            short_term_max, summarize_session_fn, max(1, summarize_every),
+            short_term_max,
+            summarize_session_fn,
+            max(1, summarize_every),
             turn_max_chars=short_term_turn_max_chars,
             pending_max=session_pending_max,
             summary_max_chars=session_summary_max_chars,
@@ -365,7 +369,9 @@ class MemoryManager:
                 metadata={"file": "long_term_facts.json", "user_id": mem.user_id},
             )
         except Exception as exc:  # noqa: BLE001 — archival must never break a chat.
-            log_warning(f"memory: fact snapshot failed for {mem.user_id}: {type(exc).__name__}: {exc}")
+            log_warning(
+                f"memory: fact snapshot failed for {mem.user_id}: {type(exc).__name__}: {exc}"
+            )
 
     # --- deliberate writes (the model calls these via tools) ----------------
     def remember(self, fact: str) -> str:
@@ -470,9 +476,7 @@ class MemoryManager:
         budget = config.lead_num_ctx
         ratio = tokens / budget if budget else 0.0
         breakdown = ", ".join(f"{k}~{_est_tokens(v)}t" for k, v in parts.items())
-        log_info(
-            f"memory: context ~{tokens} tok ({ratio:.0%} of {budget}) [{breakdown}]"
-        )
+        log_info(f"memory: context ~{tokens} tok ({ratio:.0%} of {budget}) [{breakdown}]")
         if ratio >= config.ctx_warn_ratio:
             log_warning(
                 f"memory: context ~{tokens} tok is {ratio:.0%} of the {budget}-tok window "

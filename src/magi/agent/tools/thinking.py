@@ -29,7 +29,9 @@ class ThinkingSetData(BaseModel):
 
 
 class ThinkingStateData(BaseModel):
-    enabled: bool | None = Field(description="Current thinking state, or null when following the server default.")
+    enabled: bool | None = Field(
+        description="Current thinking state, or null when following the server default."
+    )
     source: str = Field(description="Where the setting came from.")
 
 

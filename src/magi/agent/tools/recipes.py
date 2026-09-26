@@ -87,7 +87,9 @@ def _build_one(recipe: dict):
             body = body[:_MAX_BODY_CHARS] + f"\n…[truncated {len(body) - _MAX_BODY_CHARS}+ chars]"
         return ok(
             f"{name}: {resp.status_code}.",
-            RecipeCallData(tool=name, url=str(resp.request.url), status=resp.status_code, body=body),
+            RecipeCallData(
+                tool=name, url=str(resp.request.url), status=resp.status_code, body=body
+            ),
         )
 
     return recipe_tool

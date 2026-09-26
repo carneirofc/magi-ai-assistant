@@ -57,8 +57,9 @@ def test_exists(tmp_path):
 
 def test_list_is_prefix_scoped_and_skips_sidecars(tmp_path):
     store = _store(tmp_path)
-    store.put_bytes("users/u1/artifacts/one", b"a", content_type="image/png",
-                    metadata={"filename": "one.png"})
+    store.put_bytes(
+        "users/u1/artifacts/one", b"a", content_type="image/png", metadata={"filename": "one.png"}
+    )
     store.put_bytes("users/u1/artifacts/two", b"bb", content_type="text/plain")
     store.put_bytes("users/other/artifacts/three", b"ccc")
 

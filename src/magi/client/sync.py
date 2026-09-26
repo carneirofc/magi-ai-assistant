@@ -50,9 +50,7 @@ class SyncClient:
     def __init__(self, client: MagiClient) -> None:
         self._client = client
         self._loop = asyncio.new_event_loop()
-        self._thread = threading.Thread(
-            target=self._run_loop, name="magi-client-loop", daemon=True
-        )
+        self._thread = threading.Thread(target=self._run_loop, name="magi-client-loop", daemon=True)
         self._thread.start()
         self._run(client.aopen())
 

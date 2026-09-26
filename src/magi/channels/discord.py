@@ -20,7 +20,7 @@ from magi.core.prompts import load_prompt
 
 try:
     import discord
-except (ImportError, ModuleNotFoundError):
+except ImportError, ModuleNotFoundError:
     raise ImportError("`discord.py` not installed. Please install using `pip install discord.py`")
 
 

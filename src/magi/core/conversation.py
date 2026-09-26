@@ -42,9 +42,7 @@ class Runner(Protocol):
     """The slice of an agno `Agent`/`Team` this service drives: one run, awaited
     whole or consumed as an event stream (`stream=True` rides through kwargs)."""
 
-    def arun(
-        self, *, input: str, user_id: str, session_id: str, **kwargs: Any
-    ) -> Any: ...
+    def arun(self, *, input: str, user_id: str, session_id: str, **kwargs: Any) -> Any: ...
 
 
 # The pre-reply mood pass (magi/agent/mood): assembled run input -> one name from
@@ -52,6 +50,7 @@ class Runner(Protocol):
 # stays model-free; contractually it never raises and never returns free text —
 # the service still guards, because a broken pass must not break a turn.
 MoodFn = Callable[[str], Awaitable[str]]
+
 
 def _inbound_media_urls(media: dict[str, Any]) -> list[str]:
     """The http(s) URLs of inbound media passed by reference (not inline bytes).
@@ -308,12 +307,12 @@ class ConversationService:
             block = clamp(block, budget, "knowledge section")
         # Surface the knowledge contribution alongside the memory layer's own
         # context-size log (magi/core/memory), so the per-turn accounting is complete.
-        log_info(f"conversation: knowledge context ~{_est_tokens_from_chars(len(block))} tok ({len(hits)} hit(s))")
+        log_info(
+            f"conversation: knowledge context ~{_est_tokens_from_chars(len(block))} tok ({len(hits)} hit(s))"
+        )
         return block
 
-    def _prepare_input(
-        self, user_id: str, session_id: str, text: str, extra_context: str
-    ) -> str:
+    def _prepare_input(self, user_id: str, session_id: str, text: str, extra_context: str) -> str:
         """Scope memory, record the inbound turn, and build this run's input.
 
         The context rides inside the run's input, never on the shared runner:
@@ -412,8 +411,7 @@ class ConversationService:
             outbox = close_media_outbox(outbox_token)
             close_allowed_media_urls(allowed_urls_token)
         log_info(
-            f"conversation: status={response.status}, "
-            f"content_len={len(response.content or '')}"
+            f"conversation: status={response.status}, content_len={len(response.content or '')}"
         )
 
         if response.status == "ERROR":
@@ -491,9 +489,7 @@ class ConversationService:
             self.channel_guidance,
         ]
         context = "\n\n".join(p for p in parts if p and p.strip())
-        run_input = (
-            f"<context>\n{context}\n</context>\n\n{instruction}" if context else instruction
-        )
+        run_input = f"<context>\n{context}\n</context>\n\n{instruction}" if context else instruction
         async for item in self._stream_run(
             run_input,
             user_id=user_id,
@@ -619,8 +615,6 @@ class ConversationService:
         """
         on = self.knowledge is not None and self.knowledge_top_k > 0
         est_max = (
-            _est_tokens_from_chars(self.knowledge_top_k * config.knowledge_chunk_chars)
-            if on
-            else 0
+            _est_tokens_from_chars(self.knowledge_top_k * config.knowledge_chunk_chars) if on else 0
         )
         return {"auto_inject": on, "top_k": self.knowledge_top_k, "est_max_tokens": est_max}
