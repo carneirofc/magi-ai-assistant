@@ -33,12 +33,13 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
 from agno.utils.log import log_info, log_warning
 
 from magi.core.config import config
 from magi.core.memory.adapters import emit_write
+from magi.core.types import parse_json_object
 
 ProposalKind = Literal["prompt", "tool"]
 ProposalStatus = Literal["pending", "approved", "rejected"]
@@ -81,12 +82,9 @@ def validate_recipe(text: str) -> dict:
     """Parse + validate an HTTP tool recipe. Declarative on purpose: capability
     growth without arbitrary code execution — a recipe is data the loader
     (magi/agent/tools/recipes.py) turns into a plain HTTP tool."""
-    try:
-        recipe = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise ProposalError(f"recipe is not valid JSON: {exc}") from exc
-    if not isinstance(recipe, dict):
-        raise ProposalError("recipe must be a JSON object")
+    recipe = parse_json_object(text)
+    if recipe is None:
+        raise ProposalError("recipe must be a valid JSON object")
     for key in _RECIPE_REQUIRED:
         if not str(recipe.get(key) or "").strip():
             raise ProposalError(f"recipe needs a non-empty {key!r}")
@@ -106,9 +104,9 @@ class EvolutionStore:
         self,
         root: Path,
         *,
-        proposable: Optional[list[str]] = None,
-        queue_max: Optional[int] = None,
-    ):
+        proposable: list[str] | None = None,
+        queue_max: int | None = None,
+    ) -> None:
         self.root = Path(root)
         self.proposals_dir = self.root / "evolution" / "proposals"
         self.prompts_runtime = self.root / "prompts-runtime"
@@ -170,7 +168,7 @@ class EvolutionStore:
         return proposal
 
     # --- reads ---------------------------------------------------------------
-    def list(self, status: Optional[str] = None) -> list[Proposal]:
+    def list(self, status: str | None = None) -> list[Proposal]:
         """All proposals, newest first (optionally filtered by status)."""
         if not self.proposals_dir.is_dir():
             return []
@@ -182,12 +180,12 @@ class EvolutionStore:
         out.sort(key=lambda p: p.created, reverse=True)
         return out
 
-    def get(self, proposal_id: str) -> Optional[Proposal]:
+    def get(self, proposal_id: str) -> Proposal | None:
         path = self.proposals_dir / f"{proposal_id}.json"
         return self._read(path) if path.is_file() else None
 
     # --- decide --------------------------------------------------------------
-    def decide(self, proposal_id: str, approve: bool) -> Optional[Proposal]:
+    def decide(self, proposal_id: str, approve: bool) -> Proposal | None:
         """Approve (apply) or reject one pending proposal. Returns the decided
         proposal, or None for an unknown id. Deciding a non-pending proposal
         raises — decisions are one-shot."""
@@ -237,16 +235,18 @@ class EvolutionStore:
         path.write_text(proposal.to_json() + "\n", encoding="utf-8")
         emit_write(path)
 
-    def _read(self, path: Path) -> Optional[Proposal]:
+    def _read(self, path: Path) -> Proposal | None:
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = parse_json_object(path.read_bytes())
+            if data is None:
+                raise ValueError("not a JSON object")
             return Proposal(**data)
         except Exception as exc:  # noqa: BLE001 — one corrupt file must not hide the queue.
             log_warning(f"evolution: unreadable proposal {path.name}: {type(exc).__name__}: {exc}")
             return None
 
 
-def build_evolution_store(root: Path) -> Optional[EvolutionStore]:
+def build_evolution_store(root: Path) -> EvolutionStore | None:
     """The store for this deployment, or None when evolution is off."""
     if not config.evolution_enabled:
         return None

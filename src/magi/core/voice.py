@@ -20,10 +20,12 @@ local and either up or not.
 """
 
 from dataclasses import dataclass
-from typing import Any, Optional
 
 import httpx
 from agno.utils.log import log_warning
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+from magi.core.types import JsonValue
 
 
 class VoiceUnavailable(RuntimeError):
@@ -45,14 +47,24 @@ _FORMAT_MIME = {
 }
 
 
+class _SttResponse(BaseModel):
+    """The whisper-compatible sidecar's transcription body (verbose_json or json)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    text: str
+    language: str | None = None
+    duration: float | None = None
+
+
 @dataclass(frozen=True)
 class Transcription:
     """What STT heard. `language`/`duration` ride along when the sidecar
     reports them (verbose_json); plain `json` servers yield text only."""
 
     text: str
-    language: Optional[str] = None
-    duration: Optional[float] = None
+    language: str | None = None
+    duration: float | None = None
 
 
 class VoiceService:
@@ -63,16 +75,16 @@ class VoiceService:
     def __init__(
         self,
         *,
-        tts_base_url: Optional[str] = None,
-        tts_api_key: Optional[str] = None,
+        tts_base_url: str | None = None,
+        tts_api_key: str | None = None,
         tts_model: str = "tts-1",
         tts_voice: str = "af_heart",
         tts_format: str = "mp3",
-        tts_mood_styles: Optional[dict[str, dict[str, Any]]] = None,
-        stt_base_url: Optional[str] = None,
-        stt_api_key: Optional[str] = None,
+        tts_mood_styles: dict[str, dict[str, JsonValue]] | None = None,
+        stt_base_url: str | None = None,
+        stt_api_key: str | None = None,
         stt_model: str = "whisper-1",
-        stt_language: Optional[str] = None,
+        stt_language: str | None = None,
         timeout: float = 60.0,
     ) -> None:
         self._tts_base_url = tts_base_url.rstrip("/") if tts_base_url else None
@@ -96,10 +108,10 @@ class VoiceService:
         return self._stt_base_url is not None
 
     @staticmethod
-    def _headers(api_key: Optional[str]) -> dict[str, str]:
+    def _headers(api_key: str | None) -> dict[str, str]:
         return {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
-    async def synthesize(self, text: str, mood: Optional[str] = None) -> tuple[bytes, str]:
+    async def synthesize(self, text: str, mood: str | None = None) -> tuple[bytes, str]:
         """Render `text` to audio bytes; returns (audio, mime).
 
         `mood` picks the style override from `tts_mood_styles` — its keys are
@@ -110,7 +122,7 @@ class VoiceService:
         if self._tts_base_url is None:
             raise VoiceUnavailable("tts is not enabled in this deployment")
 
-        payload: dict[str, Any] = {
+        payload: dict[str, JsonValue] = {
             "model": self._tts_model,
             "voice": self._tts_voice,
             "input": text,
@@ -143,7 +155,7 @@ class VoiceService:
         *,
         filename: str = "audio.webm",
         mime: str = "audio/webm",
-        language: Optional[str] = None,
+        language: str | None = None,
     ) -> Transcription:
         """Transcribe recorded audio to text.
 
@@ -155,7 +167,7 @@ class VoiceService:
             raise VoiceUnavailable("stt is not enabled in this deployment")
 
         lang = language or self._stt_language
-        form: dict[str, Any] = {"model": self._stt_model, "response_format": "verbose_json"}
+        form: dict[str, str] = {"model": self._stt_model, "response_format": "verbose_json"}
         if lang:
             form["language"] = lang
 
@@ -171,21 +183,19 @@ class VoiceService:
             raise VoiceUpstreamError(f"stt sidecar answered {resp.status_code}: {resp.text[:200]}")
 
         try:
-            body = resp.json()
-        except ValueError as exc:
-            raise VoiceUpstreamError(f"stt sidecar returned non-JSON: {resp.text[:200]}") from exc
-        text = body.get("text")
-        if not isinstance(text, str):
-            raise VoiceUpstreamError("stt sidecar returned no text field")
-        duration = body.get("duration")
+            body = _SttResponse.model_validate_json(resp.text)
+        except ValidationError as exc:
+            raise VoiceUpstreamError(
+                f"stt sidecar returned no text field: {resp.text[:200]}"
+            ) from exc
         return Transcription(
-            text=text.strip(),
-            language=body.get("language") or None,
-            duration=float(duration) if isinstance(duration, (int, float)) else None,
+            text=body.text.strip(),
+            language=body.language or None,
+            duration=body.duration,
         )
 
     async def _post_transcription(
-        self, data: bytes, filename: str, mime: str, form: dict[str, Any]
+        self, data: bytes, filename: str, mime: str, form: dict[str, str]
     ) -> httpx.Response:
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
@@ -199,7 +209,7 @@ class VoiceService:
             raise VoiceUnavailable(f"stt sidecar unreachable: {exc}") from exc
 
 
-def build_voice_service() -> Optional[VoiceService]:
+def build_voice_service() -> VoiceService | None:
     """Composition helper: the `VoiceService` this deployment configured, or
     None when both sides are off (the API then 503s /v1/tts and /v1/stt)."""
     from magi.core.config import config

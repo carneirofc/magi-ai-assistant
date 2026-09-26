@@ -28,6 +28,8 @@ from pathlib import Path
 
 from agno.utils.log import log_warning
 
+from magi.core.types import parse_json_array
+
 
 def slug(value: object) -> str:
     """Filesystem-safe token for a user/session id (ids are ints or strings)."""
@@ -118,7 +120,7 @@ class BulletLog:
 
     def __init__(
         self, path: Path, header: str, note_type: str = "note", tags: list[str] | None = None
-    ):
+    ) -> None:
         self.path = Path(path)
         self.header = header
         self.note_type = note_type
@@ -224,7 +226,7 @@ class Blob:
 
     def __init__(
         self, path: Path, header: str, note_type: str = "note", tags: list[str] | None = None
-    ):
+    ) -> None:
         self.path = Path(path)
         self.header = header
         self.note_type = note_type
@@ -249,15 +251,17 @@ class Blob:
 class JsonWindow:
     """A JSON list of turn dicts. Two writers: a capped window and a buffer."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path) -> None:
         self.path = Path(path)
 
     def read(self) -> list[dict]:
         if not self.path.exists():
             return []
         try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as exc:
+            data = parse_json_array(self.path.read_bytes())
+            if data is None:
+                raise ValueError("not a JSON list")
+        except (ValueError, OSError) as exc:
             # A corrupt/unreadable window must not break a chat — but silently
             # dropping the whole turn history would hide real data loss, so warn.
             log_warning(
@@ -265,7 +269,7 @@ class JsonWindow:
                 f"({type(exc).__name__}: {exc})"
             )
             return []
-        return data if isinstance(data, list) else []
+        return [item for item in data if isinstance(item, dict)]
 
     def count(self) -> int:
         return len(self.read())
@@ -312,15 +316,17 @@ class JsonFacts:
     fact across turns. Order is insertion order (oldest first).
     """
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path) -> None:
         self.path = Path(path)
 
     def read(self) -> list[dict]:
         if not self.path.exists():
             return []
         try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as exc:
+            data = parse_json_array(self.path.read_bytes())
+            if data is None:
+                raise ValueError("not a JSON list")
+        except (ValueError, OSError) as exc:
             # A corrupt/unreadable fact sheet must not break a chat — but silently
             # dropping the whole profile would hide real data loss, so warn.
             log_warning(
@@ -328,7 +334,7 @@ class JsonFacts:
                 f"({type(exc).__name__}: {exc})"
             )
             return []
-        return data if isinstance(data, list) else []
+        return [item for item in data if isinstance(item, dict)]
 
     def version(self) -> str:
         """A content version token for optimistic concurrency — a sha256 of the raw

@@ -7,6 +7,7 @@ tags with post counts, error lines instead of raises, and HTML-stripped
 Civitai notes.
 """
 
+import json
 import time
 
 import httpx
@@ -29,8 +30,9 @@ class _FakeResponse:
         self.status_code = status_code
         self.headers = headers or {}
 
-    def json(self):
-        return self._json
+    @property
+    def content(self):
+        return json.dumps(self._json).encode()
 
     def raise_for_status(self):
         if self.status_code >= 400:

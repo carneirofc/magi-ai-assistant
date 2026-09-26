@@ -55,7 +55,7 @@ class ChatWindow:
         self._root = root
         self._client = client
         # UI-thread inbox: worker threads push (kind, payload) here; _pump drains it.
-        self._events: "queue.Queue[tuple[str, str]]" = queue.Queue()
+        self._events: queue.Queue[tuple[str, str]] = queue.Queue()
 
         root.title(f"magi — {client.user_id}/{client.session_id}")
         self._transcript = scrolledtext.ScrolledText(

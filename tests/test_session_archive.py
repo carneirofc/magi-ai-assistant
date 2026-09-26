@@ -211,10 +211,7 @@ def test_count_tokens_is_none_off_llamacpp_and_counts_on_it(monkeypatch):
 
     class _Resp:
         status_code = 200
-
-        @staticmethod
-        def json():
-            return {"tokens": [1, 2, 3]}
+        content = b'{"tokens": [1, 2, 3]}'
 
     calls: list[str] = []
 

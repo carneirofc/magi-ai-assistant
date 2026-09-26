@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from magi.agent.tools.outputs import ToolOutput, fail, ok
 from magi.core.config import config
+from magi.core.types import JSON_OBJECT, JsonObject
 
 _TIMEOUT = 10.0
 
@@ -54,16 +55,16 @@ class RunningOllamaModelsData(BaseModel):
     models: list[RunningOllamaModelRow]
 
 
-def _get(path: str, timeout: float = _TIMEOUT) -> dict:
+def _get(path: str, timeout: float = _TIMEOUT) -> JsonObject:
     r = httpx.get(f"{config.ollama_host}{path}", timeout=timeout)
     r.raise_for_status()
-    return r.json()
+    return JSON_OBJECT.validate_json(r.content)
 
 
-def _post(path: str, body: dict, timeout: float = _TIMEOUT) -> dict:
+def _post(path: str, body: dict, timeout: float = _TIMEOUT) -> JsonObject:
     r = httpx.post(f"{config.ollama_host}{path}", json=body, timeout=timeout)
     r.raise_for_status()
-    return r.json()
+    return JSON_OBJECT.validate_json(r.content)
 
 
 def _context_length(model_info: dict) -> int | None:

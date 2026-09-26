@@ -9,16 +9,19 @@ to know how a fact version is derived or how semantic slices are rebuilt.
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING
 
 from magi.core.items import ItemArchive
 from magi.core.memory.adapters import slug as _mem_slug
 from magi.core.memory.manager import MemoryManager
 from magi.core.memory.semantic import MemoryRetriever
 from magi.core.memory.store import FileMemoryStore, ScopedMemory
+from magi.core.types import parse_json_array
+
+if TYPE_CHECKING:
+    import git
 
 _USER_SCOPE_SID = "_admin"
 _LONG_TERM_KIND = "long_term"
@@ -106,9 +109,9 @@ class TriggerSnapshot:
 class RawFileTarget:
     path: Path
     is_json: bool
-    reindex_kind: Optional[str]
-    reindex_user_id: Optional[str]
-    reindex_session_id: Optional[str]
+    reindex_kind: str | None
+    reindex_user_id: str | None
+    reindex_session_id: str | None
 
 
 class MemoryAdmin:
@@ -118,8 +121,8 @@ class MemoryAdmin:
         self,
         memory: FileMemoryStore,
         *,
-        retriever: Optional[MemoryRetriever] = None,
-        archive: Optional[ItemArchive] = None,
+        retriever: MemoryRetriever | None = None,
+        archive: ItemArchive | None = None,
     ) -> None:
         self.memory = memory
         self.retriever = retriever
@@ -140,7 +143,7 @@ class MemoryAdmin:
             version=mem.long_term_facts.version(),
         )
 
-    def add_fact(self, user_id: str, text: str, expected_version: Optional[str]) -> FactsSnapshot:
+    def add_fact(self, user_id: str, text: str, expected_version: str | None) -> FactsSnapshot:
         mem = self._user_mem(user_id)
         self._check_fact_version(mem, expected_version)
         mem.long_term_facts.add(text.strip())
@@ -148,8 +151,8 @@ class MemoryAdmin:
         return self.facts_snapshot(user_id)
 
     def update_fact(
-        self, user_id: str, fact_id: str, text: str, expected_version: Optional[str]
-    ) -> Optional[FactsSnapshot]:
+        self, user_id: str, fact_id: str, text: str, expected_version: str | None
+    ) -> FactsSnapshot | None:
         mem = self._user_mem(user_id)
         self._check_fact_version(mem, expected_version)
         if not mem.long_term_facts.update(fact_id, text.strip()):
@@ -158,8 +161,8 @@ class MemoryAdmin:
         return self.facts_snapshot(user_id)
 
     def delete_fact(
-        self, user_id: str, fact_id: str, expected_version: Optional[str]
-    ) -> Optional[FactsSnapshot]:
+        self, user_id: str, fact_id: str, expected_version: str | None
+    ) -> FactsSnapshot | None:
         mem = self._user_mem(user_id)
         self._check_fact_version(mem, expected_version)
         if not mem.long_term_facts.remove(fact_id):
@@ -180,7 +183,7 @@ class MemoryAdmin:
         )
 
     async def summarize_session(
-        self, manager: Optional[MemoryManager], user_id: str, session_id: str
+        self, manager: MemoryManager | None, user_id: str, session_id: str
     ) -> TriggerSnapshot:
         mgr = self._require_manager(manager)
         if not mgr.session_summary_enabled:
@@ -200,7 +203,7 @@ class MemoryAdmin:
         )
 
     async def curate_session(
-        self, manager: Optional[MemoryManager], user_id: str, session_id: str
+        self, manager: MemoryManager | None, user_id: str, session_id: str
     ) -> TriggerSnapshot:
         mgr = self._require_manager(manager)
         if not mgr.curation_enabled:
@@ -222,7 +225,7 @@ class MemoryAdmin:
         )
 
     async def flush_session(
-        self, manager: Optional[MemoryManager], user_id: str, session_id: str
+        self, manager: MemoryManager | None, user_id: str, session_id: str
     ) -> TriggerSnapshot:
         mgr = self._require_manager(manager)
         mgr.set_scope(user_id, session_id)
@@ -238,7 +241,7 @@ class MemoryAdmin:
         )
 
     async def consolidate_facts(
-        self, manager: Optional[MemoryManager], user_id: str
+        self, manager: MemoryManager | None, user_id: str
     ) -> TriggerSnapshot:
         """Operator-triggered maintenance curation over the whole fact sheet
         (merge duplicates, drop contradictions) — see MemoryManager.consolidate_facts."""
@@ -262,7 +265,7 @@ class MemoryAdmin:
         )
 
     def recall_preview(
-        self, manager: Optional[MemoryManager], user_id: str, query: str
+        self, manager: MemoryManager | None, user_id: str, query: str
     ) -> dict[str, str]:
         """The per-section context bodies `build_context` would inject for
         `query` — the retrieval-quality debugging lens (ADR 0002 spirit: trust
@@ -277,8 +280,8 @@ class MemoryAdmin:
         self,
         kind: str,
         *,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
         limit: int = 20,
     ) -> list[dict]:
         """The git history of one raw memory file, newest first: `sha`
@@ -305,9 +308,9 @@ class MemoryAdmin:
         kind: str,
         sha: str,
         *,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-    ) -> Optional[str]:
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> str | None:
         """The file's content at commit `sha`, or None when unavailable (no
         repo, unknown sha, or the file didn't exist at that commit)."""
         target = self.raw_target(kind, user_id=user_id, session_id=session_id)
@@ -319,7 +322,7 @@ class MemoryAdmin:
         except Exception:  # noqa: BLE001 — an unknown sha is a 404, not a crash.
             return None
 
-    def _repo_and_rel(self, path: Path):
+    def _repo_and_rel(self, path: Path) -> tuple[git.Repo | None, str]:
         """The memory root's git repo and `path` relative to it, or (None, "")."""
         root = self.memory.root.resolve()
         if not (root / ".git").exists():
@@ -334,7 +337,7 @@ class MemoryAdmin:
             return None, ""
 
     def get_raw_file(
-        self, kind: str, *, user_id: Optional[str] = None, session_id: Optional[str] = None
+        self, kind: str, *, user_id: str | None = None, session_id: str | None = None
     ) -> RawFileSnapshot:
         target = self.raw_target(kind, user_id=user_id, session_id=session_id)
         content = target.path.read_text(encoding="utf-8") if target.path.exists() else ""
@@ -344,10 +347,10 @@ class MemoryAdmin:
         self,
         kind: str,
         content: str,
-        expected_version: Optional[str],
+        expected_version: str | None,
         *,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
     ) -> RawFileSnapshot:
         target = self.raw_target(kind, user_id=user_id, session_id=session_id)
         self._check_file_version(target.path, expected_version)
@@ -359,7 +362,7 @@ class MemoryAdmin:
         return RawFileSnapshot(kind=kind, content=content, version=self.file_version(target.path))
 
     def raw_target(
-        self, kind: str, *, user_id: Optional[str], session_id: Optional[str]
+        self, kind: str, *, user_id: str | None, session_id: str | None
     ) -> RawFileTarget:
         if kind == "persona":
             return RawFileTarget(self.memory.persona.path, False, None, None, None)
@@ -398,7 +401,7 @@ class MemoryAdmin:
         )
 
     @staticmethod
-    def _require_manager(manager: Optional[MemoryManager]) -> MemoryManager:
+    def _require_manager(manager: MemoryManager | None) -> MemoryManager:
         if manager is None:
             raise MemoryManagerRequiredError(
                 "memory triggers unavailable: no memory manager wired into this admin app"
@@ -416,22 +419,18 @@ class MemoryAdmin:
             for f in mem.long_term_facts.read()
         ]
 
-    def _check_fact_version(self, mem: ScopedMemory, expected: Optional[str]) -> None:
+    def _check_fact_version(self, mem: ScopedMemory, expected: str | None) -> None:
         if expected is not None and expected != mem.long_term_facts.version():
             raise StaleVersionError("stale version; refetch the profile")
 
-    def _check_file_version(self, path: Path, expected: Optional[str]) -> None:
+    def _check_file_version(self, path: Path, expected: str | None) -> None:
         if expected is not None and expected != self.file_version(path):
             raise StaleVersionError("stale version; refetch the file")
 
     @staticmethod
     def _validate_json_list(content: str) -> None:
-        try:
-            parsed = json.loads(content)
-        except json.JSONDecodeError as exc:
-            raise InvalidRawJsonError(f"invalid JSON: {exc}") from exc
-        if not isinstance(parsed, list):
-            raise InvalidRawJsonError("expected a JSON list of turns")
+        if parse_json_array(content) is None:
+            raise InvalidRawJsonError("expected a valid JSON list of turns")
 
     def _sync_long_term(self, mem: ScopedMemory) -> None:
         if self.retriever is not None:

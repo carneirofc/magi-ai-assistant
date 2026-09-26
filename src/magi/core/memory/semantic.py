@@ -14,8 +14,8 @@ a chat, so no exception from this module is allowed to escape.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import Optional, Protocol
+from datetime import UTC, datetime
+from typing import Protocol
 
 from agno.utils.log import log_info, log_warning
 
@@ -36,17 +36,17 @@ class MemoryRetriever(Protocol):
 class SemanticIndex:
     """Qdrant-backed retriever. All public methods are crash-proof by design."""
 
-    def __init__(self, collection: str = "chatbot_memory"):
+    def __init__(self, collection: str = "chatbot_memory") -> None:
         self.collection = collection
         self._client = None  # lazily built; None means "unavailable, no-op"
-        self._dim: Optional[int] = None
+        self._dim: int | None = None
 
     # --- embedding ----------------------------------------------------------
-    def _embed(self, text: str) -> Optional[list[float]]:
+    def _embed(self, text: str) -> list[float] | None:
         return embed_text(text)  # shared proxy embedder; None on any failure
 
     # --- qdrant client (lazy) ----------------------------------------------
-    def _ensure_client(self, dim: int):
+    def _ensure_client(self, dim: int) -> object | None:
         """Build the client + collection on first successful embed. Returns it or None."""
         if self._client is not None:
             return self._client
@@ -91,7 +91,7 @@ class SemanticIndex:
                             "user_id": str(user_id),
                             "kind": kind,
                             "text": text,
-                            "ts": datetime.now(timezone.utc).isoformat(),
+                            "ts": datetime.now(UTC).isoformat(),
                         },
                     )
                 ],
@@ -99,7 +99,7 @@ class SemanticIndex:
         except Exception as exc:  # noqa: BLE001
             log_warning(f"semantic: upsert failed ({type(exc).__name__}: {exc})")
 
-    def _connect_existing(self):
+    def _connect_existing(self) -> object | None:
         """A client bound to the collection *without* creating it — so `reset` works
         on a process that hasn't embedded yet (the admin service, or any cold start).
 
@@ -184,7 +184,7 @@ class SemanticIndex:
             return []
 
 
-def build_semantic_index() -> Optional[SemanticIndex]:
+def build_semantic_index() -> SemanticIndex | None:
     """Construct the index when enabled in config, else None (feature off)."""
     if not config.semantic_memory:
         return None

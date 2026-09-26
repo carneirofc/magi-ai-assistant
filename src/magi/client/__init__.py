@@ -33,7 +33,7 @@ entrypoints — pass config overrides straight through and it applies them via
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from magi.client.base import MagiClient
 from magi.client.embedded import EmbeddedClient
@@ -64,9 +64,9 @@ def embed(
     user_id: str,
     session_id: str = "default",
     *,
-    channel_guidance: Optional[str] = None,
-    db: "Optional[BaseDb]" = None,
-    member_builders: "Optional[Sequence[Callable[[Model], Agent]]]" = None,
+    channel_guidance: str | None = None,
+    db: BaseDb | None = None,
+    member_builders: Sequence[Callable[[Model], Agent]] | None = None,
     platform: str = "api",
     **config_overrides: object,
 ) -> EmbeddedClient:
@@ -115,7 +115,7 @@ def connect(
     user_id: str,
     session_id: str = "default",
     *,
-    auth_token: Optional[str] = None,
+    auth_token: str | None = None,
     timeout: float = 120.0,
 ) -> HttpClient:
     """Build a remote client for a running magi HTTP service (`python main.py api`).

@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from magi.agent.tools.outputs import ToolOutput, fail, ok
 from magi.core.config import config
+from magi.core.types import JSON_OBJECT, JsonObject
 
 _TIMEOUT = 10.0
 
@@ -50,10 +51,10 @@ def _headers() -> dict:
     return {"Authorization": f"Bearer {key}"} if key else {}
 
 
-def _get(path: str, timeout: float = _TIMEOUT) -> dict:
+def _get(path: str, timeout: float = _TIMEOUT) -> JsonObject:
     r = httpx.get(f"{config.litellm_base_url}{path}", headers=_headers(), timeout=timeout)
     r.raise_for_status()
-    return r.json()
+    return JSON_OBJECT.validate_json(r.content)
 
 
 @tool(

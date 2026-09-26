@@ -17,7 +17,7 @@ attach) — the bucket is a private archive, not a public file host.
 
 import asyncio
 from pathlib import Path
-from typing import Annotated, Final, Optional
+from typing import Annotated, Final
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -100,7 +100,7 @@ class ReadDocumentData(BaseModel):
     truncated: bool = Field(default=False, description="Whether the text was cut at max_chars.")
 
 
-def _filename(url: str, content_type: str, explicit: Optional[str]) -> str:
+def _filename(url: str, content_type: str, explicit: str | None) -> str:
     """A sensible filename: explicit > URL basename > a generic one."""
     if explicit:
         return explicit
@@ -116,7 +116,7 @@ def _filename(url: str, content_type: str, explicit: Optional[str]) -> str:
 def build_storage_tools(
     store: S3Store | LocalStore,
     memory: MemoryManager,
-    archive: Optional[ItemArchive] = None,
+    archive: ItemArchive | None = None,
 ) -> list:
     """Return the object-storage tool set bound to `store` + `memory` (injected).
 
@@ -156,11 +156,11 @@ def build_storage_tools(
             Field(min_length=8, description="Direct HTTP(S) URL of the file to archive."),
         ],
         filename: Annotated[
-            Optional[str],
+            str | None,
             Field(default=None, description="Optional display filename to store with the file."),
         ] = None,
         note: Annotated[
-            Optional[str],
+            str | None,
             Field(default=None, description="Optional short note describing what this file is."),
         ] = None,
     ) -> ToolOutput[StoredFileData]:
@@ -465,7 +465,7 @@ def build_storage_tools(
             return fail(f"No archived file found for reference {ref!r} (or it could not be read).")
 
         name = metadata.get("filename") or ref
-        text: Optional[str] = None
+        text: str | None = None
         if (ctype or "").lower() == "application/pdf" or name.lower().endswith(".pdf"):
             try:
                 import io

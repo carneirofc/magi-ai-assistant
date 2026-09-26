@@ -23,7 +23,6 @@ import sys
 
 from magi.core.config import configure
 
-
 # --- shared brain: the model + memory stack every chat channel serves ----------
 
 

@@ -28,6 +28,7 @@ import json
 from pathlib import Path
 
 from agno.utils.log import log_info
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from magi.core.config import config
 from magi.core.storage.s3 import ObjectInfo, StorageError, StoredObject
@@ -35,6 +36,15 @@ from magi.core.storage.s3 import ObjectInfo, StorageError, StoredObject
 # Sidecar suffix for a key's content-type + metadata. Kept distinct so listings
 # can skip the sidecars and never mistake one for an archived object.
 _META_SUFFIX = ".meta.json"
+
+
+class _Sidecar(BaseModel):
+    """A blob's `.meta.json` sidecar as written by `put`."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    content_type: str | None = None
+    metadata: dict[str, str] = {}
 
 
 class LocalStore:
@@ -45,7 +55,7 @@ class LocalStore:
     `asyncio.to_thread`, so this stays plain and testable.
     """
 
-    def __init__(self, root: Path | str, *, presign_expiry: int = 3600):
+    def __init__(self, root: Path | str, *, presign_expiry: int = 3600) -> None:
         self.root = Path(root).resolve()
         # Carried for parity with S3Store; file:// URLs don't actually expire.
         self.presign_expiry = presign_expiry
@@ -180,12 +190,10 @@ class LocalStore:
     def _read_sidecar(self, path: Path) -> tuple[str | None, dict[str, str]]:
         """Read a blob's `.meta.json` sidecar; tolerate a missing/corrupt one."""
         try:
-            raw = json.loads(self._meta_path(path).read_text(encoding="utf-8"))
-        except OSError, json.JSONDecodeError:
+            sidecar = _Sidecar.model_validate_json(self._meta_path(path).read_bytes())
+        except OSError, ValidationError:
             return None, {}
-        ctype = raw.get("content_type")
-        metadata = {str(k): str(v) for k, v in (raw.get("metadata") or {}).items()}
-        return ctype, metadata
+        return sidecar.content_type, sidecar.metadata
 
 
 def build_local_store_from_config() -> LocalStore:

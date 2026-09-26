@@ -22,17 +22,19 @@ server, never a boot failure (connect errors surface later through the API's
 lifespan hook + introspection, which already handle MCP toolkits generically).
 """
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING
 
 from agno.utils.log import log_info, log_warning
 
 from magi.core.config import config
 from magi.core.prompts import load_prompt
+from magi.core.types import JsonValue
 
 if TYPE_CHECKING:
     from agno.agent import Agent
     from agno.models.base import Model
     from agno.tools.mcp import MCPTools
+    from agno.tools.mcp.params import SSEClientParams, StreamableHTTPClientParams
 
 # Fields a spec may carry; anything else is ignored (forward compatibility).
 _DEFAULT_TIMEOUT_S = 30
@@ -62,7 +64,7 @@ def effective_mcp_specs() -> list[dict]:
     return [s for s in specs.values() if s.get("enabled", True)]
 
 
-def build_mcp_toolkit(spec: dict) -> "MCPTools":
+def build_mcp_toolkit(spec: dict) -> MCPTools:
     """One agno MCP toolkit from a spec dict. Raises on a malformed spec or a
     missing `mcp` extra — callers catch and skip (see `_guarded`)."""
     try:
@@ -76,11 +78,11 @@ def build_mcp_toolkit(spec: dict) -> "MCPTools":
     name = str(spec.get("name") or "").strip()
     transport = str(spec.get("transport") or "streamable-http")
     timeout = int(spec.get("timeout_seconds") or _DEFAULT_TIMEOUT_S)
-    headers: Optional[dict[str, Any]] = spec.get("headers") or None
+    headers: dict[str, str] | None = spec.get("headers") or None
     allow = [str(t) for t in spec.get("tool_allowlist") or []] or None
     show = [str(t) for t in spec.get("show_result_tools") or []]
 
-    common: dict[str, Any] = {
+    common: dict[str, JsonValue] = {
         "timeout_seconds": timeout,
         "include_tools": allow,
         "show_result_tools": show,
@@ -96,13 +98,15 @@ def build_mcp_toolkit(spec: dict) -> "MCPTools":
     if not url:
         raise ValueError(f"mcp server {name!r}: transport {transport!r} needs a 'url'")
     if transport == "sse":
-        params: Any = SSEClientParams(url=url, headers=headers)
+        params: SSEClientParams | StreamableHTTPClientParams = SSEClientParams(
+            url=url, headers=headers
+        )
     else:
         params = StreamableHTTPClientParams(url=url, headers=headers)
     return MCPTools(server_params=params, transport=transport, **common)
 
 
-def _guarded(spec: dict) -> Optional["MCPTools"]:
+def _guarded(spec: dict) -> MCPTools | None:
     name = spec.get("name", "?")
     try:
         return build_mcp_toolkit(spec)
@@ -134,7 +138,7 @@ def build_mcp_lead_toolkits() -> list:
     return toolkits
 
 
-def build_mcp_members(model: "Model") -> list["Agent"]:
+def build_mcp_members(model: Model) -> list[Agent]:
     """A generated specialist per enabled `attach: "member"` server. The
     member's name is `<name>-agent`; its role is the spec's `role` (or a
     generic MCP-member contract), so the lead can route to it like any

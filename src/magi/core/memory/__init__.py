@@ -13,7 +13,6 @@ Dependencies are built by these factories and injected — never constructed ins
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from agno.utils.log import log_info
 
@@ -21,8 +20,8 @@ from magi.core.config import config
 from magi.core.items import ItemArchive, build_item_archive_from_config
 from magi.core.memory.admin import (
     InvalidRawJsonError,
-    MemoryManagerRequiredError,
     MemoryAdmin,
+    MemoryManagerRequiredError,
     SessionRequiredError,
     StaleVersionError,
     TriggerUnavailableError,
@@ -107,18 +106,18 @@ def build_memory(
     short_term_max: int,
     persona_seed: str = "",
     persona_adjustments_max: int = 0,
-    summarize_session_fn: Optional[SummarizeFn] = None,
+    summarize_session_fn: SummarizeFn | None = None,
     summarize_every: int = 10,
     long_term_recent_raw: int = 5,
-    retriever: Optional[MemoryRetriever] = None,
+    retriever: MemoryRetriever | None = None,
     semantic_top_k: int = 5,
     short_term_turn_max_chars: int = 4_000,
     session_pending_max: int = 30,
     session_summary_max_chars: int = 4_000,
-    curate_fn: Optional[CurateFn] = None,
+    curate_fn: CurateFn | None = None,
     long_term_fact_max_chars: int = 1_000,
     long_term_facts_max: int = 200,
-    archive: Optional[ItemArchive] = None,
+    archive: ItemArchive | None = None,
 ) -> MemoryManager:
     """Assemble a `MemoryManager` from already-built dependencies."""
     return MemoryManager(
@@ -143,8 +142,8 @@ def build_memory(
 
 def build_memory_from_config(
     *,
-    summarize_session_fn: Optional[SummarizeFn] = None,
-    curate_fn: Optional[CurateFn] = None,
+    summarize_session_fn: SummarizeFn | None = None,
+    curate_fn: CurateFn | None = None,
 ) -> MemoryManager:
     """Build the manager wired from `config`, with operator overrides (memory location
     + git-versioning, from magi/core/settings) overlaid on top. The summarizers and the

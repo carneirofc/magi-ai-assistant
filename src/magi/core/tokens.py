@@ -13,11 +13,11 @@ repeat stats calls over unchanged sections.
 """
 
 import hashlib
-from typing import Optional
 
 import httpx
 
 from magi.core.config import config
+from magi.core.types import parse_json_object
 
 # content-hash -> token count. Bounded by wholesale clear — the working set is
 # a handful of context sections, so anything fancier is wasted machinery.
@@ -32,7 +32,7 @@ def _tokenize_root() -> str:
     return base[: -len("/v1")] if base.endswith("/v1") else base
 
 
-def count_tokens(text: str) -> Optional[int]:
+def count_tokens(text: str) -> int | None:
     """Real token count for `text` via llama-server, or None to fall back."""
     if config.model_provider != "llamacpp":
         return None
@@ -56,10 +56,8 @@ def count_tokens(text: str) -> Optional[int]:
         return None
     if resp.status_code != 200:
         return None
-    try:
-        tokens = resp.json().get("tokens")
-    except ValueError:
-        return None
+    body = parse_json_object(resp.content)
+    tokens = body.get("tokens") if body is not None else None
     if not isinstance(tokens, list):
         return None
 

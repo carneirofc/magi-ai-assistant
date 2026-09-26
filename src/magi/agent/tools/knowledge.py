@@ -14,7 +14,7 @@ construction); `save_knowledge` can target that personal scope explicitly.
 """
 
 import uuid
-from typing import Annotated, Optional
+from typing import Annotated
 
 from agno.tools import tool
 from agno.utils.log import log_info
@@ -64,9 +64,9 @@ class SavedKnowledgeData(BaseModel):
 
 def build_knowledge_tools(
     searcher: KnowledgeSearcher,
-    tagger: Optional[KnowledgeTagger] = None,
-    indexer: Optional[KnowledgeIndexer] = None,
-    memory: Optional[MemoryManager] = None,
+    tagger: KnowledgeTagger | None = None,
+    indexer: KnowledgeIndexer | None = None,
+    memory: MemoryManager | None = None,
 ) -> list:
     """Return the knowledge tool set bound to the injected dependencies.
 
@@ -78,7 +78,7 @@ def build_knowledge_tools(
     the current user's own knowledge and saves can target it; without it (or
     outside a message) everything stays global-only."""
 
-    def _current_user() -> Optional[str]:
+    def _current_user() -> str | None:
         """The ambient user id, or None outside a scoped message."""
         if memory is None:
             return None

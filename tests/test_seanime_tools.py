@@ -10,10 +10,11 @@ multiple endpoint calls in code and label whether data came from the user's
 library or the global AniList catalog.
 """
 
-import httpx
 import json
-import pytest
 from urllib.parse import quote
+
+import httpx
+import pytest
 from pydantic import ValidationError
 
 import magi.agent.tools.seanime as seanime
@@ -40,10 +41,9 @@ class _FakeResponse:
         self._json = json_data
         self.status_code = status_code
 
-    def json(self):
-        if self._json is None:
-            raise ValueError("no json")
-        return self._json
+    @property
+    def content(self):
+        return b"" if self._json is None else json.dumps(self._json).encode()
 
 
 class _FakeClient:

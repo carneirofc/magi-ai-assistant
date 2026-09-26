@@ -22,7 +22,7 @@ warning — the bot always boots.
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING
 
 from agno.utils.log import log_warning
 
@@ -52,9 +52,9 @@ class Skill:
     name: str
     prompt: str = ""
     tools: Sequence = field(default_factory=tuple)
-    lead_toolkit: Optional[Callable[["MemoryManager"], Sequence]] = None
+    lead_toolkit: Callable[[MemoryManager], Sequence] | None = None
     member_tools: Sequence = field(default_factory=tuple)
-    enabled: Union[bool, Callable[[], bool]] = True
+    enabled: bool | Callable[[], bool] = True
     # Whether self-evolution may target this skill's prompt (see
     # magi/core/evolution.py). The manifest owns the choice; identity-class
     # prompts are never proposable regardless.
@@ -71,7 +71,7 @@ class Skill:
 SKILLS: list[Skill] = []
 
 
-def register_skill(skill: Union[Skill, Callable[[], Skill]]):
+def register_skill(skill: Skill | Callable[[], Skill]) -> Skill | Callable[[], Skill]:
     """Register a skill; return the argument (usable as a factory decorator).
 
     Accepts a `Skill` directly, or a zero-arg factory returning one (so
@@ -121,7 +121,7 @@ def compose_skill_prompts() -> list[str]:
     return fragments
 
 
-def skill_lead_tools(memory: "MemoryManager") -> list:
+def skill_lead_tools(memory: MemoryManager) -> list:
     """Every active skill's lead tools: plain tools + memory-injected toolkit.
 
     A raising toolkit drops that skill's toolkit tools with a warning — its
@@ -158,7 +158,7 @@ def proposable_skill_targets() -> list[str]:
     return [s.prompt_path for s in SKILLS if s.proposable]
 
 
-def find_skill_by_prompt_path(path: str) -> Optional[Skill]:
+def find_skill_by_prompt_path(path: str) -> Skill | None:
     """The registered skill whose prompt lives at `path`, if any."""
     for skill in SKILLS:
         if skill.prompt_path == path:

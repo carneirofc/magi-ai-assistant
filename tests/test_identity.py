@@ -116,6 +116,13 @@ def test_corrupt_metadata_reads_as_blank():
     assert store.read().is_empty
 
 
+def test_non_object_metadata_reads_as_blank():
+    store = _store()
+    store.meta_path.parent.mkdir(parents=True, exist_ok=True)
+    store.meta_path.write_text('["display_name", "Alyssa"]', encoding="utf-8")
+    assert store.read().is_empty
+
+
 # --- expression pack (mood-keyed portraits; issue #26) ------------------------
 _JPG = _PNG  # any bytes will do; the store trusts the declared mime
 

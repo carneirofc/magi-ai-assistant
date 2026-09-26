@@ -14,8 +14,10 @@ from magi.core.discord_context import get_current_discord_context
 try:
     import discord
 
-except ImportError, ModuleNotFoundError:
-    raise ImportError("`discord.py` not installed. Please install using `pip install discord.py`")
+except (ImportError, ModuleNotFoundError) as exc:
+    raise ImportError(
+        "`discord.py` not installed. Please install using `pip install discord.py`"
+    ) from exc
 
 _DELETE_VERB_RE = re.compile(r"\b(delete|remove|purge|erase)\b", re.IGNORECASE)
 _CLEAR_VERB_RE = re.compile(r"\bclear\b", re.IGNORECASE)
@@ -60,7 +62,7 @@ class DiscordDeleteData(BaseModel):
     deleted: bool | None = None
 
 
-def _message_preview(message, limit: int = 200) -> str:
+def _message_preview(message: discord.Message, limit: int = 200) -> str:
     text = " ".join((getattr(message, "content", "") or "").split())
     if len(text) <= limit:
         return text

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from agno.utils.log import log_info, log_warning
 
@@ -43,23 +43,23 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 # The single active backend, for an explicit owner + inspection/teardown (tests).
 # The process-global write observer also holds a reference (the bound `on_write`),
 # so the backend stays alive for the life of the process once installed.
-_active: Optional["MemoryGit"] = None
+_active: MemoryGit | None = None
 
 
 class MemoryGit:
     """Initializes and manages the git repo at the memory root, committing per write."""
 
-    def __init__(self, root: Path, *, author_name: str, author_email: str):
+    def __init__(self, root: Path, *, author_name: str, author_email: str) -> None:
         self._root = Path(root).resolve()
         self._author_name = author_name
         self._author_email = author_email
         # Serializes stage+commit: the memory manager is shared across concurrent
         # sessions, and the git index / HEAD are single shared files.
         self._lock = threading.Lock()
-        self._repo: Optional["Repo"] = None
+        self._repo: Repo | None = None
 
     # --- repo lifecycle -----------------------------------------------------
-    def _open(self) -> "Repo":
+    def _open(self) -> Repo:
         """The cached `Repo`, opened on first use (assumes `ensure_repo` ran)."""
         if self._repo is None:
             import git  # noqa: PLC0415 — optional dependency, imported on demand.
@@ -98,7 +98,7 @@ class MemoryGit:
         if self._staged(repo):
             self._commit(repo, "memory: baseline snapshot")
 
-    def _enclosing_repo(self) -> Optional[Path]:
+    def _enclosing_repo(self) -> Path | None:
         """The nearest ancestor directory that is itself a git repo, or None.
 
         Used to reject initializing the memory repo inside another one. Only ancestors
@@ -111,7 +111,7 @@ class MemoryGit:
                 return parent
         return None
 
-    def _pin_identity(self, repo: "Repo") -> None:
+    def _pin_identity(self, repo: Repo) -> None:
         """Write the commit identity into the repo config so commits never depend on
         the host's global git config, and never GPG-sign these automated commits."""
         writer = repo.config_writer()
@@ -159,7 +159,7 @@ class MemoryGit:
                     f"memory: git commit failed for {rel.as_posix()}: {type(exc).__name__}: {exc}"
                 )
 
-    def _staged(self, repo: "Repo") -> bool:
+    def _staged(self, repo: Repo) -> bool:
         """Whether the index differs from HEAD (works before the first commit, where
         HEAD is unborn and the diff is against the empty tree)."""
         from git.exc import GitCommandError  # noqa: PLC0415 — optional dependency.
@@ -173,7 +173,7 @@ class MemoryGit:
                 return True
             raise
 
-    def _commit(self, repo: "Repo", message: str) -> None:
+    def _commit(self, repo: Repo, message: str) -> None:
         """Commit the staged index. Identity comes from the repo config pinned in
         `_pin_identity`, so no author/committer env is required."""
         repo.git.commit("-m", message)
@@ -182,10 +182,10 @@ class MemoryGit:
 def build_memory_git(
     root: Path,
     *,
-    enabled: Optional[bool] = None,
-    author_name: Optional[str] = None,
-    author_email: Optional[str] = None,
-) -> Optional[MemoryGit]:
+    enabled: bool | None = None,
+    author_name: str | None = None,
+    author_email: str | None = None,
+) -> MemoryGit | None:
     """Build, initialize, and install the git-backed memory backend for `root`, or
     return `None` when it's disabled or unbuildable.
 

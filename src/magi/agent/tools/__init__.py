@@ -34,10 +34,10 @@ DEFAULT_TOOLS: list = [get_current_time, *HTTP_TOOLS]
 # Lead-level toolkit builders registered from outside the engine tree. Each
 # builder receives the injected MemoryManager (the same convention as the
 # engine's own build_*_tools) and returns the tools to splice into the lead.
-LEAD_TOOLKIT_BUILDERS: list[Callable[["MemoryManager"], Sequence]] = []
+LEAD_TOOLKIT_BUILDERS: list[Callable[[MemoryManager], Sequence]] = []
 
 
-def register_tool(fn):
+def register_tool(fn: Callable[..., object]) -> Callable[..., object]:
     """Append a tool to the member default set; return it (usable as a decorator).
 
     Call at the entrypoint, before `build_team()` — the set flows to members
@@ -51,8 +51,8 @@ def register_tool(fn):
 
 
 def register_lead_toolkit(
-    builder: Callable[["MemoryManager"], Sequence],
-) -> Callable[["MemoryManager"], Sequence]:
+    builder: Callable[[MemoryManager], Sequence],
+) -> Callable[[MemoryManager], Sequence]:
     """Append a lead toolkit builder; return it (usable as a decorator).
 
     Call at the entrypoint, before `build_team()` reads the registry. The
@@ -66,7 +66,7 @@ def register_lead_toolkit(
     return builder
 
 
-def registered_lead_tools(memory: "MemoryManager") -> list:
+def registered_lead_tools(memory: MemoryManager) -> list:
     """Flatten every registered lead toolkit into one tool list.
 
     A raising builder is skipped with a warning — a broken persona toolkit

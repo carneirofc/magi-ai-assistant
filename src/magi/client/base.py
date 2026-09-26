@@ -20,7 +20,7 @@ toolkits whose main thread runs a UI loop.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
-from typing import Protocol, Union, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from magi.client.types import Delta, InboundImage, Reply
 
@@ -32,7 +32,7 @@ class MagiClient(Protocol):
     user_id: str
     session_id: str
 
-    async def aopen(self) -> "MagiClient":
+    async def aopen(self) -> MagiClient:
         """Ready the client (connect transports / warm MCP). Idempotent; returns
         self so the client can be opened and used in one expression."""
         ...
@@ -47,7 +47,7 @@ class MagiClient(Protocol):
 
     def stream(
         self, text: str, *, images: Sequence[InboundImage] = ()
-    ) -> AsyncIterator[Union[Delta, Reply]]:
+    ) -> AsyncIterator[Delta | Reply]:
         """Run one turn, yielding a `Delta` per text chunk then exactly one final
         `Reply` (the authoritative result — render it over the assembled deltas)."""
         ...

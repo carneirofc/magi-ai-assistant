@@ -32,9 +32,9 @@ archival must never break a chat or an ingest.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional, Sequence, Union
+from datetime import UTC, datetime
 
 from agno.utils.log import log_info, log_warning
 
@@ -49,7 +49,7 @@ GLOBAL_SCOPE = "global"
 # leaving a duplicate, and remove() can target it without a scan.
 _POINT_NS = uuid.UUID("a8f5b3c2-1d4e-4f6a-9b0c-7e2d1a3c5f80")
 
-ObjectStore = Union[LocalStore, S3Store]
+ObjectStore = LocalStore | S3Store
 
 
 @dataclass(frozen=True)
@@ -68,11 +68,11 @@ class ItemHit:
 class ItemArchive:
     """Object-store bytes + a Qdrant vector for admin-managed items. Crash-proof."""
 
-    def __init__(self, store: ObjectStore, *, collection: Optional[str] = None):
+    def __init__(self, store: ObjectStore, *, collection: str | None = None) -> None:
         self.store = store
         self.collection = collection or config.items_collection
         self._client = None  # lazily built; None means "Qdrant unavailable, no-op"
-        self._dim: Optional[int] = None
+        self._dim: int | None = None
 
     # --- keys / ids ---------------------------------------------------------
     def _key(self, kind: str, item_id: str, scope: str) -> str:
@@ -84,7 +84,7 @@ class ItemArchive:
         return uuid.uuid5(_POINT_NS, f"{kind}\x00{scope}\x00{item_id}").hex
 
     # --- qdrant client (lazy, shared shape with SemanticIndex/KnowledgeStore) ---
-    def _ensure_client(self, dim: int):
+    def _ensure_client(self, dim: int) -> object | None:
         """Build the client + collection on first successful embed. None on failure."""
         if self._client is not None:
             return self._client
@@ -105,7 +105,7 @@ class ItemArchive:
             log_warning(f"items: Qdrant unavailable ({type(exc).__name__}: {exc})")
             return None
 
-    def _connect_existing(self):
+    def _connect_existing(self) -> object | None:
         """A client bound to the collection *without* creating it — for remove on a
         process that never embedded. None when the collection/backend is absent."""
         if self._client is not None:
@@ -129,10 +129,10 @@ class ItemArchive:
         item_id: str,
         *,
         scope: str = GLOBAL_SCOPE,
-        data: Optional[bytes] = None,
-        text: Optional[str] = None,
-        content_type: Optional[str] = None,
-        metadata: Optional[dict[str, str]] = None,
+        data: bytes | None = None,
+        text: str | None = None,
+        content_type: str | None = None,
+        metadata: dict[str, str] | None = None,
     ) -> bool:
         """Archive an item: store its `data` bytes (when given) and index its `text`
         vector (when given). Returns whether the *byte* write succeeded — that is the
@@ -152,8 +152,8 @@ class ItemArchive:
         item_id: str,
         scope: str,
         data: bytes,
-        content_type: Optional[str],
-        metadata: Optional[dict[str, str]],
+        content_type: str | None,
+        metadata: dict[str, str] | None,
     ) -> bool:
         key = self._key(kind, item_id, scope)
         try:
@@ -170,7 +170,7 @@ class ItemArchive:
         item_id: str,
         scope: str,
         text: str,
-        metadata: Optional[dict[str, str]],
+        metadata: dict[str, str] | None,
     ) -> None:
         vector = embed_text(text)
         if vector is None:
@@ -194,7 +194,7 @@ class ItemArchive:
                             "text": text,
                             "key": self._key(kind, item_id, scope),
                             "metadata": dict(metadata or {}),
-                            "ts": datetime.now(timezone.utc).isoformat(),
+                            "ts": datetime.now(UTC).isoformat(),
                         },
                     )
                 ],
@@ -203,7 +203,7 @@ class ItemArchive:
             log_warning(f"items: index failed for {kind}/{item_id} ({type(exc).__name__}: {exc})")
 
     # --- read ---------------------------------------------------------------
-    def read_bytes(self, kind: str, item_id: str, *, scope: str = GLOBAL_SCOPE) -> Optional[bytes]:
+    def read_bytes(self, kind: str, item_id: str, *, scope: str = GLOBAL_SCOPE) -> bytes | None:
         """The item's canonical bytes, or None when absent / the backend is down.
         This is how a kind re-indexes from the source of truth (e.g. knowledge
         re-chunks the original after a chunking-policy change)."""
@@ -280,7 +280,7 @@ class ItemArchive:
         return [self._to_hit(p) for p in points if p.payload]
 
     @staticmethod
-    def _to_hit(point) -> ItemHit:
+    def _to_hit(point: object) -> ItemHit:
         payload = point.payload or {}
         meta = payload.get("metadata")
         return ItemHit(
@@ -294,7 +294,7 @@ class ItemArchive:
         )
 
 
-def build_item_archive_from_config() -> Optional[ItemArchive]:
+def build_item_archive_from_config() -> ItemArchive | None:
     """Construct the archive when `items_archive_enabled`, else None (feature off).
 
     Builds its own object store (ungated by `storage_enabled` — the archive has its

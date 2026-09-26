@@ -15,7 +15,7 @@ frontend snippet). Window position/size persist via ``QSettings``.
 from __future__ import annotations
 
 from agno.utils.log import log_info, log_warning
-from PySide6.QtCore import QFile, QIODevice, QPoint, QRect, QRectF, QSettings, Qt
+from PySide6.QtCore import QFile, QIODevice, QPoint, QRect, QRectF, QSettings, Qt, QUrl
 from PySide6.QtGui import (
     QCloseEvent,
     QColor,
@@ -213,13 +213,13 @@ class FramelessWindow(QWidget):
         (QWebEnginePermission); handle whichever this PySide6 exposes.
         """
 
-        def _is_loopback(origin) -> bool:
+        def _is_loopback(origin: QUrl) -> bool:
             return origin.host() in ("127.0.0.1", "localhost", "::1")
 
         if hasattr(page, "permissionRequested"):  # Qt >= 6.8
             from PySide6.QtWebEngineCore import QWebEnginePermission
 
-            def _on_permission(permission) -> None:
+            def _on_permission(permission: QWebEnginePermission) -> None:
                 mic = QWebEnginePermission.PermissionType.MediaAudioCapture
                 if permission.permissionType() == mic and _is_loopback(permission.origin()):
                     permission.grant()
@@ -229,7 +229,7 @@ class FramelessWindow(QWidget):
             page.permissionRequested.connect(_on_permission)
         else:  # Qt < 6.8
 
-            def _on_feature(origin, feature) -> None:
+            def _on_feature(origin: QUrl, feature: QWebEnginePage.Feature) -> None:
                 allowed = feature == QWebEnginePage.Feature.MediaAudioCapture and _is_loopback(
                     origin
                 )

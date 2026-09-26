@@ -25,7 +25,7 @@ Two factories, mirroring `channels/api.py`:
 
 import base64
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING
 
 from agno.utils.log import log_info
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -44,9 +44,9 @@ from magi.core.knowledge import (
 )
 from magi.core.memory import (
     InvalidRawJsonError,
-    MemoryManagerRequiredError,
-    MemoryManager,
     MemoryAdmin,
+    MemoryManager,
+    MemoryManagerRequiredError,
     SessionRequiredError,
     StaleVersionError,
     TriggerUnavailableError,
@@ -57,6 +57,9 @@ from magi.core.memory import (
 from magi.core.memory.semantic import MemoryRetriever
 from magi.core.memory.store import FileMemoryStore
 from magi.core.settings import MemoryOverrides, OperatorSettingsStore
+
+if TYPE_CHECKING:
+    from magi.core.evolution import EvolutionStore
 
 # A session id is irrelevant when reading user-level files (facts, episodes,
 # persona): those paths don't depend on it. Use a fixed placeholder so the
@@ -81,7 +84,7 @@ class DocumentSummaryOut(BaseModel):
     latest_ts: str = Field(description="Newest chunk timestamp (last ingest).")
 
     @classmethod
-    def of(cls, d: DocumentSummary) -> "DocumentSummaryOut":
+    def of(cls, d: DocumentSummary) -> DocumentSummaryOut:
         return cls(
             doc_id=d.doc_id,
             source=d.source,
@@ -110,9 +113,7 @@ class IngestDocument(BaseModel):
 
     title: str = Field(min_length=1, description="Display title (and source).")
     text: str = Field(min_length=1, description="The document's full text.")
-    doc_id: Optional[str] = Field(
-        default=None, description="Identity; derived from title if absent."
-    )
+    doc_id: str | None = Field(default=None, description="Identity; derived from title if absent.")
     subject: str = Field(default="", description="Subject (must exist in the registry), or ''.")
     tags: list[str] = Field(default_factory=list)
 
@@ -146,7 +147,7 @@ class SubjectOut(BaseModel):
     description: str = ""
 
     @classmethod
-    def of(cls, s: Subject) -> "SubjectOut":
+    def of(cls, s: Subject) -> SubjectOut:
         return cls(id=s.id, name=s.name, description=s.description)
 
 
@@ -160,8 +161,8 @@ class CreateSubject(BaseModel):
 
 
 class EditSubject(BaseModel):
-    name: Optional[str] = Field(default=None, description="New name (cascades to tagged docs).")
-    description: Optional[str] = Field(default=None)
+    name: str | None = Field(default=None, description="New name (cascades to tagged docs).")
+    description: str | None = Field(default=None)
 
 
 class ChunkOut(BaseModel):
@@ -181,7 +182,7 @@ class DocumentDetailOut(BaseModel):
     chunks: list[ChunkOut]
 
     @classmethod
-    def of(cls, d: DocumentDetail) -> "DocumentDetailOut":
+    def of(cls, d: DocumentDetail) -> DocumentDetailOut:
         return cls(
             doc_id=d.doc_id,
             source=d.source,
@@ -226,14 +227,14 @@ class Profile(BaseModel):
 
 class AddFact(BaseModel):
     text: str = Field(min_length=1, description="The fact to add.")
-    expected_version: Optional[str] = Field(
+    expected_version: str | None = Field(
         default=None, description="The version from the last read; rejected with 409 if stale."
     )
 
 
 class UpdateFact(BaseModel):
     text: str = Field(min_length=1, description="The fact's new text.")
-    expected_version: Optional[str] = Field(default=None)
+    expected_version: str | None = Field(default=None)
 
 
 class FactsResult(BaseModel):
@@ -272,7 +273,7 @@ class ExpressionOut(BaseModel):
     expression routes, never inlined here."""
 
     mime: str
-    filename: Optional[str] = None
+    filename: str | None = None
     version: str
 
 
@@ -285,8 +286,8 @@ class IdentityOut(BaseModel):
     display_name: str = ""
     description: str = ""
     has_avatar: bool = False
-    avatar_mime: Optional[str] = None
-    avatar_filename: Optional[str] = None
+    avatar_mime: str | None = None
+    avatar_filename: str | None = None
     version: str = ""
     expressions: dict[str, ExpressionOut] = Field(default_factory=dict)
     # The configured mood vocabulary (regardless of whether the mood pass is on),
@@ -299,7 +300,7 @@ class UpdateIdentity(BaseModel):
 
     display_name: str = Field(default="", description="The bot's display name ('' to clear).")
     description: str = Field(default="", description="Free-form identity notes ('' to clear).")
-    expected_version: Optional[str] = Field(
+    expected_version: str | None = Field(
         default=None, description="The version from the last read; rejected with 409 if stale."
     )
 
@@ -309,8 +310,8 @@ class SetAvatar(BaseModel):
 
     data_base64: str = Field(min_length=1, description="The image bytes, base64-encoded.")
     mime_type: str = Field(min_length=1, description="The image mime type (e.g. image/png).")
-    filename: Optional[str] = Field(default=None, description="Original filename, for display.")
-    expected_version: Optional[str] = Field(default=None)
+    filename: str | None = Field(default=None, description="Original filename, for display.")
+    expected_version: str | None = Field(default=None)
 
 
 class RawFile(BaseModel):
@@ -323,7 +324,7 @@ class RawFile(BaseModel):
 
 class PutRawFile(BaseModel):
     content: str = Field(description="The full new file content (replaces the file).")
-    expected_version: Optional[str] = Field(
+    expected_version: str | None = Field(
         default=None, description="The version from the last read; rejected with 409 if stale."
     )
 
@@ -407,7 +408,7 @@ class UpdateMcpSettings(BaseModel):
     """Replace the operator's MCP server list (empty = clear)."""
 
     servers: list[dict] = Field(default_factory=list)
-    expected_version: Optional[str] = Field(default=None)
+    expected_version: str | None = Field(default=None)
 
 
 # --- operator settings wire format -------------------------------------------
@@ -445,7 +446,7 @@ class UpdateMemorySettings(BaseModel):
     git_author_email: str = Field(
         default="", description="Commit author email ('' = code default)."
     )
-    expected_version: Optional[str] = Field(
+    expected_version: str | None = Field(
         default=None, description="The version from the last read; rejected with 409 if stale."
     )
 
@@ -454,11 +455,11 @@ def create_admin_app(
     knowledge: KnowledgeStore,
     memory: FileMemoryStore,
     subjects: SubjectRegistry,
-    retriever: Optional[MemoryRetriever] = None,
-    auth_token: Optional[str] = None,
-    archive: Optional[ItemArchive] = None,
-    memory_manager: Optional[MemoryManager] = None,
-    settings_store: Optional[OperatorSettingsStore] = None,
+    retriever: MemoryRetriever | None = None,
+    auth_token: str | None = None,
+    archive: ItemArchive | None = None,
+    memory_manager: MemoryManager | None = None,
+    settings_store: OperatorSettingsStore | None = None,
 ) -> FastAPI:
     """The FastAPI admin app over already-built stores (pure factory).
 
@@ -484,7 +485,7 @@ def create_admin_app(
     bearer = HTTPBearer(auto_error=False)
 
     def require_auth(
-        credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
+        credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
     ) -> None:
         if auth_token is None:
             return
@@ -500,7 +501,7 @@ def create_admin_app(
         response_model=DocumentList,
         dependencies=[Depends(require_auth)],
     )
-    def list_documents(scope: Optional[str] = Query(default=None)) -> DocumentList:
+    def list_documents(scope: str | None = Query(default=None)) -> DocumentList:
         """Every document, optionally narrowed to one scope ("global",
         "user:<id>", …) — the origin partition per-user knowledge lives in."""
         documents = knowledge.list_documents()
@@ -720,7 +721,7 @@ def create_admin_app(
     def delete_fact(
         user_id: str,
         fact_id: str,
-        expected_version: Optional[str] = Query(default=None),
+        expected_version: str | None = Query(default=None),
     ) -> FactsResult:
         try:
             result = memory_admin.delete_fact(user_id, fact_id, expected_version)
@@ -845,8 +846,8 @@ def create_admin_app(
     )
     def get_file_history(
         kind: str,
-        user_id: Optional[str] = Query(default=None),
-        session_id: Optional[str] = Query(default=None),
+        user_id: str | None = Query(default=None),
+        session_id: str | None = Query(default=None),
         limit: int = Query(default=20, ge=1, le=100),
     ) -> FileHistory:
         """The git history of one raw memory file (memory_git_enabled). Empty —
@@ -870,8 +871,8 @@ def create_admin_app(
     def get_file_version(
         kind: str,
         sha: str,
-        user_id: Optional[str] = Query(default=None),
-        session_id: Optional[str] = Query(default=None),
+        user_id: str | None = Query(default=None),
+        session_id: str | None = Query(default=None),
     ) -> FileVersionOut:
         """The file's content at one commit — the history drawer's read view."""
         try:
@@ -916,7 +917,7 @@ def create_admin_app(
             moods=list(config.mood_vocabulary),
         )
 
-    def _check_identity_version(expected: Optional[str]) -> None:
+    def _check_identity_version(expected: str | None) -> None:
         if expected is not None and expected != memory.identity.version():
             raise HTTPException(status_code=409, detail="stale version; refetch the identity")
 
@@ -971,7 +972,7 @@ def create_admin_app(
         dependencies=[Depends(require_auth)],
     )
     def delete_identity_avatar(
-        expected_version: Optional[str] = Query(default=None),
+        expected_version: str | None = Query(default=None),
     ) -> IdentityOut:
         _check_identity_version(expected_version)
         memory.identity.clear_avatar()
@@ -1009,7 +1010,7 @@ def create_admin_app(
         dependencies=[Depends(require_auth)],
     )
     def delete_identity_expression(
-        mood: str, expected_version: Optional[str] = Query(default=None)
+        mood: str, expected_version: str | None = Query(default=None)
     ) -> IdentityOut:
         _check_identity_version(expected_version)
         try:
@@ -1081,7 +1082,7 @@ def create_admin_app(
         return _memory_settings_out()
 
     # --- self-evolution proposals (approve/reject; apply on restart) --------
-    def _evolution_store():
+    def _evolution_store() -> EvolutionStore:
         from magi.agent.skills import evolution_proposable_targets
         from magi.core.evolution import build_evolution_store
 
@@ -1100,7 +1101,7 @@ def create_admin_app(
         response_model=ProposalsOut,
         dependencies=[Depends(require_auth)],
     )
-    def list_proposals(status: Optional[str] = Query(default=None)) -> ProposalsOut:
+    def list_proposals(status: str | None = Query(default=None)) -> ProposalsOut:
         """The self-evolution queue: what the assistant asked to change about
         itself, pending the operator's decision."""
         store = _evolution_store()
@@ -1188,8 +1189,8 @@ def create_admin_app(
     )
     def get_raw_file(
         kind: str,
-        user_id: Optional[str] = Query(default=None),
-        session_id: Optional[str] = Query(default=None),
+        user_id: str | None = Query(default=None),
+        session_id: str | None = Query(default=None),
     ) -> RawFile:
         try:
             file = memory_admin.get_raw_file(kind, user_id=user_id, session_id=session_id)
@@ -1209,8 +1210,8 @@ def create_admin_app(
     def put_raw_file(
         kind: str,
         body: PutRawFile,
-        user_id: Optional[str] = Query(default=None),
-        session_id: Optional[str] = Query(default=None),
+        user_id: str | None = Query(default=None),
+        session_id: str | None = Query(default=None),
     ) -> RawFile:
         try:
             file = memory_admin.put_raw_file(
@@ -1243,7 +1244,7 @@ def _slug(title: str) -> str:
     return s or "document"
 
 
-def build_admin_app(memory_manager: Optional[MemoryManager] = None) -> FastAPI:
+def build_admin_app(memory_manager: MemoryManager | None = None) -> FastAPI:
     """Composition root: the real stores from config, served over HTTP.
 
     Both stores are built unconditionally (admin manages memory + the corpus

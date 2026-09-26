@@ -29,7 +29,9 @@ persona overlay installs this as a dependency and extends it from the outside.
   `agent/mood.py`) is validated with a pydantic `BaseModel`/`TypeAdapter`, and
   a `ValidationError` follows the same degrade path as bad JSON. Frozen
   `@dataclass` stays fine for internal value types. Free-form JSON is typed
-  `JsonValue` (`core/types.py`), never `Any`.
+  `JsonValue` / `JsonObject` (`core/types.py`), never `Any`; degrade-on-bad-input
+  loaders use `parse_json_object` / `parse_json_array` (None on bad input), hard
+  boundaries use the raising `JSON_OBJECT` / `JSON_VALUE` adapters.
 - **Structural contracts over base classes.** `Runner` (`core/conversation.py`) and
   `PlatformAdapter` (`channels/gateway.py`) are narrow `Protocol`s satisfied by
   shape.

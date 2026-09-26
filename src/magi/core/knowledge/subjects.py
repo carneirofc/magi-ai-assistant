@@ -18,9 +18,10 @@ import json
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from agno.utils.log import log_warning
+
+from magi.core.types import parse_json_array
 
 
 @dataclass(frozen=True)
@@ -34,20 +35,23 @@ class SubjectRegistry:
     """A JSON-file list of subjects with CRUD. Read is crash-proof (a corrupt file
     degrades to empty with a warning, never breaks the admin app)."""
 
-    def __init__(self, path: Path | str):
+    def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
 
     def _read(self) -> list[dict]:
         if not self.path.exists():
             return []
         try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as exc:
+            data = parse_json_array(self.path.read_bytes())
+        except OSError as exc:
             log_warning(
                 f"subjects: unreadable registry {self.path.name} ({type(exc).__name__}: {exc})"
             )
             return []
-        return data if isinstance(data, list) else []
+        if data is None:
+            log_warning(f"subjects: malformed registry {self.path.name}")
+            return []
+        return [s for s in data if isinstance(s, dict)]
 
     def _write(self, subjects: list[dict]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -64,10 +68,10 @@ class SubjectRegistry:
             if s.get("id") and s.get("name")
         ]
 
-    def get(self, subject_id: str) -> Optional[Subject]:
+    def get(self, subject_id: str) -> Subject | None:
         return next((s for s in self.list() if s.id == subject_id), None)
 
-    def create(self, name: str, description: str = "") -> Optional[Subject]:
+    def create(self, name: str, description: str = "") -> Subject | None:
         """Add a subject. Names are unique (case-insensitive); a duplicate returns
         None rather than creating a second bucket."""
         name = name.strip()
@@ -84,8 +88,8 @@ class SubjectRegistry:
         return subject
 
     def rename(
-        self, subject_id: str, name: Optional[str] = None, description: Optional[str] = None
-    ) -> Optional[Subject]:
+        self, subject_id: str, name: str | None = None, description: str | None = None
+    ) -> Subject | None:
         """Edit a subject's name/description in place. Returns the updated subject,
         or None when the id is unknown."""
         subjects = self._read()

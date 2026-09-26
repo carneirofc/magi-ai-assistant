@@ -15,7 +15,7 @@ media never enters the model's context, so a vision-only backend never sees an
 
 import mimetypes
 from pathlib import Path
-from typing import Annotated, Final, Optional
+from typing import Annotated, Final
 from urllib.parse import urlparse
 
 import httpx
@@ -23,7 +23,7 @@ from agno.tools import tool
 from agno.utils.log import log_info, log_warning
 from pydantic import BaseModel, Field
 
-from magi.agent.tools.outputs import ToolOutput, ok, fail
+from magi.agent.tools.outputs import ToolOutput, fail, ok
 from magi.core.media import is_media_url_allowed, stage_bytes
 
 # Generous fetch cap — the channel applies its own upload limits (and falls
@@ -53,7 +53,7 @@ class MediaFetchData(BaseModel):
     )
 
 
-def _filename(url: str, ctype: str, explicit: Optional[str]) -> str:
+def _filename(url: str, ctype: str, explicit: str | None) -> str:
     """A sensible filename for the attachment: explicit > URL basename > mime."""
     if explicit:
         return explicit
@@ -83,7 +83,7 @@ async def send_media_from_url(
         Field(min_length=8, description="Direct HTTP(S) URL of the file to attach."),
     ],
     filename: Annotated[
-        Optional[str],
+        str | None,
         Field(default=None, description="Optional display filename for the delivered attachment."),
     ] = None,
 ) -> ToolOutput[MediaFetchData]:

@@ -25,7 +25,6 @@ the agent layer (see `magi/agent/summarizer.py`). Construction is done by `build
 
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Optional
 
 from agno.utils.log import log_info, log_warning
 
@@ -72,19 +71,19 @@ class MemoryManager:
         short_term_max: int,
         persona_seed: str = "",
         persona_adjustments_max: int = 0,
-        summarize_session_fn: Optional[SummarizeFn] = None,
+        summarize_session_fn: SummarizeFn | None = None,
         summarize_every: int = 10,
         long_term_recent_raw: int = 5,
-        retriever: Optional[MemoryRetriever] = None,
+        retriever: MemoryRetriever | None = None,
         semantic_top_k: int = 5,
         short_term_turn_max_chars: int = 4_000,
         session_pending_max: int = 30,
         session_summary_max_chars: int = 4_000,
-        curate_fn: Optional[CurateFn] = None,
+        curate_fn: CurateFn | None = None,
         long_term_fact_max_chars: int = 1_000,
         long_term_facts_max: int = 200,
-        archive: Optional[ItemArchive] = None,
-    ):
+        archive: ItemArchive | None = None,
+    ) -> None:
         self.store = store
         # The item archive (None = off). When set, the durable fact sheet is
         # snapshotted to the object store after each fact write, so a user's curated
@@ -171,7 +170,7 @@ class MemoryManager:
         """Whether the durable-memory curator is wired (needs a model)."""
         return self._curate_fn is not None
 
-    async def maybe_summarize_session(self) -> Optional[str]:
+    async def maybe_summarize_session(self) -> str | None:
         """Fold buffered evicted turns into the rolling session summary.
 
         Channel awaits this after each turn; no-op unless the session summarizer is
@@ -199,7 +198,7 @@ class MemoryManager:
             )
         return pressured
 
-    async def summarize_session_now(self) -> Optional[str]:
+    async def summarize_session_now(self) -> str | None:
         """Operator-triggered fold: summarize the current scope's pending buffer
         into its rolling summary regardless of the per-turn threshold.
 
@@ -208,7 +207,7 @@ class MemoryManager:
         bypassed (`force=True`). (Delegates to `Session`.)"""
         return await self.session.maybe_fold(self.mem, force=True)
 
-    async def maybe_curate(self, user_message: str, assistant_reply: str) -> Optional[list[str]]:
+    async def maybe_curate(self, user_message: str, assistant_reply: str) -> list[str] | None:
         """Post-turn durable-memory pass: let the curator revise the profile, log an
         episode, or evolve the persona based on the turn just completed.
 
@@ -233,7 +232,7 @@ class MemoryManager:
             return None
         return self._apply_curation(mem, result)
 
-    async def curate_session_summary(self) -> Optional[list[str]]:
+    async def curate_session_summary(self) -> list[str] | None:
         """Operator-triggered curation over the current session's rolling summary.
 
         The per-turn curator reads a single (user, assistant) exchange; there is no
@@ -266,7 +265,7 @@ class MemoryManager:
             return None
         return self._apply_curation(mem, result)
 
-    async def consolidate_facts(self) -> Optional[list[str]]:
+    async def consolidate_facts(self) -> list[str] | None:
         """Maintenance curation over the WHOLE fact sheet: merge duplicates,
         drop contradictions and stale entries.
 
@@ -305,13 +304,13 @@ class MemoryManager:
         result = CurationResult(operations=result.operations)
         return self._apply_curation(mem, result)
 
-    def recall_preview(self, query: Optional[str]) -> dict[str, str]:
+    def recall_preview(self, query: str | None) -> dict[str, str]:
         """What `build_context` would inject for `query`, per section — the
         operator's retrieval-quality lens (semantic memory on: shows exactly
         which facts/episodes a query surfaces; off: the whole-file render)."""
         return self._read_sections(query.strip() if query and query.strip() else None)
 
-    def _apply_curation(self, mem: ScopedMemory, result: CurationResult) -> Optional[list[str]]:
+    def _apply_curation(self, mem: ScopedMemory, result: CurationResult) -> list[str] | None:
         """Apply a curator result deterministically: per-fact ops (with an archive
         snapshot), an optional episode, an optional persona adjustment. Returns the
         list of applied changes (subset of profile/episode/persona), or None."""

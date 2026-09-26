@@ -12,7 +12,8 @@ resolves the scope and passes the `ScopedMemory` bundle (which carries its own
 guard and the retriever fallback each live once, as the helpers below.
 """
 
-from typing import Awaitable, Callable, Iterable, Optional, Protocol, runtime_checkable
+from collections.abc import Awaitable, Callable, Iterable
+from typing import Protocol, runtime_checkable
 
 from agno.utils.log import log_info, log_warning
 
@@ -31,14 +32,14 @@ class Renders(Protocol):
 
     section_header: str
 
-    def render(self, mem: ScopedMemory, query: Optional[str]) -> str: ...
+    def render(self, mem: ScopedMemory, query: str | None) -> str: ...
 
 
 @runtime_checkable
 class Folds(Protocol):
     """A kind that compresses its overflow into a compact form on a threshold."""
 
-    async def maybe_fold(self, mem: ScopedMemory) -> Optional[str]: ...
+    async def maybe_fold(self, mem: ScopedMemory) -> str | None: ...
 
 
 # --- shared helpers (each invariant lives here, once) -----------------------
@@ -71,16 +72,16 @@ def clamp(text: str, max_chars: int, label: str) -> str:
     return text[:keep] + marker
 
 
-def index(retriever: Optional[MemoryRetriever], user_id: str, key: str, text: str) -> None:
+def index(retriever: MemoryRetriever | None, user_id: str, key: str, text: str) -> None:
     """Mirror a deliberate write into the vector store (no-op when disabled)."""
     if retriever is not None:
         retriever.index(user_id, key, text)
 
 
 def retrieved_or(
-    retriever: Optional[MemoryRetriever],
+    retriever: MemoryRetriever | None,
     user_id: str,
-    query: Optional[str],
+    query: str | None,
     key: str,
     top_k: int,
     fallback: Callable[[], str],
@@ -98,11 +99,11 @@ def retrieved_or(
 
 
 async def guarded_fold(
-    fn: Optional[SummarizeFn],
-    payload: Optional[str],
+    fn: SummarizeFn | None,
+    payload: str | None,
     write_back: Callable[[str], None],
     label: str,
-) -> Optional[str]:
+) -> str | None:
     """Await `fn(payload)`, then persist via `write_back`. The one place the
     "summarization must never break a chat" contract lives: a no-op when the
     summarizer is unset or there's nothing to fold, and any failure is swallowed."""
@@ -134,19 +135,19 @@ class LongTerm:
 
     def __init__(
         self,
-        retriever: Optional[MemoryRetriever],
+        retriever: MemoryRetriever | None,
         top_k: int,
         recent_raw: int,
         fact_max_chars: int = 1_000,
         facts_max: int = 200,
-    ):
+    ) -> None:
         self.retriever = retriever
         self.top_k = top_k
         self.recent_raw = recent_raw
         self.fact_max_chars = fact_max_chars
         self.facts_max = facts_max
 
-    def render(self, mem: ScopedMemory, query: Optional[str]) -> str:
+    def render(self, mem: ScopedMemory, query: str | None) -> str:
         facts = mem.long_term_facts.texts()
         core = retrieved_or(
             self.retriever,
@@ -248,12 +249,12 @@ class Episodes:
     section_header = "## Past episodes with this user (global)"
     retriever_key = "episode"
 
-    def __init__(self, retriever: Optional[MemoryRetriever], top_k: int, tail_limit: int):
+    def __init__(self, retriever: MemoryRetriever | None, top_k: int, tail_limit: int) -> None:
         self.retriever = retriever
         self.top_k = top_k
         self.tail_limit = tail_limit
 
-    def render(self, mem: ScopedMemory, query: Optional[str]) -> str:
+    def render(self, mem: ScopedMemory, query: str | None) -> str:
         # The non-semantic fallback renders the recent tail as clean bullets
         # (`bodies()` strips the note header + any legacy timestamp) rather than the
         # raw `tail()` file text, so only episode content reaches the context.
@@ -284,12 +285,12 @@ class Session:
     def __init__(
         self,
         short_term_max: int,
-        summarize_fn: Optional[SummarizeFn],
+        summarize_fn: SummarizeFn | None,
         summarize_every: int,
         turn_max_chars: int = 4_000,
         pending_max: int = 30,
         summary_max_chars: int = 4_000,
-    ):
+    ) -> None:
         self.short_term_max = short_term_max
         self.summarize_fn = summarize_fn
         self.summarize_every = summarize_every
@@ -299,7 +300,7 @@ class Session:
         self.pending_max = max(pending_max, summarize_every) if pending_max > 0 else 0
         self.summary_max_chars = summary_max_chars
 
-    def render(self, mem: ScopedMemory, query: Optional[str] = None) -> str:
+    def render(self, mem: ScopedMemory, query: str | None = None) -> str:
         summary = mem.session_summary.read()
         # Turns evicted from the live window but not yet folded into the summary sit
         # in the pending buffer (oldest-first). Render them ahead of the live turns so
@@ -336,7 +337,7 @@ class Session:
                 f"(pending={size}/{self.summarize_every}) user={mem.user_id} session={mem.session_id}"
             )
 
-    async def maybe_fold(self, mem: ScopedMemory, force: bool = False) -> Optional[str]:
+    async def maybe_fold(self, mem: ScopedMemory, force: bool = False) -> str | None:
         """Fold the pending buffer into the rolling session summary.
 
         The per-turn caller leaves `force` False, so a fold only happens once the
@@ -364,7 +365,7 @@ class Session:
             self.summarize_fn, payload, write_back, f"session for user {mem.user_id}"
         )
 
-    def close(self, mem: ScopedMemory) -> tuple[int, Optional[str]]:
+    def close(self, mem: ScopedMemory) -> tuple[int, str | None]:
         """Wipe the live window + summary + pending. Returns (turns dropped, the
         rolling summary body to carry forward as an episode, or None)."""
         summary = mem.session_summary.read()

@@ -1,6 +1,6 @@
 """Shared structured output envelopes for model-facing tools."""
 
-from typing import Generic, Literal, TypeVar
+from typing import Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -12,7 +12,7 @@ class EmptyData(BaseModel):
 DataT = TypeVar("DataT", bound=BaseModel)
 
 
-class ToolOutput(BaseModel, Generic[DataT]):
+class ToolOutput[DataT: BaseModel](BaseModel):
     """Structured result envelope for model-facing tools."""
 
     success: bool = Field(description="Whether the tool completed successfully.")
@@ -44,13 +44,13 @@ class ToolOutput(BaseModel, Generic[DataT]):
             )
         return value
 
-    def get(self, key: str, default=None):
+    def get(self, key: str, default: object = None) -> object:
         value = getattr(self, key, default)
         if key == "data" and isinstance(value, BaseModel):
             return value.model_dump(mode="json")
         return value
 
-    def __getitem__(self, key: str):
+    def __getitem__(self, key: str) -> object:
         return self.get(key)
 
 
@@ -60,7 +60,7 @@ class FlexiblePayload(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-def ok(
+def ok[DataT: BaseModel](
     message: str,
     data: DataT | None = None,
     warnings: list[str] | None = None,
@@ -75,7 +75,7 @@ def ok(
     )
 
 
-def fail(
+def fail[DataT: BaseModel](
     message: str,
     data: DataT | None = None,
     warnings: list[str] | None = None,

@@ -9,7 +9,7 @@ One db backs everything that must survive a restart:
 for PostgresDb here — callers depend on the BaseDb interface, not the backend.
 """
 
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 from agno.db.base import BaseDb
@@ -27,7 +27,7 @@ def make_db(db_file: str | None = None) -> BaseDb:
     return SqliteDb(db_file=path)
 
 
-@lru_cache(maxsize=None)
+@cache
 def get_db(db_file: str | None = None) -> BaseDb:
     """Process-wide singleton db (one per distinct db_file)."""
     return make_db(db_file)

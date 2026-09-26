@@ -19,8 +19,6 @@ without it still boots cleanly. The model-facing tools (magi/agent/tools/storage
 bind to whichever store it hands back plus the memory manager for scope.
 """
 
-from typing import Optional, Union
-
 from agno.utils.log import log_warning
 
 from magi.core.config import config
@@ -48,8 +46,8 @@ __all__ = [
 
 
 def build_object_store(
-    backend: Optional[str] = None,
-) -> Optional[Union[LocalStore, S3Store]]:
+    backend: str | None = None,
+) -> LocalStore | S3Store | None:
     """Build the object store for `backend` (default `config.storage_backend`),
     *ungated* by `storage_enabled`.
 
@@ -71,7 +69,7 @@ def build_object_store(
     return None
 
 
-def build_object_store_from_config() -> Optional[Union[LocalStore, S3Store]]:
+def build_object_store_from_config() -> LocalStore | S3Store | None:
     """The configured object store, or `None` when storage is off / unbuildable.
 
     Honors the model-file-archive gate (`storage_enabled`), then dispatches on

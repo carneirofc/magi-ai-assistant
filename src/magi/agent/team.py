@@ -10,13 +10,14 @@ reconfigurable.
 """
 
 from collections.abc import Callable, Sequence
-from typing import Annotated, Optional
+from typing import Annotated
 
 from agno.agent import Agent
 from agno.db.base import BaseDb
 from agno.models.base import Model
 from agno.team import Team
 from agno.tools import tool
+from agno.tools.function import Function
 from agno.utils.log import log_info
 from pydantic import BaseModel, Field
 
@@ -26,20 +27,20 @@ from magi.agent.members import MEMBER_BUILDERS
 from magi.agent.model import build_lead_model, build_member_model
 from magi.agent.skills import compose_skill_prompts, skill_lead_tools
 from magi.agent.tools import registered_lead_tools
+from magi.agent.tools.evolution import build_evolution_tools
 from magi.agent.tools.http import HTTP_TOOLS
 from magi.agent.tools.identity import build_identity_tools
-from magi.agent.tools.evolution import build_evolution_tools
 from magi.agent.tools.knowledge import build_knowledge_tools
 from magi.agent.tools.mcp import build_mcp_lead_toolkits, build_mcp_members
-from magi.agent.tools.recipes import build_recipe_tools
 from magi.agent.tools.media import MEDIA_TOOLS
 from magi.agent.tools.memory import build_memory_tools
-from magi.agent.tools.reminders import build_reminder_tools
-from magi.agent.tools.websearch import build_websearch_tools
 from magi.agent.tools.outputs import ToolOutput, ok
+from magi.agent.tools.recipes import build_recipe_tools
+from magi.agent.tools.reminders import build_reminder_tools
 from magi.agent.tools.storage import build_storage_tools
 from magi.agent.tools.thinking import build_thinking_tools
 from magi.agent.tools.vision import VISION_TOOLS
+from magi.agent.tools.websearch import build_websearch_tools
 from magi.core.config import config
 from magi.core.db import get_db
 from magi.core.items import build_item_archive_from_config
@@ -65,7 +66,7 @@ class IntrospectionData(BaseModel):
     text: str = Field(description="Human-readable rendering of the roster.")
 
 
-def _build_introspection_tool(lead: Model, members):
+def _build_introspection_tool(lead: Model, members: list[Agent]) -> Function:
     """A tool that lets the lead inspect its own roster before delegating."""
 
     @tool(
@@ -86,7 +87,7 @@ def _build_introspection_tool(lead: Model, members):
     )
     def agent_introspection(
         reason: Annotated[
-            Optional[str],
+            str | None,
             Field(
                 default=None,
                 description="Brief reason for introspecting the team roster and tools.",
@@ -115,9 +116,9 @@ def _build_introspection_tool(lead: Model, members):
 
 def build_team(
     memory: MemoryManager,
-    db: Optional[BaseDb] = None,
-    member_builders: Optional[Sequence[Callable[[Model], Agent]]] = None,
-    knowledge: Optional[KnowledgeStore] = None,
+    db: BaseDb | None = None,
+    member_builders: Sequence[Callable[[Model], Agent]] | None = None,
+    knowledge: KnowledgeStore | None = None,
 ) -> Team:
     """Assemble the chatbot team: a multimodal lead routing to specialist members.
 

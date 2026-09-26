@@ -14,7 +14,6 @@ Wiring order:
 """
 
 from collections.abc import Callable, Sequence
-from typing import Optional
 
 from agno.agent import Agent
 from agno.db.base import BaseDb
@@ -31,8 +30,8 @@ from magi.core.memory import build_memory_from_config
 def build_conversation_service(
     *,
     channel_guidance: str,
-    db: Optional[BaseDb] = None,
-    member_builders: Optional[Sequence[Callable[[Model], Agent]]] = None,
+    db: BaseDb | None = None,
+    member_builders: Sequence[Callable[[Model], Agent]] | None = None,
 ) -> ConversationService:
     """Assemble the full conversation stack behind one channel-neutral service."""
     config.log_settings()

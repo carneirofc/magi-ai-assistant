@@ -6,16 +6,16 @@ file validation, and semantic reconciliation.
 
 import pytest
 
+from magi.core.memory import build_memory
 from magi.core.memory.admin import (
     InvalidRawJsonError,
-    MemoryManagerRequiredError,
     MemoryAdmin,
+    MemoryManagerRequiredError,
     SessionRequiredError,
     StaleVersionError,
     TriggerUnavailableError,
     UserRequiredError,
 )
-from magi.core.memory import build_memory
 from magi.core.memory.store import FileMemoryStore
 
 

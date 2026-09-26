@@ -9,10 +9,11 @@ plain inputs in and render the plain `ConversationReply` out.
 injected — nothing is constructed here.
 """
 
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional, Protocol
+from typing import TYPE_CHECKING, Protocol
 
+from agno.media import Audio, File, Image, Video
 from agno.utils.log import log_error, log_info, log_warning
 from agno.utils.message import get_text_from_message
 
@@ -38,11 +39,43 @@ def _est_tokens_from_chars(chars: int) -> int:
     return (chars + _CHARS_PER_TOKEN - 1) // _CHARS_PER_TOKEN
 
 
+class RunMetricsLike(Protocol):
+    """The `RunMetrics` fields `_usage_from` reads off a run output."""
+
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cache_read_tokens: int
+    reasoning_tokens: int
+
+
+class RunOutputLike(Protocol):
+    """The slice of an agno `RunOutput`/`TeamRunOutput` this service reads."""
+
+    status: str
+    content: str | None
+    reasoning_content: str | None
+    metrics: RunMetricsLike | None
+
+
 class Runner(Protocol):
     """The slice of an agno `Agent`/`Team` this service drives: one run, awaited
     whole or consumed as an event stream (`stream=True` rides through kwargs)."""
 
-    def arun(self, *, input: str, user_id: str, session_id: str, **kwargs: Any) -> Any: ...
+    def arun(
+        self,
+        *,
+        input: str,
+        user_id: str,
+        session_id: str,
+        stream: bool = False,
+        stream_events: bool = False,
+        yield_run_output: bool = False,
+        images: Sequence[Image] | None = None,
+        videos: Sequence[Video] | None = None,
+        audio: Sequence[Audio] | None = None,
+        files: Sequence[File] | None = None,
+    ) -> RunOutputLike | AsyncIterator[object]: ...
 
 
 # The pre-reply mood pass (magi/agent/mood): assembled run input -> one name from
@@ -52,7 +85,7 @@ class Runner(Protocol):
 MoodFn = Callable[[str], Awaitable[str]]
 
 
-def _inbound_media_urls(media: dict[str, Any]) -> list[str]:
+def _inbound_media_urls(media: dict[str, Sequence[object] | None]) -> list[str]:
     """The http(s) URLs of inbound media passed by reference (not inline bytes).
 
     These let `view_image_from_url` fetch an image the user attached as a link
@@ -69,7 +102,17 @@ def _inbound_media_urls(media: dict[str, Any]) -> list[str]:
     return urls
 
 
-def _tool_call_event(tool: Any) -> Optional["ConversationToolCall"]:
+class ToolExecutionLike(Protocol):
+    """The `ToolExecution` fields the tool-call/result events read."""
+
+    tool_name: str | None
+    tool_args: object | None
+    tool_call_id: str | None
+    result: object | None
+    tool_call_error: bool | None
+
+
+def _tool_call_event(tool: ToolExecutionLike | None) -> ConversationToolCall | None:
     """A `ConversationToolCall` from an agno `ToolExecution`, or None if there's
     no usable tool payload (defensive: the event's `tool` is Optional upstream)."""
     if tool is None:
@@ -85,7 +128,7 @@ def _tool_call_event(tool: Any) -> Optional["ConversationToolCall"]:
     )
 
 
-def _tool_result_event(tool: Any) -> Optional["ConversationToolResult"]:
+def _tool_result_event(tool: ToolExecutionLike | None) -> ConversationToolResult | None:
     """A `ConversationToolResult` from an agno `ToolExecution`, or None when the
     tool payload is missing."""
     if tool is None:
@@ -123,7 +166,7 @@ class ConversationUsage:
     total_tokens: int = 0
     cached_tokens: int = 0
     reasoning_tokens: int = 0
-    context_window: Optional[int] = None
+    context_window: int | None = None
 
 
 @dataclass(frozen=True)
@@ -137,17 +180,17 @@ class ConversationReply:
     """
 
     text: str
-    reasoning: Optional[str] = None
+    reasoning: str | None = None
     is_error: bool = False
     images: tuple = ()
     videos: tuple = ()
     audio: tuple = ()
     files: tuple = ()
-    usage: Optional[ConversationUsage] = None
+    usage: ConversationUsage | None = None
     # The turn's delivery mood (one config.mood_vocabulary name), predicted before
     # the reply by the mood pass. None when the pass is off or the turn errored.
     # Not display-only: this is the future TTS style input.
-    mood: Optional[str] = None
+    mood: str | None = None
 
     @property
     def has_media(self) -> bool:
@@ -224,11 +267,11 @@ class ConversationService:
         runner: Runner,
         memory: MemoryManager,
         channel_guidance: str = "",
-        context_window: Optional[int] = None,
-        knowledge: Optional["KnowledgeSearcher"] = None,
+        context_window: int | None = None,
+        knowledge: KnowledgeSearcher | None = None,
         knowledge_top_k: int = 0,
-        mood_fn: Optional[MoodFn] = None,
-    ):
+        mood_fn: MoodFn | None = None,
+    ) -> None:
         self.runner = runner
         self.memory = memory
         # The pre-reply mood pass (see `MoodFn`). None = feature off: no mood
@@ -247,7 +290,7 @@ class ConversationService:
         self.knowledge = knowledge
         self.knowledge_top_k = knowledge_top_k
 
-    def _usage_from(self, run_output: object) -> Optional[ConversationUsage]:
+    def _usage_from(self, run_output: RunOutputLike | None) -> ConversationUsage | None:
         """Lift agno's `RunMetrics` off a run output into channel-neutral usage.
 
         Returns None when the output carries no metrics (some backends omit
@@ -334,7 +377,7 @@ class ConversationService:
         self.memory.record_user_turn(text)
         return f"<context>\n{context}\n</context>\n\n{text}" if context else text
 
-    async def _turn_mood(self, run_input: str) -> Optional[str]:
+    async def _turn_mood(self, run_input: str) -> str | None:
         """This turn's delivery mood via the injected pass, or None when off.
 
         The pass contractually never raises, but a turn must survive a broken one:
@@ -352,11 +395,11 @@ class ConversationService:
     async def _finish_turn(
         self,
         reply: str,
-        reasoning: Optional[str],
-        media: Optional[dict] = None,
+        reasoning: str | None,
+        media: dict | None = None,
         user_text: str = "",
-        usage: Optional[ConversationUsage] = None,
-        mood: Optional[str] = None,
+        usage: ConversationUsage | None = None,
+        mood: str | None = None,
         curate: bool = True,
     ) -> ConversationReply:
         """Record the reply + fold/curate memory; the one tail both run modes share.
@@ -389,7 +432,7 @@ class ConversationService:
         user_id: str | int,
         session_id: str,
         text: str,
-        media: Optional[dict] = None,
+        media: dict | None = None,
         extra_context: str = "",
     ) -> ConversationReply:
         """Run one turn end to end and return a channel-neutral reply."""
@@ -434,7 +477,7 @@ class ConversationService:
         user_id: str | int,
         session_id: str,
         text: str,
-        media: Optional[dict] = None,
+        media: dict | None = None,
         extra_context: str = "",
     ) -> AsyncIterator[ConversationStreamEvent | ConversationReply]:
         """Like `handle`, but yields the reply incrementally.

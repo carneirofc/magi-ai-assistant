@@ -65,6 +65,16 @@ def test_corrupt_file_degrades_to_no_overrides(tmp_path):
     assert OperatorSettingsStore(path).read_memory().is_empty
 
 
+def test_wrong_shape_degrades_to_no_overrides(tmp_path):
+    path = tmp_path / "s.json"
+    # A top-level array, and a section whose field has the wrong type: both are
+    # rejected by validation rather than coerced.
+    path.write_text("[1, 2]", encoding="utf-8")
+    assert OperatorSettingsStore(path).read_memory().is_empty
+    path.write_text('{"memory": {"git_enabled": "yes"}}', encoding="utf-8")
+    assert OperatorSettingsStore(path).read_memory().is_empty
+
+
 def test_resolve_overlays_overrides_on_config_defaults():
     # Empty overrides -> the code defaults verbatim.
     base = resolve_memory_settings(MemoryOverrides())

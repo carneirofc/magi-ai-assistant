@@ -31,7 +31,8 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+
+from magi.core.types import JsonObject, parse_json_object
 
 
 def _emit_write(path: Path) -> None:
@@ -82,8 +83,8 @@ class BotIdentity:
     description: str = ""
     # The stored picture's mime type + original upload filename (both None when no
     # picture is set). The bytes are read separately via `IdentityStore.avatar_bytes`.
-    avatar_mime: Optional[str] = None
-    avatar_filename: Optional[str] = None
+    avatar_mime: str | None = None
+    avatar_filename: str | None = None
 
     @property
     def has_avatar(self) -> bool:
@@ -103,21 +104,20 @@ class IdentityStore:
     `identity/avatar.<ext>` so the raw bytes never bloat the JSON.
     """
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path) -> None:
         self.root = Path(root)
         self.meta_path = self.root / "identity.json"
         self.avatar_dir = self.root / "identity"
 
     # --- reads --------------------------------------------------------------
-    def _read_json(self) -> dict:
+    def _read_json(self) -> JsonObject:
         """The parsed metadata, or `{}` when absent/corrupt (never raises)."""
         if not self.meta_path.exists():
             return {}
         try:
-            parsed = json.loads(self.meta_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError, OSError:
+            return parse_json_object(self.meta_path.read_bytes()) or {}
+        except OSError:
             return {}
-        return parsed if isinstance(parsed, dict) else {}
 
     def read(self) -> BotIdentity:
         data = self._read_json()
@@ -131,7 +131,7 @@ class IdentityStore:
             avatar_filename=str(filename) if filename else None,
         )
 
-    def avatar_bytes(self) -> Optional[tuple[bytes, str]]:
+    def avatar_bytes(self) -> tuple[bytes, str] | None:
         """The avatar's `(bytes, mime)`, or None when no picture is set / readable."""
         avatar = self._read_json().get("avatar")
         if not isinstance(avatar, dict):
@@ -204,7 +204,7 @@ class IdentityStore:
             }
         return pack
 
-    def expression_bytes(self, mood: str) -> Optional[tuple[bytes, str]]:
+    def expression_bytes(self, mood: str) -> tuple[bytes, str] | None:
         """One expression's `(bytes, mime)`, or None when that mood has no portrait.
 
         `neutral` reads the avatar slot (they are the same storage)."""
@@ -223,7 +223,7 @@ class IdentityStore:
             return None
 
     def set_expression(
-        self, mood: str, data: bytes, mime: str, filename: Optional[str] = None
+        self, mood: str, data: bytes, mime: str, filename: str | None = None
     ) -> BotIdentity:
         """Set one mood's portrait. Raises ValueError on a bad mood/mime.
 
@@ -288,7 +288,7 @@ class IdentityStore:
         self._write_json(data)
         return self.read()
 
-    def set_avatar(self, data: bytes, mime: str, filename: Optional[str] = None) -> BotIdentity:
+    def set_avatar(self, data: bytes, mime: str, filename: str | None = None) -> BotIdentity:
         """Replace the profile picture. Raises ValueError on an unsupported mime."""
         mime = (mime or "").strip().lower()
         ext = _MIME_EXT.get(mime)

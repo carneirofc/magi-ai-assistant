@@ -11,17 +11,19 @@ import asyncio
 from agno.db.base import BaseDb
 from agno.utils.log import log_info
 
+from clients.mydiscord import DiscordClient
 from magi.agent.model import lead_model_def
 from magi.channels.bootstrap import build_conversation_service
 from magi.channels.gateway import run_gateway
-from clients.mydiscord import DiscordClient
 from magi.core.config import config
 from magi.core.prompts import load_prompt
 
 try:
     import discord
-except ImportError, ModuleNotFoundError:
-    raise ImportError("`discord.py` not installed. Please install using `pip install discord.py`")
+except (ImportError, ModuleNotFoundError) as exc:
+    raise ImportError(
+        "`discord.py` not installed. Please install using `pip install discord.py`"
+    ) from exc
 
 
 def build_discord_client(db: BaseDb | None = None) -> DiscordClient:

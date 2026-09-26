@@ -17,7 +17,7 @@ normalised to `StorageError` so callers don't import botocore exception types.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from agno.utils.log import log_info, log_warning
 
@@ -63,17 +63,17 @@ class S3Store:
         access_key_id: str | None,
         secret_access_key: str | None,
         presign_expiry: int = 3600,
-    ):
+    ) -> None:
         self.bucket = bucket
         self._endpoint_url = endpoint_url
         self._region = region
         self._access_key_id = access_key_id
         self._secret_access_key = secret_access_key
         self.presign_expiry = presign_expiry
-        self._client_cached: Optional["S3Client"] = None
+        self._client_cached: S3Client | None = None
 
     # --- client ------------------------------------------------------------
-    def _client(self) -> "S3Client":
+    def _client(self) -> S3Client:
         """Build (once) and return the boto3 S3 client.
 
         Lazy so importing this module never requires boto3; raises a clear
@@ -211,7 +211,7 @@ def _header_safe(value: str) -> str:
     return value.encode("ascii", "replace").decode("ascii").replace("\n", " ").strip()[:512]
 
 
-def build_s3_store_from_config() -> Optional[S3Store]:
+def build_s3_store_from_config() -> S3Store | None:
     """Build the store from `config`, or `None` when storage is off / unbuildable.
 
     Returns `None` (with a warning) rather than raising, so a deployment that
@@ -223,7 +223,7 @@ def build_s3_store_from_config() -> Optional[S3Store]:
     return s3_store_from_config()
 
 
-def s3_store_from_config() -> Optional[S3Store]:
+def s3_store_from_config() -> S3Store | None:
     """Build the S3 store from `config`, *ungated* by `storage_enabled`.
 
     The `build_*` variant above honors the model-file-archive gate; this one builds

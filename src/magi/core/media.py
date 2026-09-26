@@ -18,10 +18,10 @@ into the reply after.
 """
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field, fields
-from typing import Any, Optional
+from typing import Protocol
 from uuid import uuid4
 
 from agno.media import Audio, File, Image, Video
@@ -35,7 +35,7 @@ def view_only_id() -> str:
     return f"{VIEW_ONLY_ID_PREFIX}{uuid4()}"
 
 
-def is_view_only(item: Any) -> bool:
+def is_view_only(item: object) -> bool:
     return str(getattr(item, "id", "") or "").startswith(VIEW_ONLY_ID_PREFIX)
 
 
@@ -49,8 +49,8 @@ class MediaOutbox:
     files: list[File] = field(default_factory=list)
 
 
-_OUTBOX: ContextVar[Optional[MediaOutbox]] = ContextVar("media_outbox", default=None)
-_ALLOWED_MEDIA_URLS: ContextVar[Optional[set[str]]] = ContextVar("allowed_media_urls", default=None)
+_OUTBOX: ContextVar[MediaOutbox | None] = ContextVar("media_outbox", default=None)
+_ALLOWED_MEDIA_URLS: ContextVar[set[str] | None] = ContextVar("allowed_media_urls", default=None)
 _HTTP_URL_RE = re.compile(r"https?://[^\s<>()\[\]{}\"']+", re.IGNORECASE)
 
 
@@ -165,7 +165,19 @@ def stage_bytes(data: bytes, content_type: str | None, filename: str) -> tuple[s
     return "file", stage_media(files=(File(content=data, mime_type=ctype, filename=filename),))
 
 
-def collect_reply_media(response: Any, outbox: Optional[MediaOutbox] = None) -> dict[str, tuple]:
+class RunOutputMediaLike(Protocol):
+    """The media fields `collect_reply_media` reads off a run output."""
+
+    images: Sequence[Image] | None
+    videos: Sequence[Video] | None
+    audio: Sequence[Audio] | None
+    files: Sequence[File] | None
+    response_audio: Audio | None
+
+
+def collect_reply_media(
+    response: RunOutputMediaLike | None, outbox: MediaOutbox | None = None
+) -> dict[str, tuple]:
     """Merge run-output media (minus view-only) with the outbox.
 
     Returns the media kwargs for `ConversationReply` — one tuple per kind,
@@ -174,7 +186,7 @@ def collect_reply_media(response: Any, outbox: Optional[MediaOutbox] = None) -> 
     merged: dict[str, list] = {"images": [], "videos": [], "audio": [], "files": []}
     seen: set[str] = set()
 
-    def add(kind: str, items) -> None:
+    def add(kind: str, items: Sequence[object] | None) -> None:
         for item in items or []:
             if item is None or is_view_only(item):
                 continue

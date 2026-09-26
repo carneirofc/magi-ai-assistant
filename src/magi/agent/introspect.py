@@ -12,8 +12,6 @@ each degrades to a sensible partial snapshot instead of raising. The wire shape 
 a public contract (the web BFF reads it), so version it, don't break it.
 """
 
-from typing import Optional
-
 from pydantic import BaseModel, Field
 
 from magi.agent.tools.seanime_mcp import is_mcp_toolkit
@@ -157,7 +155,7 @@ def _expand_tools(tools: object, member: str = "") -> tuple[list[ToolInfo], list
     return infos, mcps
 
 
-def build_snapshot(runner: Optional[object]) -> TeamSnapshot:
+def build_snapshot(runner: object | None) -> TeamSnapshot:
     """A `TeamSnapshot` of a live `Team` (with members) or a bare `Agent` (no members)."""
     if runner is None:
         return TeamSnapshot(name="", lead_model="", is_team=False)

@@ -20,6 +20,7 @@ member response, which is the other way a member silently fails.
 """
 
 import time
+from collections.abc import Awaitable, Callable
 from inspect import isasyncgen, isgenerator
 
 from agno.utils.log import log_error, log_info, log_warning
@@ -112,7 +113,11 @@ async def _materialize_result(result: object, label: str, function_name: str) ->
     return result
 
 
-async def tool_call_hook(function_name: str, function_call, arguments: dict):
+async def tool_call_hook(
+    function_name: str,
+    function_call: Callable[..., Awaitable[object]],
+    arguments: dict[str, object],
+) -> object:
     """Wrap one tool call: log it, time it, and turn failures into lead-visible text.
 
     Attached as the team's only `tool_hook`. `function_call` is the next link in

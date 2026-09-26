@@ -32,17 +32,19 @@ import json
 import re
 from collections import defaultdict
 from html import unescape
-from typing import Annotated, Any, Final, Literal, Optional
+from typing import Annotated, Final, Literal
 from urllib.parse import quote
 
 import httpx
 from agno.tools import tool
+from agno.tools.function import Function
 from agno.utils.log import log_info, log_warning
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from magi.agent.tools.outputs import FlexiblePayload, ToolOutput, fail, ok
 from magi.core.config import config
 from magi.core.media import allow_media_url
+from magi.core.types import JSON_VALUE, JsonValue, parse_json_object
 
 _TIMEOUT_S: Final[float] = 30.0
 # Cap on what a tool returns to the model. ~3k tokens — enough for any single
@@ -134,7 +136,7 @@ def _clip(text: str) -> str:
     return text[:_MAX_CHARS] + f"\n…[truncated {len(text) - _MAX_CHARS} chars]"
 
 
-def _render(data: Any) -> str:
+def _render(data: JsonValue) -> str:
     if data is None:
         return "(no data)"
     if isinstance(data, str):
@@ -142,7 +144,7 @@ def _render(data: Any) -> str:
     return _clip(json.dumps(data, ensure_ascii=False, separators=(",", ":")))
 
 
-def _drop_none(value: Any) -> Any:
+def _drop_none(value: JsonValue) -> JsonValue:
     if isinstance(value, dict):
         return {k: _drop_none(v) for k, v in value.items() if v is not None}
     if isinstance(value, list):
@@ -150,7 +152,7 @@ def _drop_none(value: Any) -> Any:
     return value
 
 
-def _json_result(**fields: Any) -> str:
+def _json_result(**fields: JsonValue) -> str:
     return _render(_drop_none(fields))
 
 
@@ -165,23 +167,17 @@ def _data(**fields: object) -> SeanimeData:
     return SeanimeData(**fields)
 
 
-def _tool_result(message: str, value: Any) -> SeanimeOutput:
+def _tool_result(message: str, value: JsonValue) -> SeanimeOutput:
     """Wrap compact Seanime renderings in a structured tool envelope."""
     if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError:
-            parsed = {"text": value}
-        return ok(
-            message,
-            SeanimeData(**parsed) if isinstance(parsed, dict) else _data(text=_render(parsed)),
-        )
+        parsed = parse_json_object(value)
+        return ok(message, SeanimeData(**parsed) if parsed is not None else _data(text=value))
     return ok(
         message, SeanimeData(**value) if isinstance(value, dict) else _data(text=_render(value))
     )
 
 
-async def _call(method: str, path: str, body: Optional[dict] = None) -> Any | str:
+async def _call(method: str, path: str, body: dict | None = None) -> JsonValue | str:
     """One request against the Seanime API. Returns the unwrapped `data` payload,
     or a model-readable error string (never raises)."""
     url = config.seanime_base_url.rstrip("/") + path
@@ -196,8 +192,8 @@ async def _call(method: str, path: str, body: Optional[dict] = None) -> Any | st
         )
 
     try:
-        payload = resp.json()
-    except ValueError:
+        payload = JSON_VALUE.validate_json(resp.content)
+    except ValidationError:
         payload = None
 
     if isinstance(payload, dict) and payload.get("error"):
@@ -209,7 +205,7 @@ async def _call(method: str, path: str, body: Optional[dict] = None) -> Any | st
     return payload.get("data") if isinstance(payload, dict) else payload
 
 
-def _is_error(result: Any) -> bool:
+def _is_error(result: JsonValue) -> bool:
     """`_call` signals failure with a plain string; payloads are dict/list/scalars."""
     return isinstance(result, str)
 
@@ -230,18 +226,18 @@ def _adult_mark(media: dict) -> str:
     return " [adult]" if media.get("isAdult") else ""
 
 
-def _cover_url(media: dict) -> Optional[str]:
+def _cover_url(media: dict) -> str | None:
     cover = media.get("coverImage") or {}
     return cover.get("large") or cover.get("extraLarge") or cover.get("medium")
 
 
-def _image_proxy_url(url: str | None) -> Optional[str]:
+def _image_proxy_url(url: str | None) -> str | None:
     if not url:
         return None
     return f"{config.seanime_base_url.rstrip('/')}/api/v1/image-proxy?url={quote(url, safe='')}"
 
 
-def _cover_delivery_urls(media: dict) -> tuple[Optional[str], Optional[str]]:
+def _cover_delivery_urls(media: dict) -> tuple[str | None, str | None]:
     original = _cover_url(media)
     cover = _image_proxy_url(original)
     allow_media_url(cover)
@@ -251,8 +247,8 @@ def _cover_delivery_urls(media: dict) -> tuple[Optional[str], Optional[str]]:
 
 # --- search filter normalization ------------------------------------------------
 def _norm_enum(
-    value: Optional[str], allowed: frozenset[str], label: str
-) -> tuple[Optional[str], Optional[str]]:
+    value: str | None, allowed: frozenset[str], label: str
+) -> tuple[str | None, str | None]:
     """Uppercase + validate one enum filter. Returns (normalized, error)."""
     if not value:
         return None, None
@@ -262,7 +258,7 @@ def _norm_enum(
     return norm, None
 
 
-def _norm_genres(genres: Optional[list[str]]) -> tuple[list[str], Optional[str]]:
+def _norm_genres(genres: list[str] | None) -> tuple[list[str], str | None]:
     """Map genre inputs to AniList's canonical names. Returns (genres, error)."""
     normalized: list[str] = []
     for raw in genres or []:
@@ -284,18 +280,18 @@ def _build_search_body(
     search: str,
     page: int,
     per_page: int,
-    genres: Optional[list[str]],
-    season: Optional[str],
-    year: Optional[int],
-    media_format: Optional[str],
-    status: Optional[str],
-    sort: Optional[str],
+    genres: list[str] | None,
+    season: str | None,
+    year: int | None,
+    media_format: str | None,
+    status: str | None,
+    sort: str | None,
     adult: str,
-) -> tuple[Optional[dict], Optional[str]]:
+) -> tuple[dict | None, str | None]:
     """Validate + assemble the AniList list request body (anime and manga share
     the shape; anime uses season/seasonYear, manga a plain year). Returns
     (body, error) — exactly one is set."""
-    body: dict[str, Any] = {"page": int(page), "perPage": int(per_page)}
+    body: dict[str, JsonValue] = {"page": int(page), "perPage": int(per_page)}
     # An empty search string makes AniList return nothing — omit the key so
     # pure filter browsing ("top rated 2024 TV anime") works.
     if search and search.strip():
@@ -379,12 +375,12 @@ def _entry_records(data: dict, unit: str) -> list[dict]:
 def _compact_collection(data: dict, unit: str) -> str:
     """Selected library fields as compact JSON; raw collection JSON is megabytes."""
     stats = data.get("stats") or {}
-    lists: list[dict[str, Any]] = []
+    lists: list[dict[str, JsonValue]] = []
     for lst in data.get("lists") or []:
         entries = lst.get("entries") or []
         if not entries:
             continue
-        compact_entries: list[dict[str, Any]] = []
+        compact_entries: list[dict[str, JsonValue]] = []
         for e in entries:
             media = e.get("media") or {}
             list_data = e.get("listData") or {}
@@ -460,7 +456,7 @@ def _overview(records: list[dict], group_by: str, unit: str) -> str:
     else:
         ordered = sorted(groups.items(), key=lambda kv: len(kv[1]), reverse=True)
 
-    result_groups: list[dict[str, Any]] = []
+    result_groups: list[dict[str, JsonValue]] = []
     for key, titles in ordered:
         shown = titles[:_MAX_TITLES_PER_GROUP]
         more = len(titles) - len(shown)
@@ -738,7 +734,7 @@ def _compact_schedule(data: list) -> str:
     return _clip("\n".join(lines))
 
 
-def _compact_continuity(data: Any) -> Optional[str]:
+def _compact_continuity(data: JsonValue) -> str | None:
     """Watch history as one line per item; None when the shape is unexpected
     (caller falls back to the raw render)."""
     if isinstance(data, dict):
@@ -766,7 +762,7 @@ def _compact_continuity(data: Any) -> Optional[str]:
     return _clip("\n".join(lines))
 
 
-def _compact_search_results(result: Any, kind: str) -> Optional[str]:
+def _compact_search_results(result: JsonValue, kind: str) -> str | None:
     """Strip an AniList page envelope down to a compact media list, or None when
     the shape is unexpected (caller falls back to raw render)."""
     if not isinstance(result, dict):
@@ -1460,7 +1456,7 @@ async def seanime_manga_update_progress(
 
 # Use-case-shaped surface: one tool per conversational job, plus the two
 # deliberate mutations (progress updates).
-SEANIME_TOOLS: Final[list[Any]] = [
+SEANIME_TOOLS: Final[list[Function]] = [
     seanime_status,
     seanime_library,
     seanime_find,

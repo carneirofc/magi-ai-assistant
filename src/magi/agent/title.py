@@ -7,7 +7,7 @@ stripped defensively; any failure returns None and the caller keeps its
 client-derived title, so titling can never break anything.
 """
 
-from typing import Optional
+from collections.abc import Awaitable, Callable
 
 from agno.agent import Agent
 from agno.utils.log import log_info, log_warning
@@ -23,7 +23,7 @@ short title for it: at most six words, no quotes, no trailing punctuation, the
 conversation's own language. Answer with the title only."""
 
 
-def _clean(raw: str) -> Optional[str]:
+def _clean(raw: str) -> str | None:
     title = raw.strip().strip("\"'").strip()
     # A model that rambled (multi-line, way over budget) is worse than the
     # client's derived title — reject rather than truncate mid-sentence.
@@ -32,7 +32,7 @@ def _clean(raw: str) -> Optional[str]:
     return title[:_TITLE_MAX]
 
 
-def build_title_pass():
+def build_title_pass() -> Callable[[str], Awaitable[str | None]]:
     """An async `TitleFn`: opening text -> a short title, or None on any failure."""
     agent = Agent(
         name="TitlePass",
@@ -43,7 +43,7 @@ def build_title_pass():
     )
     log_info(f"TitlePass ready: model={getattr(agent.model, 'id', '?')}")
 
-    async def title(text: str) -> Optional[str]:
+    async def title(text: str) -> str | None:
         try:
             resp = await agent.arun(input=text[:2000])
             raw = get_text_from_message(resp.content) if resp.content else ""

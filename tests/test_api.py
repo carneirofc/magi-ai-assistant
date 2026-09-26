@@ -1071,8 +1071,8 @@ def test_stt_rejects_an_empty_upload():
 def test_identity_advertises_voice_capabilities():
     """One identity fetch tells a client whether the deployment can speak/hear."""
     conversation = _FakeConversation()
-    from types import SimpleNamespace
     import tempfile
+    from types import SimpleNamespace
 
     from magi.core.identity import IdentityStore
 

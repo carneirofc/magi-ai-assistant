@@ -27,7 +27,7 @@ import asyncio
 import queue
 import threading
 from collections.abc import Coroutine, Iterator, Sequence
-from typing import Optional, TypeVar, Union
+from typing import TypeVar
 
 from magi.client.base import MagiClient
 from magi.client.types import Delta, InboundImage, Reply
@@ -37,7 +37,7 @@ _T = TypeVar("_T")
 # One item handed from the loop thread to the caller: a streamed value, or an
 # exception, or (None, None) as the end-of-stream sentinel. A streamed value is
 # always a truthy Delta/Reply, so `item is None` unambiguously marks the end.
-_BridgeItem = tuple[Union[Delta, Reply, None], Optional[BaseException]]
+_BridgeItem = tuple[Delta | Reply | None, BaseException | None]
 
 
 class SyncClient:
@@ -73,15 +73,13 @@ class SyncClient:
     def send(self, text: str, *, images: Sequence[InboundImage] = ()) -> Reply:
         return self._run(self._client.send(text, images=images))
 
-    def stream(
-        self, text: str, *, images: Sequence[InboundImage] = ()
-    ) -> Iterator[Union[Delta, Reply]]:
+    def stream(self, text: str, *, images: Sequence[InboundImage] = ()) -> Iterator[Delta | Reply]:
         """Drive the async stream on the loop thread, yielding items synchronously.
 
         A bounded queue hands items from the loop thread to the caller; an
         exception raised inside the stream is re-raised here, in the caller.
         """
-        bridge: "queue.Queue[_BridgeItem]" = queue.Queue(maxsize=64)
+        bridge: queue.Queue[_BridgeItem] = queue.Queue(maxsize=64)
 
         async def drain() -> None:
             try:
@@ -119,7 +117,7 @@ class SyncClient:
             self._thread.join(timeout=5)
             self._loop.close()
 
-    def __enter__(self) -> "SyncClient":
+    def __enter__(self) -> SyncClient:
         return self
 
     def __exit__(self, *exc: object) -> None:

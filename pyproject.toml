@@ -165,7 +165,20 @@ addopts = "-ra"
 target-version = "py314"
 line-length = 100
 
-# Default rule set (pyflakes F + essential pycodestyle E). Kept conservative so
-# the lint gate is meaningful without demanding a repo-wide reformat — `ruff
-# format` is intentionally not enforced in CI yet. Tighten (e.g. add "I", "UP")
-# in a follow-up once the tree is clean under them.
+# Lint + format are both enforced in CI and pre-commit. ANN401 bans typing.Any
+# (see the root AGENTS.md "Code Standards"); tests are exempt from annotations.
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ANN"]
+# The formatter owns line length; long prose strings are not worth wrapping.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN"]
+"examples/**" = ["ANN"]
+"scripts/**" = ["ANN"]
+
+[tool.ruff.format]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency markers are meant to be call defaults.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Query", "fastapi.Form"]

@@ -27,6 +27,7 @@ from pydantic import Field
 from magi.agent.tools.danbooru_local import LocalDanbooru
 from magi.agent.tools.outputs import FlexiblePayload, ToolOutput, fail, ok
 from magi.core.config import config
+from magi.core.types import JSON_VALUE, JsonValue
 
 _TIMEOUT = 15.0
 _HEADERS = {"User-Agent": "AlyssaBot/1.0 (tag lookup; +https://discord.com)"}
@@ -49,7 +50,7 @@ _DESCRIPTION_LIMIT = 3000
 class _Throttle:
     """Minimum gap between requests to one host, serialized across tasks."""
 
-    def __init__(self, gap_s: float):
+    def __init__(self, gap_s: float) -> None:
         self.gap_s = gap_s
         self._lock = asyncio.Lock()
         self._last = 0.0
@@ -77,7 +78,7 @@ def _local() -> LocalDanbooru:
     return store
 
 
-async def _get_json(throttle: _Throttle, url: str, params: dict | None = None):
+async def _get_json(throttle: _Throttle, url: str, params: dict | None = None) -> JsonValue:
     """GET JSON through the host throttle; on 429, back off once per Retry-After."""
     async with httpx.AsyncClient(
         timeout=_TIMEOUT, headers=_HEADERS, follow_redirects=True
@@ -95,7 +96,7 @@ async def _get_json(throttle: _Throttle, url: str, params: dict | None = None):
                 await asyncio.sleep(backoff)
                 continue
             resp.raise_for_status()
-            return resp.json()
+            return JSON_VALUE.validate_json(resp.content)
 
 
 def _strip_html(html: str) -> str:

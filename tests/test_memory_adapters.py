@@ -4,7 +4,7 @@ These pin the on-disk formats byte-for-byte so existing memory files round-trip
 unchanged after the store was refactored onto adapters.
 """
 
-from magi.core.memory.adapters import BulletLog, Blob, JsonFacts, JsonWindow
+from magi.core.memory.adapters import Blob, BulletLog, JsonFacts, JsonWindow
 from magi.core.memory.store import FileMemoryStore
 
 

@@ -17,7 +17,6 @@ trivial to test against a fake `ConversationService`.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
-from typing import Optional, Union
 
 from agno.media import Image
 
@@ -26,7 +25,7 @@ from magi.client.types import Delta, InboundImage, Media, Reply
 from magi.core.conversation import ConversationDelta, ConversationReply, ConversationService
 
 
-def _subtype(mime: Optional[str]) -> Optional[str]:
+def _subtype(mime: str | None) -> str | None:
     """agno's `format` — the subtype of a mime type ("image/png" -> "png")."""
     return mime.split("/", 1)[1] if mime and "/" in mime else None
 
@@ -112,7 +111,7 @@ class EmbeddedClient:
         self._mcp_toolkits = list(mcp_toolkits)
         self._opened = False
 
-    async def aopen(self) -> "EmbeddedClient":
+    async def aopen(self) -> EmbeddedClient:
         if not self._opened:
             for tk in self._mcp_toolkits:
                 connect = getattr(tk, "connect", None)
@@ -134,7 +133,7 @@ class EmbeddedClient:
                     pass
         self._opened = False
 
-    async def __aenter__(self) -> "EmbeddedClient":
+    async def __aenter__(self) -> EmbeddedClient:
         return await self.aopen()
 
     async def __aexit__(self, *exc: object) -> None:
@@ -151,7 +150,7 @@ class EmbeddedClient:
 
     async def stream(
         self, text: str, *, images: Sequence[InboundImage] = ()
-    ) -> AsyncIterator[Union[Delta, Reply]]:
+    ) -> AsyncIterator[Delta | Reply]:
         async for item in self._conversation.handle_stream(
             user_id=self._scoped,
             session_id=self.session_id,

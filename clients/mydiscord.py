@@ -14,6 +14,7 @@ import asyncio
 import io
 import mimetypes
 import re
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from textwrap import dedent
@@ -35,8 +36,10 @@ from magi.core.discord_context import (
 try:
     import discord
 
-except ImportError, ModuleNotFoundError:
-    raise ImportError("`discord.py` not installed. Please install using `pip install discord.py`")
+except (ImportError, ModuleNotFoundError) as exc:
+    raise ImportError(
+        "`discord.py` not installed. Please install using `pip install discord.py`"
+    ) from exc
 
 
 # Intent verbs that, when paired with the word "thread", signal the user wants a
@@ -81,16 +84,16 @@ def _wants_new_thread(text: str) -> bool:
 
 
 class RequiresConfirmationView(discord.ui.View):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.value = None
+        self.value: bool | None = None
 
     @discord.ui.button(label="Confirm", style=discord.ButtonStyle.primary)
     async def confirm(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button,
-    ):
+    ) -> None:
         self.value = True
         button.disabled = True
         await interaction.response.edit_message(view=self)
@@ -102,14 +105,14 @@ class RequiresConfirmationView(discord.ui.View):
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button,
-    ):
+    ) -> None:
         self.value = False
         button.disabled = True
         await interaction.response.edit_message(view=self)
         self.clear_items()
         self.stop()
 
-    async def on_timeout(self):
+    async def on_timeout(self) -> None:
         log_warning("Agent Timeout Error")
 
 
@@ -124,7 +127,7 @@ class DiscordClient:
         client: discord.Client,
         token: str,
         supports_audio: bool = True,
-    ):
+    ) -> None:
         self.conversation = conversation
         self.client = client
         self.token = token
@@ -135,9 +138,9 @@ class DiscordClient:
         log_info(f"DiscordClient init (supports_audio={supports_audio})")
         self._setup_events()
 
-    def _setup_events(self):
+    def _setup_events(self) -> None:
         @self.client.event
-        async def on_ready():
+        async def on_ready() -> None:
             user = self.client.user
             guilds = self.client.guilds
             log_info(
@@ -146,7 +149,7 @@ class DiscordClient:
             )
 
         @self.client.event
-        async def on_message(message):
+        async def on_message(message: discord.Message) -> None:
             if message.author == self.client.user:
                 log_info(f"sent {message.content}")
                 return
@@ -230,7 +233,7 @@ class DiscordClient:
                 finally:
                     reset_current_discord_context(token)
 
-    async def _extract_media(self, message) -> tuple[dict, list[str]]:
+    async def _extract_media(self, message: discord.Message) -> tuple[dict, list[str]]:
         """Map ALL of a message's media to agno media kwargs for `*.arun(**media)`.
 
         Everything is read as raw bytes and handed to agno, which formats it per
@@ -304,7 +307,7 @@ class DiscordClient:
         return media, notes
 
     async def _extract_emoji(
-        self, message, images: list[Image], notes: list[str]
+        self, message: discord.Message, images: list[Image], notes: list[str]
     ) -> tuple[list[Image], list[str]]:
         """Wire custom emoji (`<:name:id>`) into the run as images.
 
@@ -328,7 +331,7 @@ class DiscordClient:
         return images, notes
 
     async def _extract_stickers(
-        self, message, images: list[Image], notes: list[str]
+        self, message: discord.Message, images: list[Image], notes: list[str]
     ) -> tuple[list[Image], list[str]]:
         """Wire message stickers into the run as images (lottie ones are JSON
         animations, not pixels — skipped with a note)."""
@@ -364,11 +367,11 @@ class DiscordClient:
     def _build_run_context(
         self,
         *,
-        message,
-        target,
+        message: discord.Message,
+        target: discord.abc.Messageable,
         message_text: str,
         message_user: str,
-        message_user_id,
+        message_user_id: int,
         message_url: str,
     ) -> DiscordRunContext:
         guild = getattr(message, "guild", None)
@@ -406,13 +409,13 @@ class DiscordClient:
         return dedent("\n".join(lines))
 
     @asynccontextmanager
-    async def _safe_typing(self, target):
+    async def _safe_typing(self, target: discord.abc.Messageable) -> AsyncIterator[None]:
         """Typing is cosmetic; timeouts here should not abort the reply."""
         typing_cm = None
         try:
             typing_cm = target.typing()
             await typing_cm.__aenter__()
-        except (asyncio.TimeoutError, discord.HTTPException) as exc:
+        except (TimeoutError, discord.HTTPException) as exc:
             log_warning(
                 f"typing indicator failed for target id={getattr(target, 'id', '?')}: "
                 f"{type(exc).__name__}: {exc}"
@@ -426,7 +429,7 @@ class DiscordClient:
                 try:
                     if await typing_cm.__aexit__(type(exc), exc, exc.__traceback__):
                         return
-                except (asyncio.TimeoutError, discord.HTTPException) as exit_exc:
+                except (TimeoutError, discord.HTTPException) as exit_exc:
                     log_warning(
                         f"typing indicator cleanup failed for target id={getattr(target, 'id', '?')}: "
                         f"{type(exit_exc).__name__}: {exit_exc}"
@@ -436,13 +439,15 @@ class DiscordClient:
             if typing_cm is not None:
                 try:
                     await typing_cm.__aexit__(None, None, None)
-                except (asyncio.TimeoutError, discord.HTTPException) as exc:
+                except (TimeoutError, discord.HTTPException) as exc:
                     log_warning(
                         f"typing indicator cleanup failed for target id={getattr(target, 'id', '?')}: "
                         f"{type(exc).__name__}: {exc}"
                     )
 
-    async def _maybe_handle_command(self, channel, text: str, user_id) -> bool:
+    async def _maybe_handle_command(
+        self, channel: discord.abc.Messageable, text: str, user_id: int
+    ) -> bool:
         """Handle `!`-prefixed control commands. Returns True if one was handled.
 
         Commands act on THIS chat's session (`channel.id`) — no new-thread logic —
@@ -497,7 +502,13 @@ class DiscordClient:
 
         return False
 
-    async def _resolve_target(self, message, channel, message_text: str, message_user: str):
+    async def _resolve_target(
+        self,
+        message: discord.Message,
+        channel: discord.abc.Messageable,
+        message_text: str,
+        message_user: str,
+    ) -> tuple[discord.abc.Messageable | None, str]:
         """Pick the reply target and its session id.
 
         Default = same chat (current channel / thread / DM). A brand-new thread is
@@ -547,7 +558,7 @@ class DiscordClient:
         snippet = " ".join(text.split())[:40].strip()
         return f"{user}: {snippet}" if snippet else f"{user}'s thread"
 
-    async def _send_reply(self, reply: ConversationReply, target) -> None:
+    async def _send_reply(self, reply: ConversationReply, target: discord.abc.Messageable) -> None:
         """Render a channel-neutral reply onto the Discord target: text first,
         then any media as real attachments."""
         sent_any = False
@@ -567,7 +578,7 @@ class DiscordClient:
                 message="I finished processing that, but there was no text content to send.",
             )
 
-    async def _send_media(self, reply: ConversationReply, target) -> bool:
+    async def _send_media(self, reply: ConversationReply, target: discord.abc.Messageable) -> bool:
         """Upload the reply's media as Discord attachments.
 
         Each agno media object is resolved to bytes (inline content, local
@@ -627,7 +638,7 @@ class DiscordClient:
         return sent_any
 
     @staticmethod
-    def _media_filename(item, kind: str, index: int) -> str:
+    def _media_filename(item: Image | Video | Audio | File, kind: str, index: int) -> str:
         """A display name for the upload: explicit filename > URL basename >
         generated `kind-N.ext` from format/mime."""
         explicit = getattr(item, "filename", None)
@@ -645,7 +656,7 @@ class DiscordClient:
             ext = (guessed or ".bin").lstrip(".")
         return f"{kind}-{index}.{ext}"
 
-    async def _media_bytes(self, item) -> bytes | None:
+    async def _media_bytes(self, item: Image | Video | Audio | File) -> bytes | None:
         """Resolve an agno media object to raw bytes; None when unavailable."""
         content = getattr(item, "content", None)
         if isinstance(content, bytes) and content:

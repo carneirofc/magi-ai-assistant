@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -29,13 +28,13 @@ class Media:
     """
 
     kind: str  # "image" | "video" | "audio" | "file"
-    mime_type: Optional[str] = None
-    filename: Optional[str] = None
-    url: Optional[str] = None
-    data: Optional[bytes] = None
+    mime_type: str | None = None
+    filename: str | None = None
+    url: str | None = None
+    data: bytes | None = None
 
     @property
-    def data_uri(self) -> Optional[str]:
+    def data_uri(self) -> str | None:
         if self.data is None:
             return None
         b64 = base64.b64encode(self.data).decode("ascii")
@@ -47,7 +46,7 @@ class Reply:
     """The result of one turn, in terms a UI can render directly."""
 
     text: str
-    reasoning: Optional[str] = None
+    reasoning: str | None = None
     is_error: bool = False
     media: tuple[Media, ...] = ()
 
@@ -71,9 +70,9 @@ class InboundImage:
     (`data` without it still works, but backends see the type when you pass it).
     """
 
-    data: Optional[bytes] = None
-    url: Optional[str] = None
-    mime_type: Optional[str] = None
+    data: bytes | None = None
+    url: str | None = None
+    mime_type: str | None = None
 
 
 # --- HTTP wire <-> types (pure stdlib; the embedded backend maps agno itself) --
@@ -99,7 +98,7 @@ def reply_from_wire(payload: dict) -> Reply:
     )
 
 
-def inbound_to_wire(images: "list[InboundImage] | tuple[InboundImage, ...]") -> list[dict]:
+def inbound_to_wire(images: list[InboundImage] | tuple[InboundImage, ...]) -> list[dict]:
     """Serialize inbound images for the HTTP message body (`images: [...]`).
 
     Bytes ride as base64; an http(s) URL rides by reference. Items with neither

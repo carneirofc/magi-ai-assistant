@@ -18,7 +18,7 @@ import json
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 from agno.tools import tool
 from agno.utils.log import log_info, log_warning
@@ -28,6 +28,7 @@ from magi.agent.tools.outputs import ToolOutput, fail, ok
 from magi.core.config import config
 from magi.core.memory import MemoryManager
 from magi.core.memory.adapters import slug
+from magi.core.types import parse_json_array
 
 
 class Reminder(BaseModel):
@@ -56,11 +57,14 @@ def read_reminders(root: Path, user_id: str) -> list[dict]:
     if not path.exists():
         return []
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
+        data = parse_json_array(path.read_bytes())
+    except OSError as exc:
         log_warning(f"reminders: unreadable {path.name} ({type(exc).__name__}: {exc})")
         return []
-    return data if isinstance(data, list) else []
+    if data is None:
+        log_warning(f"reminders: malformed {path.name}")
+        return []
+    return [item for item in data if isinstance(item, dict)]
 
 
 def _write_reminders(root: Path, user_id: str, items: list[dict]) -> None:
@@ -73,14 +77,14 @@ def _write_reminders(root: Path, user_id: str, items: list[dict]) -> None:
     emit_write(path)
 
 
-def _parse_due(value: str) -> Optional[datetime]:
+def _parse_due(value: str) -> datetime | None:
     try:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
 
 
-def due_reminders_text(root: Path, user_id: str, now: Optional[datetime] = None) -> str:
+def due_reminders_text(root: Path, user_id: str, now: datetime | None = None) -> str:
     """The user's due, not-done reminders as lines for the greeting instruction
     ('' when none). A date-only `due` counts as due from that day's start."""
     now = now or datetime.now()

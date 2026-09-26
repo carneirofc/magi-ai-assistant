@@ -176,8 +176,7 @@ async def test_local_miss_falls_back_to_api(local_config, monkeypatch):
         def raise_for_status(self):
             pass
 
-        def json(self):
-            return [{"name": "obscure_tag", "category": 0, "post_count": 3}]
+        content = b'[{"name": "obscure_tag", "category": 0, "post_count": 3}]'
 
     class _FakeClient:
         async def __aenter__(self):

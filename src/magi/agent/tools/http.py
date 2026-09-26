@@ -28,11 +28,12 @@ pixels into context; these return text only.
 import asyncio
 import ipaddress
 import socket
-from typing import Annotated, Any, Final, Literal
+from typing import Annotated, Final, Literal
 from urllib.parse import urlsplit
 
 import httpx
 from agno.tools import tool
+from agno.tools.function import Function
 from agno.utils.log import log_info, log_warning
 from pydantic import BaseModel, Field
 
@@ -353,4 +354,4 @@ async def http_request(
 
 
 # Read-only fetch + the controllable arbitrary-request escape hatch.
-HTTP_TOOLS: Final[list[Any]] = [http_get, http_request]
+HTTP_TOOLS: Final[list[Function]] = [http_get, http_request]

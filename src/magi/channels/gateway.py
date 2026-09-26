@@ -23,7 +23,7 @@ See ADR 0003.
 
 import asyncio
 from collections.abc import Coroutine
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -51,7 +51,7 @@ def scoped_user_id(platform: str, external_id: object) -> str:
     return f"{platform}:{external_id}"
 
 
-async def run_gateway(*coros: Coroutine[Any, Any, None]) -> None:
+async def run_gateway(*coros: Coroutine[object, object, None]) -> None:
     """Run every coroutine concurrently until one finishes (returns or raises);
     cancel the rest and re-raise that one's exception, if any.
 

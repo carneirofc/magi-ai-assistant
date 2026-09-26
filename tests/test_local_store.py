@@ -112,3 +112,13 @@ def test_get_tolerates_missing_sidecar(tmp_path):
     blob.write_bytes(b"loose")  # no .meta.json sidecar
     data, ctype, metadata = store.get_bytes("users/u1/artifacts/raw")
     assert data == b"loose" and ctype is None and metadata == {}
+
+
+@pytest.mark.parametrize("sidecar", ["{not json", "[1]", '{"metadata": {"k": 1}}'])
+def test_get_tolerates_malformed_sidecar(tmp_path, sidecar):
+    store = _store(tmp_path)
+    store.put_bytes("users/u1/artifacts/m", b"d", content_type="text/plain")
+    blob = tmp_path / "artifacts" / "users" / "u1" / "artifacts" / "m"
+    blob.with_name("m.meta.json").write_text(sidecar, encoding="utf-8")
+    data, ctype, metadata = store.get_bytes("users/u1/artifacts/m")
+    assert data == b"d" and ctype is None and metadata == {}

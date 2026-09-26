@@ -23,7 +23,7 @@ from magi.core.prompts import load_prompt
 load_dotenv()  # secrets only — see module docstring
 
 
-def _secret(name: str):
+def _secret(name: str) -> str | None:
     """A dataclass default that reads a secret from the environment at startup."""
     return field(default_factory=lambda: os.getenv(name) or None)
 
@@ -546,7 +546,7 @@ class Config:
 config = Config()
 
 
-def configure(**overrides) -> Config:
+def configure(**overrides: object) -> Config:
     """Set deployment configuration in code — call once, at the entrypoint,
     before building any channel/team (values are read at build/run time).
 

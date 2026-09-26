@@ -62,9 +62,9 @@ import json
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime
-from contextlib import asynccontextmanager
-from typing import Optional, Protocol, Union
+from typing import Protocol
 
 from agno.db.base import BaseDb
 from agno.media import File, Image
@@ -79,7 +79,6 @@ from pydantic import BaseModel, Field, model_validator
 from magi.agent.introspect import TeamSnapshot, build_snapshot
 from magi.channels.gateway import scoped_user_id
 from magi.core.config import config
-from magi.core.voice import VoiceService, VoiceUnavailable, VoiceUpstreamError
 from magi.core.conversation import (
     ConversationDelta,
     ConversationMood,
@@ -90,6 +89,7 @@ from magi.core.conversation import (
     ConversationToolCall,
     ConversationToolResult,
 )
+from magi.core.voice import VoiceService, VoiceUnavailable, VoiceUpstreamError
 
 # This channel's namespace for `scoped_user_id` (ADR 0003) — the native
 # contract and the OpenAI-compatible shim below are one transport/platform,
@@ -106,9 +106,9 @@ class InboundImage(BaseModel):
     """An image the client sends for the agent to see. Exactly one of
     `data_base64` / `url` is set; a base64 `data:` URI may also ride in `url`."""
 
-    mime_type: Optional[str] = None
-    url: Optional[str] = None
-    data_base64: Optional[str] = None
+    mime_type: str | None = None
+    url: str | None = None
+    data_base64: str | None = None
 
 
 class InboundFile(BaseModel):
@@ -116,10 +116,10 @@ class InboundFile(BaseModel):
     Exactly one of `data_base64` / `url` is set; a base64 `data:` URI may also
     ride in `url`."""
 
-    mime_type: Optional[str] = None
-    filename: Optional[str] = None
-    url: Optional[str] = None
-    data_base64: Optional[str] = None
+    mime_type: str | None = None
+    filename: str | None = None
+    url: str | None = None
+    data_base64: str | None = None
 
 
 class GreetRequest(BaseModel):
@@ -130,7 +130,7 @@ class GreetRequest(BaseModel):
 
 # The auto-title pass (magi/agent/title): opening text -> a short title or None.
 # Injected like the mood pass so this module stays model-free.
-TitleFn = Callable[[str], Awaitable[Optional[str]]]
+TitleFn = Callable[[str], Awaitable[str | None]]
 
 
 class TitleRequest(BaseModel):
@@ -143,7 +143,7 @@ class TitleOut(BaseModel):
     """A short model-made title; null when the pass produced nothing usable —
     the client keeps its derived title."""
 
-    title: Optional[str] = None
+    title: str | None = None
 
 
 class SessionInfo(BaseModel):
@@ -152,7 +152,7 @@ class SessionInfo(BaseModel):
     id: str
     turns: int
     has_summary: bool = False
-    last_ts: Optional[str] = None
+    last_ts: str | None = None
     preview: str = ""
 
 
@@ -163,7 +163,7 @@ class SessionsOut(BaseModel):
 class TranscriptTurn(BaseModel):
     role: str = "?"
     content: str = ""
-    ts: Optional[str] = None
+    ts: str | None = None
 
 
 class TranscriptOut(BaseModel):
@@ -171,7 +171,7 @@ class TranscriptOut(BaseModel):
     (short_term_max), so older turns survive only through the summary."""
 
     turns: list[TranscriptTurn] = Field(default_factory=list)
-    summary: Optional[str] = None
+    summary: str | None = None
 
 
 class HistoryHit(BaseModel):
@@ -179,9 +179,9 @@ class HistoryHit(BaseModel):
     .search_history): a transcript turn, a session summary, or an episode."""
 
     kind: str
-    session_id: Optional[str] = None
-    role: Optional[str] = None
-    ts: Optional[str] = None
+    session_id: str | None = None
+    role: str | None = None
+    ts: str | None = None
     snippet: str = ""
 
 
@@ -194,7 +194,7 @@ class TtsRequest(BaseModel):
     override (tts_mood_styles) — clients pass the mood the reply rode in on."""
 
     text: str = Field(min_length=1)
-    mood: Optional[str] = None
+    mood: str | None = None
 
 
 class TranscriptionOut(BaseModel):
@@ -202,8 +202,8 @@ class TranscriptionOut(BaseModel):
     them; the text is the contract."""
 
     text: str
-    language: Optional[str] = None
-    duration: Optional[float] = None
+    language: str | None = None
+    duration: float | None = None
 
 
 class MemoryFact(BaseModel):
@@ -233,7 +233,7 @@ class MessageRequest(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _require_content(self) -> "MessageRequest":
+    def _require_content(self) -> MessageRequest:
         """A turn must carry something — text or at least one attachment."""
         if not self.text.strip() and not self.images and not self.files:
             raise ValueError("provide text or at least one attachment")
@@ -244,10 +244,10 @@ class MediaItem(BaseModel):
     """One piece of reply media. Exactly one of `data_base64` / `url` is set."""
 
     kind: str  # "image" | "video" | "audio" | "file"
-    mime_type: Optional[str] = None
-    filename: Optional[str] = None
-    url: Optional[str] = None
-    data_base64: Optional[str] = None
+    mime_type: str | None = None
+    filename: str | None = None
+    url: str | None = None
+    data_base64: str | None = None
 
 
 class Usage(BaseModel):
@@ -258,18 +258,18 @@ class Usage(BaseModel):
     total_tokens: int = 0
     cached_tokens: int = 0
     reasoning_tokens: int = 0
-    context_window: Optional[int] = None
+    context_window: int | None = None
 
 
 class MessageReply(BaseModel):
     text: str
-    reasoning: Optional[str] = None
+    reasoning: str | None = None
     is_error: bool = False
     media: list[MediaItem] = Field(default_factory=list)
-    usage: Optional[Usage] = None
+    usage: Usage | None = None
     # The turn's delivery mood — one of the names IdentityOut.moods advertises.
     # None when the mood pass is off or the turn errored.
-    mood: Optional[str] = None
+    mood: str | None = None
 
 
 class ExpressionOut(BaseModel):
@@ -293,7 +293,7 @@ class IdentityOut(BaseModel):
     display_name: str = ""
     description: str = ""
     has_avatar: bool = False
-    avatar_mime: Optional[str] = None
+    avatar_mime: str | None = None
     version: str = ""
     moods: list[str] = Field(default_factory=list)
     mood_vocab_version: int = 1
@@ -335,7 +335,7 @@ def _media_items(reply: ConversationReply) -> list[MediaItem]:
     return items
 
 
-def _usage_wire(reply: ConversationReply) -> Optional[Usage]:
+def _usage_wire(reply: ConversationReply) -> Usage | None:
     """Serialize the reply's token accounting onto the wire, when present."""
     u = reply.usage
     if u is None:
@@ -362,12 +362,12 @@ def _to_wire(reply: ConversationReply) -> MessageReply:
 
 
 # --- inbound media (client → agent) ------------------------------------------
-def _subtype(mime: Optional[str]) -> Optional[str]:
+def _subtype(mime: str | None) -> str | None:
     """The subtype of a mime type, agno's `format` ("image/png" -> "png")."""
     return mime.split("/", 1)[1] if mime and "/" in mime else None
 
 
-def _decode_data_uri(uri: str) -> Optional[tuple[bytes, Optional[str]]]:
+def _decode_data_uri(uri: str) -> tuple[bytes, str | None] | None:
     """`(bytes, mime)` for a base64 `data:` URI, or None if it isn't one/decodes."""
     if not uri.startswith("data:"):
         return None
@@ -381,9 +381,7 @@ def _decode_data_uri(uri: str) -> Optional[tuple[bytes, Optional[str]]]:
         return None
 
 
-def _inbound_image(
-    url: Optional[str], data_base64: Optional[str], mime_type: Optional[str]
-) -> Optional[Image]:
+def _inbound_image(url: str | None, data_base64: str | None, mime_type: str | None) -> Image | None:
     """Build an inbound agno Image from a client reference.
 
     Inline bytes (`data_base64`, or a `data:` URI in `url`) are decoded so any
@@ -408,11 +406,11 @@ def _inbound_image(
 
 
 def _inbound_file(
-    url: Optional[str],
-    data_base64: Optional[str],
-    mime_type: Optional[str],
-    filename: Optional[str],
-) -> Optional[File]:
+    url: str | None,
+    data_base64: str | None,
+    mime_type: str | None,
+    filename: str | None,
+) -> File | None:
     """Build an inbound agno File from a client reference (the non-image sibling
     of `_inbound_image`).
 
@@ -472,7 +470,7 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _greeting_instruction(now: Optional[datetime] = None, due_reminders: str = "") -> str:
+def _greeting_instruction(now: datetime | None = None, due_reminders: str = "") -> str:
     """The greeting turn's run input: the greet policy prompt (overlay-able per
     persona — prompts/greet.md) plus the local time of day, read per request so
     every greeting gets the real clock. Due reminders, when the deployment
@@ -500,32 +498,32 @@ class _ImageUrl(BaseModel):
     """The `image_url` payload of an OpenAI content part (a URL or `data:` URI)."""
 
     url: str
-    detail: Optional[str] = None
+    detail: str | None = None
 
 
 class _ContentPart(BaseModel):
     """One element of OpenAI's array-form message content (text or image)."""
 
     type: str
-    text: Optional[str] = None
-    image_url: Optional[_ImageUrl] = None
+    text: str | None = None
+    image_url: _ImageUrl | None = None
 
 
 class ChatMessage(BaseModel):
     role: str
-    content: Union[str, list[_ContentPart], None] = None
+    content: str | list[_ContentPart] | None = None
 
 
 class ChatCompletionRequest(BaseModel):
     """The slice of OpenAI's chat-completions body this shim honors."""
 
     messages: list[ChatMessage] = Field(min_length=1)
-    model: Optional[str] = None
+    model: str | None = None
     stream: bool = False
-    user: Optional[str] = None
+    user: str | None = None
 
 
-def _message_text(content: Union[str, list[_ContentPart], None]) -> str:
+def _message_text(content: str | list[_ContentPart] | None) -> str:
     """The plain text of a message, flattening OpenAI's array content form."""
     if isinstance(content, str):
         return content
@@ -534,7 +532,7 @@ def _message_text(content: Union[str, list[_ContentPart], None]) -> str:
     return ""
 
 
-def _message_images(content: Union[str, list[_ContentPart], None]) -> list[Image]:
+def _message_images(content: str | list[_ContentPart] | None) -> list[Image]:
     """The inbound images of a message (OpenAI `image_url` parts → agno Images)."""
     if not isinstance(content, list):
         return []
@@ -594,7 +592,7 @@ def _chat_chunk(
     created: int,
     model: str,
     delta: dict,
-    finish_reason: Optional[str] = None,
+    finish_reason: str | None = None,
 ) -> str:
     """One `chat.completion.chunk` SSE frame (OpenAI streams bare `data:` lines)."""
     payload = {
@@ -615,7 +613,9 @@ class MCPConnection(Protocol):
     async def close(self) -> None: ...
 
 
-def _mcp_lifespan(mcp_toolkits: Sequence[MCPConnection]):
+def _mcp_lifespan(
+    mcp_toolkits: Sequence[MCPConnection],
+) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
     """A FastAPI lifespan that opens each member's MCP connection at startup and
     closes it at shutdown, on the serving event loop.
 
@@ -649,13 +649,13 @@ def _mcp_lifespan(mcp_toolkits: Sequence[MCPConnection]):
 
 def create_app(
     conversation: ConversationService,
-    auth_token: Optional[str] = None,
+    auth_token: str | None = None,
     *,
-    cors_origins: Optional[Sequence[str]] = None,
-    mcp_toolkits: Optional[Sequence[MCPConnection]] = None,
-    admin_app: Optional[FastAPI] = None,
-    title_fn: Optional[TitleFn] = None,
-    voice: Optional[VoiceService] = None,
+    cors_origins: Sequence[str] | None = None,
+    mcp_toolkits: Sequence[MCPConnection] | None = None,
+    admin_app: FastAPI | None = None,
+    title_fn: TitleFn | None = None,
+    voice: VoiceService | None = None,
 ) -> FastAPI:
     """The FastAPI app over an already-built `ConversationService` (pure factory).
 
@@ -684,7 +684,7 @@ def create_app(
     bearer = HTTPBearer(auto_error=False)
 
     def require_auth(
-        credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
+        credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
     ) -> None:
         if auth_token is None:
             return
@@ -717,7 +717,7 @@ def create_app(
         """Map a conversation event stream onto the SSE wire (shared by the
         message and greeting stream routes)."""
 
-        async def events():
+        async def events() -> AsyncIterator[str]:
             async for item in items:
                 # Live observability frames (thinking + tool activity) ride
                 # alongside the text `delta`s; the terminal `done` frame stays
@@ -876,9 +876,9 @@ def create_app(
         try:
             audio, mime = await voice.synthesize(body.text, mood=body.mood)
         except VoiceUnavailable as exc:
-            raise HTTPException(status_code=503, detail=str(exc))
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except VoiceUpstreamError as exc:
-            raise HTTPException(status_code=502, detail=str(exc))
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
         return Response(content=audio, media_type=mime, headers={"Cache-Control": "no-store"})
 
     @app.post(
@@ -902,9 +902,9 @@ def create_app(
                 mime=file.content_type or "audio/webm",
             )
         except VoiceUnavailable as exc:
-            raise HTTPException(status_code=503, detail=str(exc))
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except VoiceUpstreamError as exc:
-            raise HTTPException(status_code=502, detail=str(exc))
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
         return TranscriptionOut(
             text=result.text, language=result.language, duration=result.duration
         )
@@ -982,7 +982,7 @@ def create_app(
         )
 
     @app.get("/v1/identity/avatar", dependencies=[Depends(require_auth)])
-    def get_identity_avatar(mood: Optional[str] = Query(default=None)) -> Response:
+    def get_identity_avatar(mood: str | None = Query(default=None)) -> Response:
         """The bot's profile-picture bytes (404 when none is set).
 
         With `?mood=…` this serves that mood's expression portrait instead
@@ -1026,9 +1026,9 @@ def create_app(
     )
     async def chat_completions(
         body: ChatCompletionRequest,
-        x_session_id: Optional[str] = Header(default=None),
-        x_user_id: Optional[str] = Header(default=None),
-    ) -> Union[dict, StreamingResponse]:
+        x_session_id: str | None = Header(default=None),
+        x_user_id: str | None = Header(default=None),
+    ) -> dict | StreamingResponse:
         text, images = _last_user_turn(body.messages)
         if not text and not images:
             raise HTTPException(
@@ -1067,7 +1067,7 @@ def create_app(
             # Lead frame announces the assistant role (OpenAI convention).
             yield _chat_chunk(completion_id, created, model, {"role": "assistant"})
             streamed_any = False
-            final: Optional[ConversationReply] = None
+            final: ConversationReply | None = None
             async for item in conversation.handle_stream(
                 user_id=user_id, session_id=session_id, text=text, media=media
             ):
@@ -1117,10 +1117,10 @@ def _collect_mcp_toolkits(runner: object) -> list[MCPConnection]:
     return toolkits
 
 
-def build_api_app(db: Optional[BaseDb] = None) -> FastAPI:
+def build_api_app(db: BaseDb | None = None) -> FastAPI:
     """Composition root: the real stack from config, served over HTTP."""
-    from magi.channels.bootstrap import build_conversation_service
     from magi.agent.members import MEMBER_BUILDERS, build_discord_agent
+    from magi.channels.bootstrap import build_conversation_service
     from magi.core.config import config
     from magi.core.prompts import load_prompt
 
@@ -1185,7 +1185,7 @@ class ApiAdapter:
         await self._server.serve()
 
 
-def build_api_adapter(db: Optional[BaseDb] = None) -> ApiAdapter:
+def build_api_adapter(db: BaseDb | None = None) -> ApiAdapter:
     """Composition root for the `PlatformAdapter` form — wraps `build_api_app`,
     it does not reimplement it, so the two stay in lockstep."""
     from magi.core.config import config

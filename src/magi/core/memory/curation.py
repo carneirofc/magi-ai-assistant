@@ -17,8 +17,9 @@ actual model call is an injected `CurateFn` built in `magi/agent/curator.py`, th
 seam the summarizers use. The manager applies the returned operations deterministically.
 """
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Literal, Optional
+from typing import Literal
 
 # The per-fact verbs the curator may emit. NOOP isn't a `FactOp` — it's simply an
 # empty `operations` list (the common case: the turn changed nothing durable).
@@ -38,8 +39,8 @@ class FactOp:
     """
 
     op: FactOpKind
-    fact_id: Optional[str] = None
-    text: Optional[str] = None
+    fact_id: str | None = None
+    text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -75,12 +76,12 @@ class CurationResult:
     # Per-fact changes to the durable profile; empty list means NOOP.
     operations: tuple[FactOp, ...] = field(default_factory=tuple)
     # A one-line episode to record at a natural close, or None.
-    episode: Optional[str] = None
+    episode: str | None = None
     # A general, lasting behavior rule to append to the persona, or None.
-    persona_adjustment: Optional[str] = None
+    persona_adjustment: str | None = None
     # An evolution proposal to file (rare; the curator's escalation path when a
     # recurring issue belongs in an adjustable prompt, not the persona), or None.
-    proposal: Optional[PromptProposal] = None
+    proposal: PromptProposal | None = None
 
     @property
     def is_empty(self) -> bool:

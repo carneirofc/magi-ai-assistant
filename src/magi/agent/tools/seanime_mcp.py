@@ -53,7 +53,7 @@ def _headers() -> dict[str, str]:
     return {}
 
 
-def build_seanime_mcp_tools() -> "MCPTools":
+def build_seanime_mcp_tools() -> MCPTools:
     """The Seanime MCP toolkit, pointed at `config.seanime_mcp_url`.
 
     Returns an unconnected `MCPTools`; agno connects it on the owning agent's

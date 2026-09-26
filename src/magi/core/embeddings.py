@@ -19,8 +19,6 @@ logs a warning and returns `None`. Callers treat `None` as "embedding unavailabl
 and degrade to a no-op; embedding must never break a chat or an ingest.
 """
 
-from typing import Optional
-
 from agno.utils.log import log_warning
 
 from magi.core.config import config
@@ -50,7 +48,7 @@ def _route(model_id: str) -> tuple[str, str | None, str | None]:
     return _routed(model_id), config.litellm_base_url, config.litellm_api_key
 
 
-def embed_text(text: str, *, model_id: Optional[str] = None) -> Optional[list[float]]:
+def embed_text(text: str, *, model_id: str | None = None) -> list[float] | None:
     """Embed one string, or `None` on empty input / any failure.
 
     `model_id` defaults to `config.embedding_model_id`. The endpoint and key are

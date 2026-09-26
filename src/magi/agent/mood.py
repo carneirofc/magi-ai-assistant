@@ -15,7 +15,6 @@ may ignore response_format), and any failure degrades to the vocabulary's first
 entry — the mood pass must never break a chat.
 """
 
-import json
 import re
 from typing import Literal
 
@@ -27,6 +26,7 @@ from magi.agent.model import build_member_model
 from magi.core.config import config
 from magi.core.conversation import MoodFn
 from magi.core.prompts import load_prompt
+from magi.core.types import parse_json_object
 
 # First {...} block in a text reply; only used when the backend returned a string
 # instead of the parsed schema instance.
@@ -51,11 +51,8 @@ def _extract_mood(content: object, valid: frozenset[str]) -> str | None:
     if isinstance(content, str):
         match = _JSON_RE.search(content)
         if match:
-            try:
-                data = json.loads(match.group(0))
-            except json.JSONDecodeError, ValueError:
-                return None
-            value = data.get("mood") if isinstance(data, dict) else None
+            data = parse_json_object(match.group(0))
+            value = data.get("mood") if data is not None else None
             if isinstance(value, str) and value in valid:
                 return value
     return None

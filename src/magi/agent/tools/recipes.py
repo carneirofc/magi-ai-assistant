@@ -13,12 +13,12 @@ recipe, so its target host is intentional — that approval is the SSRF
 boundary here, mirroring how http_request trusts an explicit user request.
 """
 
-import json
 from pathlib import Path
 from typing import Annotated, Final
 
 import httpx
 from agno.tools import tool
+from agno.tools.function import Function
 from agno.utils.log import log_info, log_warning
 from pydantic import BaseModel, Field
 
@@ -36,7 +36,7 @@ class RecipeCallData(BaseModel):
     body: str = Field(description="Response text (truncation marked).")
 
 
-def _build_one(recipe: dict):
+def _build_one(recipe: dict) -> Function:
     name = str(recipe["name"])
     method = str(recipe["method"]).upper()
     url_template = str(recipe["url_template"])
@@ -116,4 +116,4 @@ def build_recipe_tools(memory_root: Path) -> list:
 
 def _parse_recipe_file(path: Path) -> dict:
     """Test seam: parse+validate one recipe file (raises on invalid)."""
-    return validate_recipe(json.dumps(json.loads(path.read_text(encoding="utf-8"))))
+    return validate_recipe(path.read_text(encoding="utf-8"))

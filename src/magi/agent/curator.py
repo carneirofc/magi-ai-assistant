@@ -13,9 +13,8 @@ to a no-op (never raises), and the manager swallows failures anyway — curation
 must never break a chat.
 """
 
-import json
 import re
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from agno.agent import Agent
 from agno.utils.log import log_info, log_warning
@@ -25,6 +24,7 @@ from magi.agent.model import build_member_model
 from magi.core.config import config
 from magi.core.memory import CurateFn, CurationInput, CurationResult, FactOp, PromptProposal
 from magi.core.prompts import load_prompt
+from magi.core.types import parse_json_object
 
 if TYPE_CHECKING:
     from magi.core.evolution import EvolutionStore
@@ -47,12 +47,12 @@ def _format_input(inp: CurationInput) -> str:
     )
 
 
-def _str_field(data: dict, key: str) -> Optional[str]:
+def _str_field(data: dict, key: str) -> str | None:
     value = data.get(key)
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-def _parse_op(item: object) -> Optional[FactOp]:
+def _parse_op(item: object) -> FactOp | None:
     """One operation dict -> a `FactOp`, or None when it's malformed/unusable.
 
     Drops anything that can't be applied: an unknown verb, an add/update with no
@@ -73,7 +73,7 @@ def _parse_op(item: object) -> Optional[FactOp]:
     return None
 
 
-def _parse_proposal(data: dict) -> Optional[PromptProposal]:
+def _parse_proposal(data: dict) -> PromptProposal | None:
     """The optional `proposal` object -> a `PromptProposal`, or None.
 
     All three fields must be non-empty strings; anything less is dropped (the
@@ -96,11 +96,8 @@ def _parse(text: str) -> CurationResult:
     match = _JSON_RE.search(text)
     if not match:
         return CurationResult()
-    try:
-        data = json.loads(match.group(0))
-    except json.JSONDecodeError, ValueError:
-        return CurationResult()
-    if not isinstance(data, dict):
+    data = parse_json_object(match.group(0))
+    if data is None:
         return CurationResult()
     raw_ops = data.get("operations")
     operations = (
@@ -116,7 +113,7 @@ def _parse(text: str) -> CurationResult:
     )
 
 
-def file_curator_proposal(store: "EvolutionStore", proposal: PromptProposal) -> bool:
+def file_curator_proposal(store: EvolutionStore, proposal: PromptProposal) -> bool:
     """File one curator proposal into the evolution queue; never raises.
 
     The same rails as every proposal (allowlisted target, capped queue) — a
@@ -141,7 +138,7 @@ def file_curator_proposal(store: "EvolutionStore", proposal: PromptProposal) -> 
 
 
 def dispatch_curator_proposal(
-    store: Optional["EvolutionStore"], proposal: Optional[PromptProposal]
+    store: EvolutionStore | None, proposal: PromptProposal | None
 ) -> None:
     """Route a parsed proposal to the queue, or drop it honestly.
 

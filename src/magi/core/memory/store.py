@@ -40,7 +40,7 @@ def _norm_bullet(text: str) -> str:
 class ScopedMemory:
     """The six per-(user, session) memory files, each as its file-shape adapter."""
 
-    def __init__(self, root: Path, user_id: object, session_id: object):
+    def __init__(self, root: Path, user_id: object, session_id: object) -> None:
         self.user_id = str(user_id)
         self.session_id = str(session_id)
         users = root / "users" / slug(user_id)
@@ -73,7 +73,7 @@ class ScopedMemory:
 class FileMemoryStore:
     """Root of the on-disk memory tree: the global persona + a per-scope bundle factory."""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path) -> None:
         self.root = Path(root)
         self.persona = BulletLog(
             self.root / "persona.md",

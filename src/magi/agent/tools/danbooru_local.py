@@ -78,7 +78,7 @@ def _loose_score(q: str, tokens: list[str], name: str) -> float:
 
 
 class LocalDanbooru:
-    def __init__(self, tags_csv: str, wiki_csv: str):
+    def __init__(self, tags_csv: str, wiki_csv: str) -> None:
         self._tags_path = Path(tags_csv)
         self._wiki_path = Path(wiki_csv)
         self._tags: dict[str, tuple[int, int]] | None = None  # name -> (category, count)

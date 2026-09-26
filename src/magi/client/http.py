@@ -15,17 +15,19 @@ process.
 
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncIterator, Sequence
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING
+
+from pydantic import BaseModel
 
 from magi.client.types import Delta, InboundImage, Reply, inbound_to_wire, reply_from_wire
+from magi.core.types import JSON_OBJECT, JsonObject
 
 if TYPE_CHECKING:  # keep httpx off the import path unless actually used
     import httpx
 
 
-async def _iter_sse(response: "httpx.Response") -> AsyncIterator[tuple[str, dict]]:
+async def _iter_sse(response: httpx.Response) -> AsyncIterator[tuple[str, JsonObject]]:
     """Yield `(event, data)` pairs from an SSE response.
 
     Frames are blank-line separated; we accumulate `event:` / `data:` lines and
@@ -37,7 +39,7 @@ async def _iter_sse(response: "httpx.Response") -> AsyncIterator[tuple[str, dict
         line = raw.rstrip("\r")
         if line == "":  # frame boundary
             if data_lines:
-                yield event, json.loads("\n".join(data_lines))
+                yield event, JSON_OBJECT.validate_json("\n".join(data_lines))
             event = "message"
             data_lines = []
             continue
@@ -50,7 +52,11 @@ async def _iter_sse(response: "httpx.Response") -> AsyncIterator[tuple[str, dict
         elif field == "data":
             data_lines.append(value)
     if data_lines:  # a final frame with no trailing blank line
-        yield event, json.loads("\n".join(data_lines))
+        yield event, JSON_OBJECT.validate_json("\n".join(data_lines))
+
+
+class _Flushed(BaseModel):
+    dropped_turns: int
 
 
 class HttpClient:
@@ -62,9 +68,9 @@ class HttpClient:
         user_id: str,
         session_id: str = "default",
         *,
-        auth_token: Optional[str] = None,
+        auth_token: str | None = None,
         timeout: float = 120.0,
-        client: "Optional[httpx.AsyncClient]" = None,
+        client: httpx.AsyncClient | None = None,
     ) -> None:
         self.user_id = user_id
         self.session_id = session_id
@@ -81,7 +87,7 @@ class HttpClient:
             )
             self._owns_client = True
 
-    async def aopen(self) -> "HttpClient":
+    async def aopen(self) -> HttpClient:
         return self  # httpx.AsyncClient connects lazily on first request
 
     async def aclose(self) -> None:
@@ -89,7 +95,7 @@ class HttpClient:
         if self._owns_client:
             await self._client.aclose()
 
-    async def __aenter__(self) -> "HttpClient":
+    async def __aenter__(self) -> HttpClient:
         return await self.aopen()
 
     async def __aexit__(self, *exc: object) -> None:
@@ -107,11 +113,11 @@ class HttpClient:
             f"/v1/sessions/{self.session_id}/messages", json=self._body(text, images)
         )
         resp.raise_for_status()
-        return reply_from_wire(resp.json())
+        return reply_from_wire(JSON_OBJECT.validate_json(resp.content))
 
     async def stream(
         self, text: str, *, images: Sequence[InboundImage] = ()
-    ) -> AsyncIterator[Union[Delta, Reply]]:
+    ) -> AsyncIterator[Delta | Reply]:
         async with self._client.stream(
             "POST",
             f"/v1/sessions/{self.session_id}/messages/stream",
@@ -129,11 +135,11 @@ class HttpClient:
             f"/v1/sessions/{self.session_id}/flush", json={"user_id": self.user_id}
         )
         resp.raise_for_status()
-        return int(resp.json()["dropped_turns"])
+        return _Flushed.model_validate_json(resp.content).dropped_turns
 
-    async def context_stats(self) -> dict[str, object]:
+    async def context_stats(self) -> JsonObject:
         resp = await self._client.get(
             f"/v1/sessions/{self.session_id}/context", params={"user_id": self.user_id}
         )
         resp.raise_for_status()
-        return resp.json()
+        return JSON_OBJECT.validate_json(resp.content)

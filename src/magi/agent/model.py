@@ -13,12 +13,18 @@ and register it in `_BUILDERS`.
 import enum
 from collections.abc import Callable
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 import pydantic
 from agno.models.base import Model
 from agno.utils.log import log_info
 
 from magi.core.config import config
+
+if TYPE_CHECKING:
+    from agno.models.litellm import LiteLLM
+    from agno.models.message import Message
+    from agno.models.response import ModelResponse
 
 
 class ModelProviderEnum(enum.StrEnum):
@@ -57,7 +63,7 @@ class ModelDefinition(pydantic.BaseModel):
 
 
 @lru_cache(maxsize=1)
-def _proxy_litellm_cls():
+def _proxy_litellm_cls() -> type[LiteLLM]:
     """A LiteLLM subclass that tolerates no-argument tool calls (built once).
 
     Some proxied backends (Databricks-served Claude) emit tool_use blocks with no
@@ -70,7 +76,9 @@ def _proxy_litellm_cls():
     """
     from agno.models.litellm import LiteLLM
 
-    def _normalize(tool_calls):
+    def _normalize(
+        tool_calls: list[dict[str, object]] | None,
+    ) -> list[dict[str, object]] | None:
         for tc in tool_calls or []:
             fn = tc.get("function")
             if isinstance(fn, dict):
@@ -80,12 +88,14 @@ def _proxy_litellm_cls():
         return tool_calls
 
     class ProxyLiteLLM(LiteLLM):
-        def _parse_provider_response(self, response, **kwargs):
+        def _parse_provider_response(self, response: object, **kwargs: object) -> ModelResponse:
             mr = super()._parse_provider_response(response, **kwargs)
             _normalize(mr.tool_calls)
             return mr
 
-        def _format_messages(self, messages, compress_tool_results: bool = False):
+        def _format_messages(
+            self, messages: list[Message], compress_tool_results: bool = False
+        ) -> list[dict[str, object]]:
             for m in messages:
                 if getattr(m, "role", None) == "assistant" and m.tool_calls:
                     _normalize(m.tool_calls)

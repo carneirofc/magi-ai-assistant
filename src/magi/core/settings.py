@@ -19,7 +19,10 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+from magi.core.types import JsonObject, parse_json_object
 
 
 @dataclass(frozen=True)
@@ -27,10 +30,10 @@ class MemoryOverrides:
     """Operator overrides for the memory subsystem. Every field is optional — `None`
     means "inherit the code default" (the factory resolves it against `config`)."""
 
-    memory_dir: Optional[str] = None
-    git_enabled: Optional[bool] = None
-    git_author_name: Optional[str] = None
-    git_author_email: Optional[str] = None
+    memory_dir: str | None = None
+    git_enabled: bool | None = None
+    git_author_name: str | None = None
+    git_author_email: str | None = None
 
     @property
     def is_empty(self) -> bool:
@@ -40,6 +43,18 @@ class MemoryOverrides:
             and self.git_author_name is None
             and self.git_author_email is None
         )
+
+
+class _MemorySection(BaseModel):
+    """The `memory` section as stored on disk. Strict: a wrong-typed field makes
+    the whole section fall back to the code defaults rather than coercing."""
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    memory_dir: str | None = None
+    git_enabled: bool | None = None
+    git_author_name: str | None = None
+    git_author_email: str | None = None
 
 
 class OperatorSettingsStore:
@@ -60,36 +75,32 @@ class OperatorSettingsStore:
     file degrades to code defaults instead of breaking startup.
     """
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path) -> None:
         self.path = Path(path)
 
     # --- reads --------------------------------------------------------------
-    def _read_json(self) -> dict:
+    def _read_json(self) -> JsonObject:
         """The parsed settings, or `{}` when absent/corrupt (never raises)."""
         if not self.path.exists():
             return {}
         try:
-            parsed = json.loads(self.path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError, OSError:
+            return parse_json_object(self.path.read_bytes()) or {}
+        except OSError:
             return {}
-        return parsed if isinstance(parsed, dict) else {}
 
     def read_memory(self) -> MemoryOverrides:
         """The persisted memory overrides (all-`None` when nothing is set)."""
-        section = self._read_json().get("memory")
-        if not isinstance(section, dict):
+        try:
+            section = _MemorySection.model_validate(self._read_json().get("memory"))
+        except ValidationError:
             return MemoryOverrides()
-        raw_dir = section.get("memory_dir")
-        raw_enabled = section.get("git_enabled")
-        raw_name = section.get("git_author_name")
-        raw_email = section.get("git_author_email")
         # A blank string is treated as "unset" so clearing a field in the UI falls
         # back to the code default rather than pinning an empty path/name.
         return MemoryOverrides(
-            memory_dir=str(raw_dir).strip() or None if isinstance(raw_dir, str) else None,
-            git_enabled=bool(raw_enabled) if isinstance(raw_enabled, bool) else None,
-            git_author_name=str(raw_name).strip() or None if isinstance(raw_name, str) else None,
-            git_author_email=str(raw_email).strip() or None if isinstance(raw_email, str) else None,
+            memory_dir=(section.memory_dir or "").strip() or None,
+            git_enabled=section.git_enabled,
+            git_author_name=(section.git_author_name or "").strip() or None,
+            git_author_email=(section.git_author_email or "").strip() or None,
         )
 
     def read_mcp(self) -> list[dict]:

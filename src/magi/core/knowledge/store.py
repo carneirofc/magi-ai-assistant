@@ -23,9 +23,10 @@ nothing in the agent uses it yet, but the store already supports it end to end.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional, Protocol, Sequence
+from datetime import UTC, datetime
+from typing import Protocol
 
 from agno.utils.log import log_info, log_warning
 
@@ -123,7 +124,7 @@ class KnowledgeSearcher(Protocol):
         query: str,
         top_k: int,
         *,
-        subject: Optional[str] = None,
+        subject: str | None = None,
         tags: Sequence[str] = (),
         scopes: Sequence[str] = (GLOBAL_SCOPE,),
     ) -> list[KnowledgeHit]: ...
@@ -135,7 +136,7 @@ class KnowledgeTagger(Protocol):
 
     def tag_document(
         self, doc_id: str, *, add: Sequence[str] = (), remove: Sequence[str] = ()
-    ) -> Optional[list[str]]: ...
+    ) -> list[str] | None: ...
 
 
 class KnowledgeIndexer(Protocol):
@@ -149,11 +150,11 @@ class KnowledgeIndexer(Protocol):
         text: str,
         *,
         source: str,
-        title: Optional[str] = None,
+        title: str | None = None,
         subject: str = "",
-        tags: Optional[list[str]] = None,
+        tags: list[str] | None = None,
         scope: str = GLOBAL_SCOPE,
-        metadata: Optional[dict[str, str]] = None,
+        metadata: dict[str, str] | None = None,
     ) -> int: ...
 
 
@@ -184,12 +185,12 @@ class KnowledgeStore:
 
     def __init__(
         self,
-        collection: Optional[str] = None,
+        collection: str | None = None,
         *,
-        chunk_chars: Optional[int] = None,
-        chunk_overlap: Optional[int] = None,
-        archive: Optional[ItemArchive] = None,
-    ):
+        chunk_chars: int | None = None,
+        chunk_overlap: int | None = None,
+        archive: ItemArchive | None = None,
+    ) -> None:
         self.collection = collection or config.knowledge_collection
         self.chunk_chars = chunk_chars if chunk_chars is not None else config.knowledge_chunk_chars
         self.chunk_overlap = (
@@ -200,10 +201,10 @@ class KnowledgeStore:
         # joins the cross-item search index on ingest; both are dropped on delete.
         self.archive = archive
         self._client = None  # lazily built; None means "unavailable, no-op"
-        self._dim: Optional[int] = None
+        self._dim: int | None = None
 
     # --- qdrant client (lazy, shared shape with SemanticIndex) --------------
-    def _ensure_client(self, dim: int):
+    def _ensure_client(self, dim: int) -> object | None:
         """Build the client + collection on first successful embed. Returns it or None."""
         if self._client is not None:
             return self._client
@@ -224,7 +225,7 @@ class KnowledgeStore:
             log_warning(f"knowledge: Qdrant unavailable ({type(exc).__name__}: {exc})")
             return None
 
-    def _connect_existing(self):
+    def _connect_existing(self) -> object | None:
         """A client bound to the collection, *without* creating it — for admin
         reads (list/delete) on a cold process where no embed has run yet.
 
@@ -252,11 +253,11 @@ class KnowledgeStore:
         text: str,
         *,
         source: str,
-        title: Optional[str] = None,
+        title: str | None = None,
         subject: str = "",
-        tags: Optional[list[str]] = None,
+        tags: list[str] | None = None,
         scope: str = GLOBAL_SCOPE,
-        metadata: Optional[dict[str, str]] = None,
+        metadata: dict[str, str] | None = None,
     ) -> int:
         """Chunk, embed, and upsert one document. Re-ingesting the same `doc_id`
         replaces its previous chunks (so edits and shrinks are clean). Returns the
@@ -270,7 +271,7 @@ class KnowledgeStore:
         if not chunks:
             return 0
         vectors = [embed_text(c) for c in chunks]
-        embedded = [(c, v) for c, v in zip(chunks, vectors) if v is not None]
+        embedded = [(c, v) for c, v in zip(chunks, vectors, strict=False) if v is not None]
         if not embedded:
             return 0
         client = self._ensure_client(len(embedded[0][1]))
@@ -281,7 +282,7 @@ class KnowledgeStore:
 
             # Replace-on-reingest: drop any prior chunks for this doc first.
             self._delete_doc(client, doc_id)
-            ts = datetime.now(timezone.utc).isoformat()
+            ts = datetime.now(UTC).isoformat()
             points = [
                 models.PointStruct(
                     id=uuid.uuid4().hex,
@@ -391,7 +392,7 @@ class KnowledgeStore:
 
     def tag_document(
         self, doc_id: str, *, add: Sequence[str] = (), remove: Sequence[str] = ()
-    ) -> Optional[list[str]]:
+    ) -> list[str] | None:
         """Add/remove free-form tags on a document, in place across all its chunks.
         Returns the document's new tag list, or None when it doesn't exist / the
         backend is unavailable.
@@ -472,7 +473,7 @@ class KnowledgeStore:
         log_info(f"knowledge: renamed subject {old!r} -> {new!r} on {len(ids)} point(s)")
         return len(ids)
 
-    def _points_and_tags(self, client, doc_id: str) -> tuple[list, list[str]]:
+    def _points_and_tags(self, client: object, doc_id: str) -> tuple[list, list[str]]:
         """The point ids of `doc_id`'s chunks + its current tag list (from the first
         matching chunk). ([], []) on any failure / absence."""
         try:
@@ -520,7 +521,7 @@ class KnowledgeStore:
         log_info(f"knowledge: renamed doc {doc_id!r} -> title {title!r}")
         return True
 
-    def _point_ids_for_doc(self, client, doc_id: str) -> list:
+    def _point_ids_for_doc(self, client: object, doc_id: str) -> list:
         """The point ids of every chunk for `doc_id`, by scrolling payloads and
         filtering client-side (no `models` import). [] on any failure."""
         try:
@@ -635,7 +636,7 @@ class KnowledgeStore:
             return []
         return sorted(tags)
 
-    def get_document(self, doc_id: str) -> Optional[DocumentDetail]:
+    def get_document(self, doc_id: str) -> DocumentDetail | None:
         """One document's doc-level fields + its chunks in `chunk_index` order, or
         None when it doesn't exist / the backend is unavailable.
 
@@ -688,7 +689,7 @@ class KnowledgeStore:
             chunks=chunks,
         )
 
-    def _delete_doc(self, client, doc_id: str) -> None:
+    def _delete_doc(self, client: object, doc_id: str) -> None:
         try:
             from qdrant_client import models
 
@@ -715,7 +716,7 @@ class KnowledgeStore:
         query: str,
         top_k: int,
         *,
-        subject: Optional[str] = None,
+        subject: str | None = None,
         tags: Sequence[str] = (),
         scopes: Sequence[str] = (GLOBAL_SCOPE,),
     ) -> list[KnowledgeHit]:
@@ -751,10 +752,10 @@ class KnowledgeStore:
 
     def _query(
         self,
-        client,
+        client: object,
         vector: list,
         limit: int,
-        subject: Optional[str],
+        subject: str | None,
         scopes: Sequence[str],
     ) -> list[KnowledgeHit]:
         """One Qdrant vector query with the scope + optional subject hard-filter."""
@@ -779,7 +780,7 @@ class KnowledgeStore:
         return [self._to_hit(h) for h in points if h.payload and h.payload.get("text")]
 
     @staticmethod
-    def _to_hit(point) -> KnowledgeHit:
+    def _to_hit(point: object) -> KnowledgeHit:
         payload = point.payload or {}
         meta = payload.get("metadata")
         return KnowledgeHit(
@@ -793,7 +794,7 @@ class KnowledgeStore:
         )
 
 
-def build_knowledge_from_config() -> Optional[KnowledgeStore]:
+def build_knowledge_from_config() -> KnowledgeStore | None:
     """Construct the store when enabled in config, else None (feature off).
 
     Attaches the item archive when `items_archive_enabled` so ingests keep a durable,
