@@ -18,10 +18,15 @@ building magi admin/chat UIs. Published to GitHub Packages; consumed from **sour
 - **Server/client split.** Modules under `lib/` that hold a bearer or hit an upstream
   (`admin-api.ts`, `chat-api.ts`) are server-only; never import them into client
   components. `middleware.ts` and `routes/*` run on the server.
+- **Runtime validation with zod.** Admin-api schemas are generated into
+  `src/lib/api-schemas.ts` alongside `api-types.ts`; parse responses with
+  `fetchJson(res, Schema)` (`src/lib/utils.ts`). Non-OpenAPI shapes (SSE events,
+  localStorage records, runtime config) get hand-written zod schemas next to
+  the code that owns them. `zod` is a runtime dependency.
 - The package is **presentational + runtime only** — the reference app owns route
   mounting, shell assembly, and env/secret wiring.
 
 # Verification
 
-From `web/`: `npm run typecheck -w @carneirofc/magi-web`. `sideEffects: false` — keep
+From `web/`: `npm run lint` and `npm run typecheck -w @carneirofc/magi-web`. `sideEffects: false` — keep
 modules side-effect-free so tree-shaking holds.

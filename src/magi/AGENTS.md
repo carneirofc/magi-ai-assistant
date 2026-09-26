@@ -24,6 +24,12 @@ persona overlay installs this as a dependency and extends it from the outside.
 - **Extension points are registries/overlays, extended from the persona, not by
   editing this tree**: `register_member`, `register_tool` / `register_lead_toolkit`
   (`agent/tools/__init__.py`), `register_skill`, and the `load_prompt` overlay.
+- **Pydantic at boundaries.** JSON from files under `core/`, upstream HTTP in
+  tools, the client SDK, FastAPI bodies, and LLM output (`agent/curator.py`,
+  `agent/mood.py`) is validated with a pydantic `BaseModel`/`TypeAdapter`, and
+  a `ValidationError` follows the same degrade path as bad JSON. Frozen
+  `@dataclass` stays fine for internal value types. Free-form JSON is typed
+  `JsonValue` (`core/types.py`), never `Any`.
 - **Structural contracts over base classes.** `Runner` (`core/conversation.py`) and
   `PlatformAdapter` (`channels/gateway.py`) are narrow `Protocol`s satisfied by
   shape.
@@ -39,7 +45,8 @@ persona overlay installs this as a dependency and extends it from the outside.
 
 # Verification
 
-`uv run ruff check src tests` and `uv run pytest -q` (from repo root).
+`uv run ruff check .`, `uv run ruff format --check .`, and `uv run pytest -q`
+(from repo root).
 
 # Child Index
 

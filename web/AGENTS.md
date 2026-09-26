@@ -20,9 +20,15 @@ The MAGI web frontend. An npm workspace with two products:
   publicly. See [ADR 0002](../docs/adr/0002-admin-interface-for-memory-and-knowledge.md).
 - **All secrets are server-side only** — the config vars in `README.md` are never
   shipped to the browser.
-- **`src/lib/api-types.ts` is generated** — `npm run gen:api` regenerates it from the
-  live admin-api OpenAPI. Never hand-edit it; regenerate when a channel endpoint
+- **`api-types.ts` and `api-schemas.ts` are generated** (in
+  `packages/magi-web/src/lib/`) — `npm run gen:api` regenerates both from the live
+  admin-api OpenAPI. Never hand-edit them; regenerate when a channel endpoint
   changes.
+- **Every fetch/parse result goes through a zod schema** — generated schemas for
+  admin-api shapes, hand-written ones for everything else. No `as T` on JSON.
+- **Biome is the only linter/formatter** (`biome.json` covers the app and
+  `packages/*`). `npm run lint` checks, `npm run check:fix` applies fixes and
+  formatting.
 - **App owns routes and shell; library owns pieces.** The golden path (e.g. the
   `/chat` route) is an app-local page that reuses stable library slice exports — not
   a bare re-export. Prefer slice building blocks (`types + hooks + components`) over
@@ -35,8 +41,9 @@ The MAGI web frontend. An npm workspace with two products:
 
 # Verification
 
-From `web/`: `npm run typecheck` (app) and `npm run typecheck -w @carneirofc/magi-web`
-(library). There is no separate test suite; typecheck is the gate.
+From `web/`: `npm run lint`, `npm run typecheck` (app), and
+`npm run typecheck -w @carneirofc/magi-web` (library). There is no separate test
+suite; lint + typecheck are the gate.
 
 # Child Index
 

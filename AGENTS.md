@@ -79,6 +79,20 @@ Default section order:
 5. Run existing verification when relevant
 6. Report any docs intentionally left unchanged and why
 
+## Code Standards
+
+- **Never use `any` (TypeScript) or `typing.Any` (Python).** Use precise types;
+  for unknown input use `unknown` + zod parsing in TS, and `object`, `TypeVar`,
+  `Protocol`, or `pydantic.JsonValue` in Python. Enforced by Biome
+  `noExplicitAny` and ruff `ANN401`.
+- **Untrusted data is parsed through a schema, never cast.** HTTP responses and
+  bodies, `JSON.parse`/`json.loads`, files, localStorage, env, and LLM output go
+  through **zod** in `web/` and **pydantic** (`BaseModel` / `TypeAdapter`) in
+  Python. No `as T` on parsed data.
+- **Tooling:** Python uses **ruff** (lint + format), web uses **Biome** (lint +
+  format). Both gate CI and pre-commit; do not add ESLint, Prettier, black, or
+  isort.
+
 ## User Preferences
 
 When the user requests a durable behavior change, record it here or in the relevant child AGENTS.md
