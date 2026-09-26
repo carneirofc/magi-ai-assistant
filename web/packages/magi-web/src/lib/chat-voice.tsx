@@ -17,18 +17,17 @@
 // ambient provider or scopes local state so it works standalone. PersonaStage
 // reads `useVoiceOptional` — no provider, no voice treatments, no crash.
 
+import type { SpeechSynthesisAdapter } from "@assistant-ui/react";
 import {
   createContext,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
-
-import type { SpeechSynthesisAdapter } from "@assistant-ui/react";
 
 /** localStorage key for the auto-speak preference (shared across sessions). */
 const AUTO_SPEAK_KEY = "magi.chat.voice.v1";
@@ -179,9 +178,7 @@ export function useVoiceOptional(): VoiceContextValue | null {
 export function VoiceScope({ children }: { children: ReactNode }) {
   const ambient = useContext(VoiceContext);
   const local = useVoiceStateInternal();
-  return (
-    <VoiceContext.Provider value={ambient ?? local}>{children}</VoiceContext.Provider>
-  );
+  return <VoiceContext.Provider value={ambient ?? local}>{children}</VoiceContext.Provider>;
 }
 
 /** assistant-ui `SpeechSynthesisAdapter` over the shared controller, so the

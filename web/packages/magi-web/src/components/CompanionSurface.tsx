@@ -46,6 +46,7 @@ function CompanionBust({
   return (
     <div className="flex items-center gap-3 rounded-xl border border-ui bg-[color:var(--ui-bg)] px-3 py-2">
       {src ? (
+        // biome-ignore lint/performance/noImgElement: BFF-served, dynamic persona art
         <img
           src={src}
           alt={name ?? "assistant portrait"}
@@ -59,9 +60,7 @@ function CompanionBust({
       )}
       <div className="flex min-w-0 flex-col">
         {name ? (
-          <span className="truncate text-ui-sm font-medium text-[color:var(--ui-ink)]">
-            {name}
-          </span>
+          <span className="truncate text-ui-sm font-medium text-[color:var(--ui-ink)]">{name}</span>
         ) : null}
         <span className="flex items-center gap-1.5 text-ui-2xs text-[color:var(--ui-ink-subtle)]">
           {mood ? (
@@ -83,23 +82,23 @@ export function CompanionSurface({
 }: CompanionSurfaceProps) {
   return (
     <MoodProvider>
-    <VoiceProvider>
-      <div className={`flex min-h-0 flex-1 flex-col gap-3 lg:flex-row ${className}`}>
-        {/* Narrow: the face rides a compact header bust above the transcript. */}
-        <div className="lg:hidden">
-          <CompanionBust expressions={expressions} name={name} />
-        </div>
+      <VoiceProvider>
+        <div className={`flex min-h-0 flex-1 flex-col gap-3 lg:flex-row ${className}`}>
+          {/* Narrow: the face rides a compact header bust above the transcript. */}
+          <div className="lg:hidden">
+            <CompanionBust expressions={expressions} name={name} />
+          </div>
 
-        {/* Wide: the side stage — portrait + status + whatever the app mounts
+          {/* Wide: the side stage — portrait + status + whatever the app mounts
             under it — while the transcript keeps its full height beside it. */}
-        <aside className="hidden w-60 shrink-0 flex-col gap-3 lg:flex xl:w-72">
-          <PersonaStage expressions={expressions} name={name} />
-          {aside}
-        </aside>
+          <aside className="hidden w-60 shrink-0 flex-col gap-3 lg:flex xl:w-72">
+            <PersonaStage expressions={expressions} name={name} />
+            {aside}
+          </aside>
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
-      </div>
-    </VoiceProvider>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+        </div>
+      </VoiceProvider>
     </MoodProvider>
   );
 }

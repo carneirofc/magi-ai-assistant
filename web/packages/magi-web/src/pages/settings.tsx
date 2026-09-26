@@ -14,8 +14,8 @@ import { ConnectionSettingsEditor } from "../components/ConnectionSettingsEditor
 import { MemorySettingsEditor } from "../components/MemorySettingsEditor";
 import { ScrollRegion } from "../components/ScrollRegion";
 import { getMemorySettings } from "../lib/admin-api";
-import { readConfigState } from "../lib/runtime-config";
 import { mergeCopy, type PageCopy } from "../lib/page-copy";
+import { readConfigState } from "../lib/runtime-config";
 
 export const settingsCopy = {
   subtitle: "magi // settings",
@@ -46,7 +46,11 @@ export async function SettingsView({ copy }: { copy?: PageCopy } = {}) {
 
   return (
     <AppPage className="gap-8">
-      <PageHeader subtitle={header.subtitle} title={header.title} description={header.description} />
+      <PageHeader
+        subtitle={header.subtitle}
+        title={header.title}
+        description={header.description}
+      />
 
       <ScrollRegion className="flex flex-col gap-8">
         <section className="flex flex-col gap-3">

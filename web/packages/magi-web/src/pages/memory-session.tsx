@@ -2,8 +2,8 @@
 // and the pending buffer. Window/pending render as a chat transcript (Rendered)
 // or raw JSON (Raw); the summary renders as prose or raw markdown.
 
-import Link from "next/link";
 import { PageHeader, StatusMessage, SurfacePanel } from "@carneirofc/ui";
+import Link from "next/link";
 
 import { AppPage } from "../components/AppPage";
 import { CopyId } from "../components/CopyId";
@@ -70,7 +70,11 @@ export async function SessionView({
           ← {userId}
         </Link>
       </div>
-      <PageHeader subtitle={header.subtitle} title={header.title} description={header.description} />
+      <PageHeader
+        subtitle={header.subtitle}
+        title={header.title}
+        description={header.description}
+      />
 
       <ScrollRegion className="flex flex-col gap-6">
         <CopyId value={sessionId} className="self-start" />
@@ -81,23 +85,23 @@ export async function SessionView({
           </StatusMessage>
         ) : (
           <div className="flex flex-col gap-4">
-          <SurfacePanel tone="soft" padding="lg">
-            <SessionMemoryActions userId={userId} sessionId={sessionId} />
-          </SurfacePanel>
-          {files?.map((file, i) => (
-            <SurfacePanel key={kinds[i].kind} tone="soft" padding="lg">
-              <SessionFile
-                kind={kinds[i].kind}
-                label={kinds[i].label}
-                description={kinds[i].description}
-                render={kinds[i].render}
-                userId={userId}
-                sessionId={sessionId}
-                initialContent={file.content}
-                initialVersion={file.version}
-              />
+            <SurfacePanel tone="soft" padding="lg">
+              <SessionMemoryActions userId={userId} sessionId={sessionId} />
             </SurfacePanel>
-          ))}
+            {files?.map((file, i) => (
+              <SurfacePanel key={kinds[i].kind} tone="soft" padding="lg">
+                <SessionFile
+                  kind={kinds[i].kind}
+                  label={kinds[i].label}
+                  description={kinds[i].description}
+                  render={kinds[i].render}
+                  userId={userId}
+                  sessionId={sessionId}
+                  initialContent={file.content}
+                  initialVersion={file.version}
+                />
+              </SurfacePanel>
+            ))}
           </div>
         )}
       </ScrollRegion>

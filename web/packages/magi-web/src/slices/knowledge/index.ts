@@ -8,15 +8,16 @@ import * as hooks from "./hooks";
 import * as screens from "./screens";
 import * as types from "./types";
 
-export * from "./types";
-export * from "./hooks";
 export * from "./components";
+export * from "./hooks";
 export * from "./screens";
+export * from "./types";
 
 export const knowledgeSlice = defineFeatureSlice({
   key: "knowledge",
   title: "Knowledge",
-  description: "Stable MAGI knowledge building blocks for browsing, ingesting, and editing corpus documents.",
+  description:
+    "Stable MAGI knowledge building blocks for browsing, ingesting, and editing corpus documents.",
   entrypoints: {
     types: "@carneirofc/magi-web/slices/knowledge/types",
     hooks: "@carneirofc/magi-web/slices/knowledge/hooks",

@@ -28,12 +28,7 @@ export type ScrollRegionProps = HTMLAttributes<HTMLDivElement> & {
   children?: ReactNode;
 };
 
-export function ScrollRegion({
-  axis = "y",
-  className = "",
-  children,
-  ...rest
-}: ScrollRegionProps) {
+export function ScrollRegion({ axis = "y", className = "", children, ...rest }: ScrollRegionProps) {
   return (
     <div
       data-scroll-region={axis}

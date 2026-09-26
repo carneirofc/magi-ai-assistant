@@ -11,6 +11,7 @@ export function DashboardSkeleton() {
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder count, no data to key on
           <div key={i} className="h-24 rounded-xl border border-ui bg-[color:var(--ui-bg)]" />
         ))}
       </div>

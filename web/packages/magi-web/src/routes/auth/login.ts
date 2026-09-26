@@ -1,8 +1,8 @@
 // Login: compare the posted password against ADMIN_PASSWORD (server-side), and on
 // match set the signed httpOnly session cookie. No accounts, one operator.
 
-import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 
 import { session, signSession } from "../../lib/session";
 

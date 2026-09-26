@@ -1,8 +1,8 @@
 // The knowledge document list. Server-fetches the corpus + subjects, then a client
 // component renders the table/cards with subject (hard) and tag (soft) filters.
 
-import Link from "next/link";
 import { EmptyState, PageHeader, PlusIcon, StatusMessage } from "@carneirofc/ui";
+import Link from "next/link";
 
 import { AppPage } from "../components/AppPage";
 import { KnowledgeList } from "../components/KnowledgeList";
@@ -44,15 +44,15 @@ export async function KnowledgeView({ copy }: { copy?: PageCopy } = {}) {
       </PageHeader>
 
       <ScrollRegion className="flex flex-col gap-6">
-      {error ? (
-        <StatusMessage role="alert" tone="error">
-          {error}
-        </StatusMessage>
-      ) : documents.length === 0 ? (
-        <EmptyState>No documents in the corpus yet.</EmptyState>
-      ) : (
-        <KnowledgeList documents={documents} subjects={subjects} />
-      )}
+        {error ? (
+          <StatusMessage role="alert" tone="error">
+            {error}
+          </StatusMessage>
+        ) : documents.length === 0 ? (
+          <EmptyState>No documents in the corpus yet.</EmptyState>
+        ) : (
+          <KnowledgeList documents={documents} subjects={subjects} />
+        )}
       </ScrollRegion>
     </AppPage>
   );

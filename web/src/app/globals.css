@@ -89,13 +89,48 @@
   border: 1px solid transparent;
   background: transparent;
   color: var(--sidebar-item-ink);
-  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease;
 }
 
 .rail-toggle:hover {
   background: var(--sidebar-item-hover-bg);
   color: var(--sidebar-item-hover-ink);
   border-color: var(--sidebar-item-active-border);
+}
+
+/* Sidebar nav link — reuses the design-system sidebar tokens but laid out as a
+ * full-width labelled row rather than the icon-only dock. Defined before the
+ * `[data-collapsed]` override below so source order matches specificity order. */
+.rail-link {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  color: var(--sidebar-item-ink);
+  font-size: var(--ui-font-sm);
+  font-weight: 500;
+  text-decoration: none;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease;
+}
+
+.rail-link:hover {
+  background: var(--sidebar-item-hover-bg);
+  color: var(--sidebar-item-hover-ink);
+}
+
+.rail-link[data-active="true"] {
+  border-color: var(--sidebar-item-active-border);
+  background: var(--sidebar-item-active-bg);
+  color: var(--sidebar-item-active-ink);
+  box-shadow: var(--sidebar-item-active-shadow);
 }
 
 /* Hide every text label and center the icon dock when collapsed. */
@@ -139,34 +174,6 @@
 .app-page--fill {
   flex: 1;
   min-height: 0;
-}
-
-/* Sidebar nav link — reuses the design-system sidebar tokens but laid out as a
- * full-width labelled row rather than the icon-only dock. */
-.rail-link {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  padding: 0.55rem 0.7rem;
-  border-radius: var(--radius-md);
-  border: 1px solid transparent;
-  color: var(--sidebar-item-ink);
-  font-size: var(--ui-font-sm);
-  font-weight: 500;
-  text-decoration: none;
-  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
-}
-
-.rail-link:hover {
-  background: var(--sidebar-item-hover-bg);
-  color: var(--sidebar-item-hover-ink);
-}
-
-.rail-link[data-active="true"] {
-  border-color: var(--sidebar-item-active-border);
-  background: var(--sidebar-item-active-bg);
-  color: var(--sidebar-item-active-ink);
-  box-shadow: var(--sidebar-item-active-shadow);
 }
 
 @media (max-width: 820px) {

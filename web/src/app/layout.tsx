@@ -1,6 +1,6 @@
-import type { Metadata } from "next";
-import { ThemeToggleButton } from "@carneirofc/ui";
 import { themeInitScript } from "@carneirofc/magi-web/lib/theme";
+import { ThemeToggleButton } from "@carneirofc/ui";
+import type { Metadata } from "next";
 import "@carneirofc/ui/styles.css";
 import "./globals.css";
 
@@ -12,14 +12,12 @@ export const metadata: Metadata = {
   description: "Operator dashboard for MAGI memory & knowledge",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: themeInitScript is a static,
+            library-authored constant (no user input) — must run inline before paint. */}
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body>

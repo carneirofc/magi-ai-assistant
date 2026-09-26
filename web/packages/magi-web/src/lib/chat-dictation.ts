@@ -9,15 +9,13 @@
 // clean "stopped"/"cancelled") means the mic never got going. That fires onError,
 // which the composer renders as a dismissible hint.
 
-import { WebSpeechDictationAdapter, type DictationAdapter } from "@assistant-ui/react";
+import { type DictationAdapter, WebSpeechDictationAdapter } from "@assistant-ui/react";
 
 export function dictationSupported(): boolean {
   return WebSpeechDictationAdapter.isSupported();
 }
 
-export function createDictationAdapter(
-  onError: (message: string) => void,
-): DictationAdapter {
+export function createDictationAdapter(onError: (message: string) => void): DictationAdapter {
   const inner = new WebSpeechDictationAdapter();
 
   return {

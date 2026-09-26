@@ -3,9 +3,6 @@
 // Rename + delete controls for a knowledge document. Client component: calls the
 // BFF mutation routes, then refreshes (rename) or navigates back (delete).
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
-import type { FormEvent } from "react";
 import {
   ConfirmationDialog,
   OutlineButton,
@@ -13,6 +10,9 @@ import {
   TextInput,
   TrashIcon,
 } from "@carneirofc/ui";
+import { useRouter } from "next/navigation";
+import type { FormEvent } from "react";
+import { useState } from "react";
 
 import { encodeDocId } from "../lib/encode";
 

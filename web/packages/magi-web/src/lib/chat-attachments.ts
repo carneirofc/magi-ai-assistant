@@ -10,9 +10,9 @@
 // part — the backend accepts arbitrary inbound files (channels/api.py `InboundFile`).
 
 import {
-  CompositeAttachmentAdapter,
   type AttachmentAdapter,
   type CompleteAttachment,
+  CompositeAttachmentAdapter,
   type PendingAttachment,
 } from "@assistant-ui/react";
 

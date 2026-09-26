@@ -5,16 +5,17 @@ import * as hooks from "./hooks";
 import * as screens from "./screens";
 import * as types from "./types";
 
-export * from "./types";
-export * from "./hooks";
 export * from "./components";
-export * from "./screens";
+export * from "./hooks";
 export * from "./routes";
+export * from "./screens";
+export * from "./types";
 
 export const chatSlice = defineFeatureSlice({
   key: "chat",
   title: "Chat",
-  description: "Stable MAGI chat building blocks: types, controller helpers, and composition-friendly components.",
+  description:
+    "Stable MAGI chat building blocks: types, controller helpers, and composition-friendly components.",
   entrypoints: {
     types: "@carneirofc/magi-web/slices/chat/types",
     hooks: "@carneirofc/magi-web/slices/chat/hooks",

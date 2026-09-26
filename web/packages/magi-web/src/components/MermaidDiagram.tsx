@@ -12,9 +12,9 @@
 // the dashboard (light/dark) without a re-render. When the source doesn't parse we
 // fall back to the plain fenced-code rendering rather than throwing.
 
-import { useMemo, useState } from "react";
-import { renderMermaidSVG } from "beautiful-mermaid";
 import type { SyntaxHighlighterProps } from "@assistant-ui/react-markdown";
+import { renderMermaidSVG } from "beautiful-mermaid";
+import { useMemo, useState } from "react";
 
 // Map the diagram's palette onto our theme tokens. beautiful-mermaid emits these
 // as `--bg`/`--fg`/… on the SVG, defaulted to whatever we pass here — so a plain
@@ -72,7 +72,7 @@ export function MermaidDiagram({ code, components }: SyntaxHighlighterProps) {
       ) : (
         <div
           className="overflow-x-auto p-3 [&>svg]:mx-auto [&>svg]:h-auto [&>svg]:max-w-full"
-          // beautiful-mermaid output is a self-contained SVG string we trust.
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: beautiful-mermaid output is a self-contained SVG string we trust
           dangerouslySetInnerHTML={{ __html: svg }}
         />
       )}

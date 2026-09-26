@@ -1,7 +1,6 @@
 // Dashboard overview: at-a-glance metrics across memory + knowledge, plus recent
 // documents and the busiest users. Server-fetches the three list endpoints.
 
-import Link from "next/link";
 import {
   EmptyState,
   InfoChip,
@@ -16,12 +15,13 @@ import {
   TableHeader,
   TableRow,
 } from "@carneirofc/ui";
+import Link from "next/link";
 
 import { AppPage } from "../components/AppPage";
 import { ScrollRegion } from "../components/ScrollRegion";
 import { StatCard } from "../components/StatCard";
-import { encodeDocId } from "../lib/encode";
 import { getHealth, listKnowledgeDocuments, listSubjects, listUsers } from "../lib/admin-api";
+import { encodeDocId } from "../lib/encode";
 import { mergeCopy, type PageCopy } from "../lib/page-copy";
 
 export const dashboardCopy = {
@@ -98,7 +98,12 @@ export async function DashboardView({ copy }: { copy?: PageCopy } = {}) {
                 href="/knowledge"
               />
               <StatCard label="Chunks" value={chunks} hint="embedded + indexed" href="/knowledge" />
-              <StatCard label="Subjects" value={subjects.length} hint="controlled vocab" href="/subjects" />
+              <StatCard
+                label="Subjects"
+                value={subjects.length}
+                hint="controlled vocab"
+                href="/subjects"
+              />
             </section>
 
             <div className="grid gap-4 lg:grid-cols-2">
@@ -166,11 +171,17 @@ export async function DashboardView({ copy }: { copy?: PageCopy } = {}) {
                       {topUsers.map((u) => (
                         <TableRow key={u.user_id}>
                           <TableCell>
-                            <Link href={`/memory/${encodeURIComponent(u.user_id)}`}>{u.user_id}</Link>
+                            <Link href={`/memory/${encodeURIComponent(u.user_id)}`}>
+                              {u.user_id}
+                            </Link>
                           </TableCell>
                           <TableCell className="text-right tabular-nums">{u.fact_count}</TableCell>
-                          <TableCell className="text-right tabular-nums">{u.episode_count}</TableCell>
-                          <TableCell className="text-right tabular-nums">{u.session_count}</TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {u.episode_count}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {u.session_count}
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

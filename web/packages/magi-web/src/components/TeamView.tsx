@@ -84,9 +84,7 @@ function GroupedToolTables({ tools }: { tools: ToolInfo[] }) {
         <div key={g.origin} className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
             <h3 className="text-ui-sm font-semibold">{g.label}</h3>
-            <span className="text-ui-2xs text-[color:var(--ui-ink-subtle)]">
-              {g.tools.length}
-            </span>
+            <span className="text-ui-2xs text-[color:var(--ui-ink-subtle)]">{g.tools.length}</span>
           </div>
           <ToolTable tools={g.tools} />
         </div>
@@ -154,9 +152,7 @@ export function TeamView({ snapshot }: { snapshot: TeamSnapshot }) {
       {/* Members */}
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-ui-lg font-semibold">
-            {snapshot.is_team ? "Members" : "Agent"}
-          </h2>
+          <h2 className="text-ui-lg font-semibold">{snapshot.is_team ? "Members" : "Agent"}</h2>
           <span className="text-ui-xs text-[color:var(--ui-ink-subtle)]">
             {snapshot.members.length} specialist{snapshot.members.length === 1 ? "" : "s"}
           </span>
@@ -164,8 +160,8 @@ export function TeamView({ snapshot }: { snapshot: TeamSnapshot }) {
         {snapshot.members.length === 0 ? (
           <SurfacePanel tone="soft" padding="lg">
             <EmptyState>
-              This runner has no specialist members — it&apos;s a single agent. Its tools are
-              listed below.
+              This runner has no specialist members — it&apos;s a single agent. Its tools are listed
+              below.
             </EmptyState>
           </SurfacePanel>
         ) : (
@@ -198,9 +194,7 @@ export function TeamView({ snapshot }: { snapshot: TeamSnapshot }) {
       {/* Team-level tools */}
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-ui-lg font-semibold">
-            {snapshot.is_team ? "Lead tools" : "Tools"}
-          </h2>
+          <h2 className="text-ui-lg font-semibold">{snapshot.is_team ? "Lead tools" : "Tools"}</h2>
           <span className="text-ui-xs text-[color:var(--ui-ink-subtle)]">
             {snapshot.team_tools.length} tool{snapshot.team_tools.length === 1 ? "" : "s"}
           </span>
@@ -215,7 +209,8 @@ export function TeamView({ snapshot }: { snapshot: TeamSnapshot }) {
         <div className="flex items-center justify-between">
           <h2 className="text-ui-lg font-semibold">MCP servers</h2>
           <span className="text-ui-xs text-[color:var(--ui-ink-subtle)]">
-            {snapshot.mcp_servers.length} connected member{snapshot.mcp_servers.length === 1 ? "" : "s"}
+            {snapshot.mcp_servers.length} connected member
+            {snapshot.mcp_servers.length === 1 ? "" : "s"}
           </span>
         </div>
         {snapshot.mcp_servers.length === 0 ? (

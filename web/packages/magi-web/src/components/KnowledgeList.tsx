@@ -7,8 +7,6 @@
 // own knowledge). A table/grid toggle switches between a dense list and
 // mem0-style memory cards.
 
-import Link from "next/link";
-import { useMemo, useState } from "react";
 import {
   EmptyState,
   InfoChip,
@@ -23,6 +21,8 @@ import {
   TableRow,
   TextInput,
 } from "@carneirofc/ui";
+import Link from "next/link";
+import { useMemo, useState } from "react";
 
 import { encodeDocId } from "../lib/encode";
 
@@ -39,13 +39,7 @@ type Doc = {
 
 type View = "table" | "grid";
 
-export function KnowledgeList({
-  documents,
-  subjects,
-}: {
-  documents: Doc[];
-  subjects: string[];
-}) {
+export function KnowledgeList({ documents, subjects }: { documents: Doc[]; subjects: string[] }) {
   const [subject, setSubject] = useState("");
   const [scope, setScope] = useState("");
   const [tag, setTag] = useState("");
@@ -175,7 +169,11 @@ export function KnowledgeList({
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {rows.map((d) => (
-            <Link key={d.doc_id} href={`/knowledge/${encodeDocId(d.doc_id)}`} className="no-underline">
+            <Link
+              key={d.doc_id}
+              href={`/knowledge/${encodeDocId(d.doc_id)}`}
+              className="no-underline"
+            >
               <SurfacePanel
                 tone="soft"
                 padding="md"

@@ -3,5 +3,5 @@
 // the slice's hooks + components.
 
 export { MemoryView, memoryCopy } from "../../pages/memory";
-export { UserMemoryView } from "../../pages/memory-user";
 export { SessionView } from "../../pages/memory-session";
+export { UserMemoryView } from "../../pages/memory-user";

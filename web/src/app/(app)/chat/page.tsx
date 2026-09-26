@@ -1,8 +1,8 @@
-import { PageHeader, StatusBadge, StatusMessage, SurfacePanel } from "@carneirofc/ui";
+import { getChatHealth } from "@carneirofc/magi-web/lib/chat-api";
 
 import { ChatConsole } from "@carneirofc/magi-web/slices/chat/components";
 import { chatCopy } from "@carneirofc/magi-web/slices/chat/screens";
-import { getChatHealth } from "@carneirofc/magi-web/lib/chat-api";
+import { PageHeader, StatusBadge, StatusMessage, SurfacePanel } from "@carneirofc/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +26,11 @@ export default async function ChatPage() {
         }
       />
 
-      <SurfacePanel tone="soft" padding="md" className="text-ui-sm text-[color:var(--ui-ink-muted)]">
+      <SurfacePanel
+        tone="soft"
+        padding="md"
+        className="text-ui-sm text-[color:var(--ui-ink-muted)]"
+      >
         This page is app-owned: it keeps route ownership and page-level policy here while reusing
         the library's stable Chat slice exports.
       </SurfacePanel>
@@ -35,8 +39,8 @@ export default async function ChatPage() {
         <ChatConsole />
       ) : (
         <StatusMessage role="alert" tone="error">
-          Could not reach the chat API. Check CHAT_API_URL and API_AUTH_TOKEN, and that
-          `python main.py api` is running.
+          Could not reach the chat API. Check CHAT_API_URL and API_AUTH_TOKEN, and that `python
+          main.py api` is running.
         </StatusMessage>
       )}
     </div>

@@ -7,8 +7,8 @@
 // takes effect on restart; reject just records the decision. The decided
 // timeline stays visible below the pending queue — growth is auditable.
 
-import { useCallback, useEffect, useState } from "react";
 import { OutlineButton, StatusMessage } from "@carneirofc/ui";
+import { useCallback, useEffect, useState } from "react";
 
 type Proposal = {
   id: string;
@@ -64,9 +64,7 @@ export function EvolutionQueue() {
     setBusy(null);
     if (res.ok) {
       setNote(
-        action === "approve"
-          ? "Approved — restart the app for it to take effect."
-          : "Rejected.",
+        action === "approve" ? "Approved — restart the app for it to take effect." : "Rejected.",
       );
       refresh();
       return;
@@ -113,7 +111,10 @@ export function EvolutionQueue() {
         </p>
       ) : (
         pending.map((p) => (
-          <div key={p.id} className="flex flex-col gap-2 rounded-xl border border-ui bg-[color:var(--ui-bg)] p-3">
+          <div
+            key={p.id}
+            className="flex flex-col gap-2 rounded-xl border border-ui bg-[color:var(--ui-bg)] p-3"
+          >
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full border border-ui px-2 py-0.5 font-mono text-[10px] uppercase text-[color:var(--ui-ink-accent)]">
                 {p.kind}

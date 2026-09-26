@@ -5,8 +5,8 @@
 // panels with the available SegmentedControl. Panels arrive as props (React
 // nodes) from the server page and are toggled client-side.
 
-import { useState, type ReactNode } from "react";
 import { SegmentedControl } from "@carneirofc/ui";
+import { type ReactNode, useState } from "react";
 
 type TabKey = "facts" | "episodes" | "sessions";
 

@@ -24,7 +24,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { useMood, type ChatLifecycle } from "../lib/chat-mood";
+import { type ChatLifecycle, useMood } from "../lib/chat-mood";
 import { useVoiceOptional } from "../lib/chat-voice";
 
 export type PersonaStageProps = {
@@ -146,6 +146,7 @@ export function PersonaStage({
       >
         {current ? (
           layers.map((url, i) => (
+            // biome-ignore lint/performance/noImgElement: BFF-served, dynamic persona art
             <img
               key={url}
               src={url}

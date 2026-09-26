@@ -5,9 +5,9 @@
 // routes and refreshes. TagSelect hands back the full next selection; we diff it
 // against the current tags to derive the add/remove the tags route expects.
 
+import { SelectInput, StatusMessage, TagSelect } from "@carneirofc/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { SelectInput, StatusMessage, TagSelect } from "@carneirofc/ui";
 
 export function DocumentMeta({
   docId,

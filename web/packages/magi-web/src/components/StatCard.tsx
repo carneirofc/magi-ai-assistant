@@ -1,8 +1,8 @@
 // A single metric tile for the dashboard overview. Optionally a link.
 
+import { SurfacePanel } from "@carneirofc/ui";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { SurfacePanel } from "@carneirofc/ui";
 
 export function StatCard({
   label,

@@ -42,8 +42,8 @@ export async function ChatView({ copy }: { copy?: PageCopy } = {}) {
         <ChatConsole />
       ) : (
         <StatusMessage role="alert" tone="error">
-          Could not reach the chat API. Check CHAT_API_URL and API_AUTH_TOKEN, and that
-          `python main.py api` is running.
+          Could not reach the chat API. Check CHAT_API_URL and API_AUTH_TOKEN, and that `python
+          main.py api` is running.
         </StatusMessage>
       )}
     </AppPage>

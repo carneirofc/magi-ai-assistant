@@ -16,9 +16,9 @@
 // language; bare ``` fences fall back to the themed <pre>/<code> in ChatConsole.
 // `CodeHeader` is still invoked for those, so it renders nothing without a language.
 
+import type { CodeHeaderProps, SyntaxHighlighterProps } from "@assistant-ui/react-markdown";
 import { useCallback, useState } from "react";
 import ShikiHighlighter from "react-shiki";
-import type { CodeHeaderProps, SyntaxHighlighterProps } from "@assistant-ui/react-markdown";
 
 const THEMES = { light: "github-light", dark: "github-dark" } as const;
 
@@ -47,14 +47,34 @@ function CopyButton({ code }: { code: string }) {
     >
       {copied ? (
         <>
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <svg
+            viewBox="0 0 24 24"
+            width="13"
+            height="13"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
             <path d="M20 6 9 17l-5-5" />
           </svg>
           Copied
         </>
       ) : (
         <>
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <svg
+            viewBox="0 0 24 24"
+            width="13"
+            height="13"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
             <rect x="9" y="9" width="11" height="11" rx="2" />
             <path d="M5 15V5a2 2 0 0 1 2-2h10" />
           </svg>

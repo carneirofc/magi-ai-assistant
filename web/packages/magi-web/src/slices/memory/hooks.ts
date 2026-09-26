@@ -3,24 +3,24 @@
 // admin BFF calls the default screens use.
 
 export {
-  // reads
-  listUsers,
+  // fact mutations
+  addFact,
+  consolidateFacts,
+  deleteFact,
+  getMemorySettings,
   getProfile,
-  listSessions,
-  getSession,
   getRawFile,
   getRawFileHistory,
   getRawFileVersion,
   getRecallPreview,
-  getMemorySettings,
-  // fact mutations
-  addFact,
-  updateFact,
-  deleteFact,
+  getSession,
+  listSessions,
+  // reads
+  listUsers,
   // raw-file mutations
   putRawFile,
   // operator-triggered passes
   triggerSessionMemory,
-  consolidateFacts,
+  updateFact,
   updateMemorySettings,
 } from "../../lib/admin-api";

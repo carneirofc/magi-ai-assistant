@@ -4,8 +4,8 @@
 // page and offers a retry without a full reload. Mount it from an `error.tsx`
 // (which must be a client component); the title/description are overridable.
 
-import { useEffect } from "react";
 import { OutlineButton, StatusMessage, SurfacePanel } from "@carneirofc/ui";
+import { useEffect } from "react";
 
 export function DashboardError({
   error,

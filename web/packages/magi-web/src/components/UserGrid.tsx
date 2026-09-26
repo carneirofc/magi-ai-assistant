@@ -3,9 +3,9 @@
 // The memory user list as searchable cards. Client component so the operator can
 // filter a long roster by id without a round-trip.
 
+import { EmptyState, SurfacePanel, TextInput } from "@carneirofc/ui";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { EmptyState, SurfacePanel, TextInput } from "@carneirofc/ui";
 
 type User = {
   user_id: string;
@@ -19,9 +19,7 @@ export function UserGrid({ users }: { users: User[] }) {
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const list = needle
-      ? users.filter((u) => u.user_id.toLowerCase().includes(needle))
-      : users;
+    const list = needle ? users.filter((u) => u.user_id.toLowerCase().includes(needle)) : users;
     return [...list].sort((a, b) => b.fact_count - a.fact_count);
   }, [users, q]);
 

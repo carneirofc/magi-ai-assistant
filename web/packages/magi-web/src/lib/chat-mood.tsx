@@ -20,14 +20,7 @@
 // stream). Without a provider the console still works — it falls back to
 // component-local state via `useMoodBridge`.
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 
 /** Where the current turn is, as observed by the chat adapter. */
 export type ChatLifecycle = "idle" | "thinking" | "streaming" | "tool" | "error";
@@ -48,10 +41,7 @@ const MoodContext = createContext<MoodContextValue | null>(null);
 function useMoodStateInternal(): MoodContextValue {
   const [mood, setMood] = useState<string | null>(null);
   const [lifecycle, setLifecycle] = useState<ChatLifecycle>("idle");
-  return useMemo(
-    () => ({ mood, lifecycle, setMood, setLifecycle }),
-    [mood, lifecycle],
-  );
+  return useMemo(() => ({ mood, lifecycle, setMood, setLifecycle }), [mood, lifecycle]);
 }
 
 /** Shares the chat's mood/lifecycle with everything under it (stage, badges).
@@ -79,9 +69,7 @@ export function useMood(): MoodContextValue {
 export function MoodScope({ children }: { children: ReactNode }) {
   const ambient = useContext(MoodContext);
   const local = useMoodStateInternal();
-  return (
-    <MoodContext.Provider value={ambient ?? local}>{children}</MoodContext.Provider>
-  );
+  return <MoodContext.Provider value={ambient ?? local}>{children}</MoodContext.Provider>;
 }
 
 /** Adapter callbacks bound to a mood context — hand these to

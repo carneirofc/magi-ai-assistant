@@ -3,8 +3,8 @@
 // Inline "copy to clipboard" affordance for identifiers (doc_id, session id).
 // Shows the value in monospace with a copy button that flips to a check briefly.
 
-import { useState } from "react";
 import { CheckIcon, CopyIcon } from "@carneirofc/ui";
+import { useState } from "react";
 
 export function CopyId({ value, className }: { value: string; className?: string }) {
   const [copied, setCopied] = useState(false);

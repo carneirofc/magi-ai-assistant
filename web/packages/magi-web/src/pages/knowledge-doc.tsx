@@ -2,15 +2,9 @@
 // delete controls. Catch-all segment because a doc_id is the ingest path and may
 // contain slashes.
 
+import { InfoChip, KeyValueField, PageHeader, SectionLabel, SurfacePanel } from "@carneirofc/ui";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import {
-  InfoChip,
-  KeyValueField,
-  PageHeader,
-  SectionLabel,
-  SurfacePanel,
-} from "@carneirofc/ui";
 
 import { AppPage } from "../components/AppPage";
 import { CopyId } from "../components/CopyId";
@@ -62,39 +56,48 @@ export async function DocumentView({
         </Link>
       </div>
 
-      <PageHeader subtitle={header.subtitle} title={header.title} description={header.description} />
+      <PageHeader
+        subtitle={header.subtitle}
+        title={header.title}
+        description={header.description}
+      />
 
       <ScrollRegion className="flex flex-col gap-6">
-      <CopyId value={doc.doc_id} className="self-start" />
+        <CopyId value={doc.doc_id} className="self-start" />
 
-      <SurfacePanel tone="soft" padding="lg" className="flex flex-col gap-5">
-        <DocumentActions docId={doc.doc_id} title={doc.title} />
-        <DocumentMeta
-          docId={doc.doc_id}
-          subject={doc.subject}
-          tags={doc.tags}
-          allSubjects={allSubjects}
-          allTags={allTags}
-        />
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <KeyValueField label="Source" value={doc.source || "—"} />
-          <KeyValueField label="Scope" value={doc.scope} />
-          <KeyValueField label="Chunks" value={doc.chunks.length} />
-          <KeyValueField label="Subject" value={doc.subject || "—"} />
+        <SurfacePanel tone="soft" padding="lg" className="flex flex-col gap-5">
+          <DocumentActions docId={doc.doc_id} title={doc.title} />
+          <DocumentMeta
+            docId={doc.doc_id}
+            subject={doc.subject}
+            tags={doc.tags}
+            allSubjects={allSubjects}
+            allTags={allTags}
+          />
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <KeyValueField label="Source" value={doc.source || "—"} />
+            <KeyValueField label="Scope" value={doc.scope} />
+            <KeyValueField label="Chunks" value={doc.chunks.length} />
+            <KeyValueField label="Subject" value={doc.subject || "—"} />
+          </div>
+        </SurfacePanel>
+
+        <div className="flex flex-col gap-2">
+          <SectionLabel>Chunks ({doc.chunks.length})</SectionLabel>
+          {doc.chunks.map((c) => (
+            <SurfacePanel
+              key={c.chunk_index}
+              tone="subtle"
+              padding="md"
+              className="flex flex-col gap-2"
+            >
+              <InfoChip className="self-start">#{c.chunk_index}</InfoChip>
+              <div className="whitespace-pre-wrap text-ui-sm text-[color:var(--ui-ink-muted)]">
+                {c.text}
+              </div>
+            </SurfacePanel>
+          ))}
         </div>
-      </SurfacePanel>
-
-      <div className="flex flex-col gap-2">
-        <SectionLabel>Chunks ({doc.chunks.length})</SectionLabel>
-        {doc.chunks.map((c) => (
-          <SurfacePanel key={c.chunk_index} tone="subtle" padding="md" className="flex flex-col gap-2">
-            <InfoChip className="self-start">#{c.chunk_index}</InfoChip>
-            <div className="whitespace-pre-wrap text-ui-sm text-[color:var(--ui-ink-muted)]">
-              {c.text}
-            </div>
-          </SurfacePanel>
-        ))}
-      </div>
       </ScrollRegion>
     </AppPage>
   );

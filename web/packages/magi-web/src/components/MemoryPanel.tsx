@@ -37,6 +37,7 @@ export function MemoryPanel({
   const settled = wasBusy.current && !busy;
   wasBusy.current = busy;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `settled` is the refresh edge
   useEffect(() => {
     if (busy) return; // fetch only at rest; `settled` retriggers this effect
     let active = true;
@@ -57,7 +58,6 @@ export function MemoryPanel({
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `settled` is the refresh edge
   }, [userId, busy, settled]);
 
   // Unreachable backend (or an engine predating the endpoint): stay quiet
@@ -80,9 +80,9 @@ export function MemoryPanel({
         </span>
       ) : (
         <ul className="flex max-h-56 flex-col gap-1.5 overflow-y-auto">
-          {facts.map((fact, i) => (
+          {facts.map((fact) => (
             <li
-              key={`${fact.ts}-${i}`}
+              key={`${fact.ts}-${fact.text}`}
               className="text-ui-xs leading-snug text-[color:var(--ui-ink-muted)]"
               title={fact.ts || undefined}
             >

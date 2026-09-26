@@ -1,7 +1,7 @@
 // Logout: clear the session cookie and bounce to /login.
 
-import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 
 import { session } from "../../lib/session";
 

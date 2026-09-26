@@ -20,21 +20,17 @@
 
 import { useAuiState } from "@assistant-ui/react";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "../ui/tooltip";
-import { cn } from "../../lib/utils";
-import {
+  type ComponentProps,
   createContext,
+  type FC,
+  type ReactNode,
   useContext,
   useEffect,
   useMemo,
   useState,
-  type ComponentProps,
-  type FC,
-  type ReactNode,
 } from "react";
+import { cn } from "../../lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 
 /** Per-turn token counts the display renders. Mirrors AI-SDK's `ThreadTokenUsage`
  * so the component body is unchanged; supplied via the `usage` prop. */
@@ -52,10 +48,7 @@ const formatTokenCount = (tokens: number): string => {
   return `${tokens}`;
 };
 
-const getUsagePercent = (
-  totalTokens: number | undefined,
-  modelContextWindow: number,
-): number => {
+const getUsagePercent = (totalTokens: number | undefined, modelContextWindow: number): number => {
   if (!totalTokens) return 0;
   return Math.min((totalTokens / modelContextWindow) * 100, 100);
 };
@@ -89,9 +82,7 @@ type ContextDisplayContextValue = {
   modelContextWindow: number;
 };
 
-const ContextDisplayContext = createContext<ContextDisplayContextValue | null>(
-  null,
-);
+const ContextDisplayContext = createContext<ContextDisplayContextValue | null>(null);
 
 function useContextDisplay(): ContextDisplayContextValue {
   const ctx = useContext(ContextDisplayContext);
@@ -172,29 +163,19 @@ function ContextDisplayRootBase({
 
 function ContextDisplayRoot(props: ContextDisplayRootProps) {
   return (
-    <ContextDisplayRootBase
-      modelContextWindow={props.modelContextWindow}
-      usage={props.usage}
-    >
+    <ContextDisplayRootBase modelContextWindow={props.modelContextWindow} usage={props.usage}>
       {props.children}
     </ContextDisplayRootBase>
   );
 }
 
-function ContextDisplayTrigger({
-  className,
-  children,
-  ...props
-}: ComponentProps<"button">) {
+function ContextDisplayTrigger({ className, children, ...props }: ComponentProps<"button">) {
   return (
     <TooltipTrigger asChild>
       <button
         type="button"
         data-slot="context-display-trigger"
-        className={cn(
-          "inline-flex items-center rounded-md transition-colors",
-          className,
-        )}
+        className={cn("inline-flex items-center rounded-md transition-colors", className)}
         {...props}
       >
         {children}
@@ -210,8 +191,7 @@ function ContextDisplayContent({
   side?: "top" | "bottom" | "left" | "right" | undefined;
   className?: string;
 }) {
-  const { usage, totalTokens, percent, modelContextWindow } =
-    useContextDisplay();
+  const { usage, totalTokens, percent, modelContextWindow } = useContextDisplay();
 
   return (
     <TooltipContent
@@ -228,26 +208,21 @@ function ContextDisplayContent({
         {usage?.inputTokens !== undefined && (
           <div className="flex items-center justify-between gap-4">
             <span className="text-[color:var(--ui-ink-subtle)]">Input</span>
+            <span className="font-mono tabular-nums">{formatTokenCount(usage.inputTokens)}</span>
+          </div>
+        )}
+        {usage?.cachedInputTokens !== undefined && usage.cachedInputTokens > 0 && (
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-[color:var(--ui-ink-subtle)]">Cached</span>
             <span className="font-mono tabular-nums">
-              {formatTokenCount(usage.inputTokens)}
+              {formatTokenCount(usage.cachedInputTokens)}
             </span>
           </div>
         )}
-        {usage?.cachedInputTokens !== undefined &&
-          usage.cachedInputTokens > 0 && (
-            <div className="flex items-center justify-between gap-4">
-              <span className="text-[color:var(--ui-ink-subtle)]">Cached</span>
-              <span className="font-mono tabular-nums">
-                {formatTokenCount(usage.cachedInputTokens)}
-              </span>
-            </div>
-          )}
         {usage?.outputTokens !== undefined && (
           <div className="flex items-center justify-between gap-4">
             <span className="text-[color:var(--ui-ink-subtle)]">Output</span>
-            <span className="font-mono tabular-nums">
-              {formatTokenCount(usage.outputTokens)}
-            </span>
+            <span className="font-mono tabular-nums">{formatTokenCount(usage.outputTokens)}</span>
           </div>
         )}
         {usage?.reasoningTokens !== undefined && usage.reasoningTokens > 0 && (
@@ -262,8 +237,7 @@ function ContextDisplayContent({
           <div className="flex items-center justify-between gap-4">
             <span className="text-[color:var(--ui-ink-subtle)]">Total</span>
             <span className="font-mono tabular-nums">
-              {formatTokenCount(totalTokens)} /{" "}
-              {formatTokenCount(modelContextWindow)}
+              {formatTokenCount(totalTokens)} / {formatTokenCount(modelContextWindow)}
             </span>
           </div>
         </div>
@@ -304,9 +278,7 @@ function RingVisual() {
         strokeWidth={RING_STROKE}
         strokeLinecap="round"
         strokeDasharray={RING_CIRCUMFERENCE}
-        strokeDashoffset={
-          RING_CIRCUMFERENCE - (percent / 100) * RING_CIRCUMFERENCE
-        }
+        strokeDashoffset={RING_CIRCUMFERENCE - (percent / 100) * RING_CIRCUMFERENCE}
         className={cn(
           "transition-[stroke-dashoffset,stroke] duration-300",
           getStrokeColor(percent),
@@ -316,17 +288,9 @@ function RingVisual() {
   );
 }
 
-const ContextDisplayRing: FC<PresetProps> = ({
-  modelContextWindow,
-  className,
-  side,
-  usage,
-}) => (
+const ContextDisplayRing: FC<PresetProps> = ({ modelContextWindow, className, side, usage }) => (
   <ContextDisplayRoot modelContextWindow={modelContextWindow} usage={usage}>
-    <ContextDisplayTrigger
-      className={cn("p-1", className)}
-      aria-label="Context usage"
-    >
+    <ContextDisplayTrigger className={cn("p-1", className)} aria-label="Context usage">
       <RingVisual />
     </ContextDisplayTrigger>
     <ContextDisplayContent side={side} />
@@ -340,10 +304,7 @@ function BarVisual() {
     <div className="flex items-center gap-2">
       <div className="h-1.5 w-16 overflow-hidden rounded-full bg-[color:var(--ui-bg-soft)]">
         <div
-          className={cn(
-            "h-full rounded-full transition-all duration-300",
-            getBarColor(percent),
-          )}
+          className={cn("h-full rounded-full transition-all duration-300", getBarColor(percent))}
           style={{ width: `${percent}%` }}
         />
       </div>
@@ -354,17 +315,9 @@ function BarVisual() {
   );
 }
 
-const ContextDisplayBar: FC<PresetProps> = ({
-  modelContextWindow,
-  className,
-  side,
-  usage,
-}) => (
+const ContextDisplayBar: FC<PresetProps> = ({ modelContextWindow, className, side, usage }) => (
   <ContextDisplayRoot modelContextWindow={modelContextWindow} usage={usage}>
-    <ContextDisplayTrigger
-      className={cn("px-2 py-1", className)}
-      aria-label="Context usage"
-    >
+    <ContextDisplayTrigger className={cn("px-2 py-1", className)} aria-label="Context usage">
       <BarVisual />
     </ContextDisplayTrigger>
     <ContextDisplayContent side={side} />
@@ -381,12 +334,7 @@ function TextVisual() {
   );
 }
 
-const ContextDisplayText: FC<PresetProps> = ({
-  modelContextWindow,
-  className,
-  side,
-  usage,
-}) => (
+const ContextDisplayText: FC<PresetProps> = ({ modelContextWindow, className, side, usage }) => (
   <ContextDisplayRoot modelContextWindow={modelContextWindow} usage={usage}>
     <ContextDisplayTrigger
       aria-label="Context usage"
@@ -419,10 +367,10 @@ ContextDisplay.Text = ContextDisplayText;
 
 export {
   ContextDisplay,
-  ContextDisplayRoot,
-  ContextDisplayTrigger,
+  ContextDisplayBar,
   ContextDisplayContent,
   ContextDisplayRing,
-  ContextDisplayBar,
+  ContextDisplayRoot,
   ContextDisplayText,
+  ContextDisplayTrigger,
 };

@@ -29,7 +29,11 @@ export async function PersonaView({ copy }: { copy?: PageCopy } = {}) {
 
   return (
     <AppPage className="gap-6">
-      <PageHeader subtitle={header.subtitle} title={header.title} description={header.description} />
+      <PageHeader
+        subtitle={header.subtitle}
+        title={header.title}
+        description={header.description}
+      />
 
       <ScrollRegion className="flex flex-col gap-6">
         {error ? (

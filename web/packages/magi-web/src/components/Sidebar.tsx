@@ -7,7 +7,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
-export type NavItem = { href: string; label: string; icon: ReactNode; match: (p: string) => boolean };
+export type NavItem = {
+  href: string;
+  label: string;
+  icon: ReactNode;
+  match: (p: string) => boolean;
+};
 
 const stroke = {
   fill: "none",
@@ -190,13 +195,7 @@ export function Sidebar({
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           aria-pressed={collapsed}
         >
-          <Icon>
-            {collapsed ? (
-              <path d="M9 6l6 6-6 6" />
-            ) : (
-              <path d="M15 6l-6 6 6 6" />
-            )}
-          </Icon>
+          <Icon>{collapsed ? <path d="M9 6l6 6-6 6" /> : <path d="M15 6l-6 6 6 6" />}</Icon>
         </button>
       </div>
 

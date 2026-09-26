@@ -33,76 +33,76 @@
 // api/chat/route.ts.
 
 import {
-  createContext,
-  forwardRef,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ComponentPropsWithoutRef,
-  type ReactNode,
-} from "react";
-import {
   ActionBarPrimitive,
   AssistantRuntimeProvider,
   AttachmentPrimitive,
   BranchPickerPrimitive,
   ComposerPrimitive,
   ErrorPrimitive,
+  type FileMessagePartProps,
+  type ImageMessagePartProps,
   MessagePrimitive,
+  type ReasoningMessagePartProps,
   SelectionToolbarPrimitive,
   ThreadPrimitive,
+  type ToolCallMessagePartProps,
   useAttachment,
   useLocalRuntime,
   useMessageQuote,
   useThread,
-  type FileMessagePartProps,
-  type ImageMessagePartProps,
-  type ReasoningMessagePartProps,
-  type ToolCallMessagePartProps,
 } from "@assistant-ui/react";
-import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import type { CodeHeaderProps, SyntaxHighlighterProps } from "@assistant-ui/react-markdown";
+import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
+import { OutlineButton, TextInput } from "@carneirofc/ui";
 import type { ComponentType } from "react";
+import {
+  type ComponentPropsWithoutRef,
+  createContext,
+  forwardRef,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { OutlineButton, TextInput } from "@carneirofc/ui";
 
-import { createChatModelAdapter, type ChatUsage } from "../lib/chat-adapter";
-import { greetIfFresh } from "../lib/chat-greeting";
-import { MoodScope, useMood, useMoodAdapterEvents } from "../lib/chat-mood";
-import { VoiceScope, createSpeechAdapter, useVoice } from "../lib/chat-voice";
+import { type ChatUsage, createChatModelAdapter } from "../lib/chat-adapter";
 import { createChatAttachmentAdapter } from "../lib/chat-attachments";
 import { createDictationAdapter, dictationSupported } from "../lib/chat-dictation";
-import { createRecordingDictationAdapter, recordingSupported } from "../lib/chat-recording";
-import { ContextDisplay, type ThreadTokenUsage } from "./assistant-ui/context-display";
-import { ContextInspector } from "./ContextInspector";
-import { ArchiveReference } from "./ArchiveReference";
-import { PersonaStage, resolveExpression } from "./PersonaStage";
-import { CodeHeader, CodeSyntaxHighlighter } from "./CodeBlock";
-import { MermaidDiagram } from "./MermaidDiagram";
-import { clearSessionHistory, createSessionHistoryAdapter } from "../lib/chat-history";
 import { exportTranscript } from "../lib/chat-export";
+import { greetIfFresh } from "../lib/chat-greeting";
+import { clearSessionHistory, createSessionHistoryAdapter } from "../lib/chat-history";
+import { MoodScope, useMood, useMoodAdapterEvents } from "../lib/chat-mood";
+import { createRecordingDictationAdapter, recordingSupported } from "../lib/chat-recording";
 import {
-  DEFAULT_TITLE,
   activeSession,
   archivedSessions,
+  type ChatSession,
   createSession,
+  DEFAULT_TITLE,
   deriveTitle,
   loadRegistry,
   removeSession,
   renameSession,
+  type SessionRegistry,
   saveRegistry,
   selectSession,
   toggleArchiveSession,
   togglePinSession,
   touchSession,
   visibleSessions,
-  type ChatSession,
-  type SessionRegistry,
 } from "../lib/chat-sessions";
+import { createSpeechAdapter, useVoice, VoiceScope } from "../lib/chat-voice";
+import { ArchiveReference } from "./ArchiveReference";
+import { ContextDisplay, type ThreadTokenUsage } from "./assistant-ui/context-display";
+import { CodeHeader, CodeSyntaxHighlighter } from "./CodeBlock";
+import { ContextInspector } from "./ContextInspector";
+import { MermaidDiagram } from "./MermaidDiagram";
+import { PersonaStage, resolveExpression } from "./PersonaStage";
 
 const USER_KEY = "magi.chat.userId";
 const RAIL_KEY = "magi.chat.railCollapsed";
@@ -186,8 +186,7 @@ export function ChatConsole({
   useEffect(() => {
     // Free mode (no pin, no default) restores the last "chat as" id; a seeded
     // console always starts as the configured person.
-    if (!pinnedUserId && !defaultUserId)
-      setUserId(localStorage.getItem(USER_KEY) || DEFAULT_USER);
+    if (!pinnedUserId && !defaultUserId) setUserId(localStorage.getItem(USER_KEY) || DEFAULT_USER);
     setRegistry(loadRegistry());
     setRailCollapsed(localStorage.getItem(RAIL_KEY) === "1");
     setPresenceOpen(localStorage.getItem(PRESENCE_KEY) !== "1");
@@ -271,8 +270,9 @@ export function ChatConsole({
   }
 
   function onUserSend(id: string, text: string) {
-    const wasUntitled = registry?.sessions.find((s) => s.id === id)?.title === DEFAULT_TITLE;
-    commit(touchSession(registry!, id, text));
+    if (!registry) return;
+    const wasUntitled = registry.sessions.find((s) => s.id === id)?.title === DEFAULT_TITLE;
+    commit(touchSession(registry, id, text));
     if (wasUntitled && text.trim()) maybeAutoTitle(id, text);
   }
 
@@ -287,87 +287,100 @@ export function ChatConsole({
 
   return (
     <IdentityContext.Provider value={identity}>
-    <PersonaContext.Provider value={persona}>
-    <VoiceCapsContext.Provider value={voice}>
-    {/* Mood + voice signals: join the page's providers when mounted, else scope
+      <PersonaContext.Provider value={persona}>
+        <VoiceCapsContext.Provider value={voice}>
+          {/* Mood + voice signals: join the page's providers when mounted, else scope
         our own — the header bust, presence stage, composer mood badge and the
         speak controls all read the same signal either way. */}
-    <MoodScope>
-    <VoiceScope>
-    <div className="flex min-h-[520px] flex-1 flex-col gap-3">
-      {/* Header bar: the persona anchors the left (face + name + live status);
+          <MoodScope>
+            <VoiceScope>
+              <div className="flex min-h-[520px] flex-1 flex-col gap-3">
+                {/* Header bar: the persona anchors the left (face + name + live status);
           controls stack on the right, chatbot-style. */}
-      <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-xl border border-ui bg-[color:var(--ui-bg)] px-3 py-2">
-        <PersonaChip expressions={expressions} name={displayName} avatarUrl={identity.avatarUrl} />
-        <div className="flex flex-wrap items-center gap-2">
-          {headerExtra}
-          {voice.tts ? <AutoSpeakToggle /> : null}
-          {pinnedUserId ? null : (
-            <UserSwitcher userId={userId} defaultUserId={defaultUserId} onChange={changeUser} />
-          )}
-          {hasPresence ? (
-            <PresenceToggle open={presenceOpen} onToggle={togglePresence} />
-          ) : null}
-          <span
-            className="hidden font-mono text-ui-2xs text-[color:var(--ui-ink-subtle)] sm:inline"
-            title="Conversation id (scopes session memory)"
-          >
-            {sessionId}
-          </span>
-        </div>
-      </header>
+                <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-xl border border-ui bg-[color:var(--ui-bg)] px-3 py-2">
+                  <PersonaChip
+                    expressions={expressions}
+                    name={displayName}
+                    avatarUrl={identity.avatarUrl}
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    {headerExtra}
+                    {voice.tts ? <AutoSpeakToggle /> : null}
+                    {pinnedUserId ? null : (
+                      <UserSwitcher
+                        userId={userId}
+                        defaultUserId={defaultUserId}
+                        onChange={changeUser}
+                      />
+                    )}
+                    {hasPresence ? (
+                      <PresenceToggle open={presenceOpen} onToggle={togglePresence} />
+                    ) : null}
+                    <span
+                      className="hidden font-mono text-ui-2xs text-[color:var(--ui-ink-subtle)] sm:inline"
+                      title="Conversation id (scopes session memory)"
+                    >
+                      {sessionId}
+                    </span>
+                  </div>
+                </header>
 
-      <div className="flex min-h-0 flex-1 gap-3">
-        <SessionRail
-          registry={registry}
-          collapsed={railCollapsed}
-          onToggleCollapsed={toggleRail}
-          onNew={() => commit(createSession(registry))}
-          onSelect={(id) => commit(selectSession(registry, id))}
-          onRename={(id, title) => commit(renameSession(registry, id, title))}
-          onTogglePin={(id) => commit(togglePinSession(registry, id))}
-          onToggleArchive={(id) => commit(toggleArchiveSession(registry, id))}
-          onExport={(session, format) =>
-            void exportTranscript(session.id, session.title, format, displayName ?? "Assistant")
-          }
-          onRemove={(id) => {
-            clearSessionHistory(id);
-            commit(removeSession(registry, id));
-          }}
-        />
+                <div className="flex min-h-0 flex-1 gap-3">
+                  <SessionRail
+                    registry={registry}
+                    collapsed={railCollapsed}
+                    onToggleCollapsed={toggleRail}
+                    onNew={() => commit(createSession(registry))}
+                    onSelect={(id) => commit(selectSession(registry, id))}
+                    onRename={(id, title) => commit(renameSession(registry, id, title))}
+                    onTogglePin={(id) => commit(togglePinSession(registry, id))}
+                    onToggleArchive={(id) => commit(toggleArchiveSession(registry, id))}
+                    onExport={(session, format) =>
+                      void exportTranscript(
+                        session.id,
+                        session.title,
+                        format,
+                        displayName ?? "Assistant",
+                      )
+                    }
+                    onRemove={(id) => {
+                      clearSessionHistory(id);
+                      commit(removeSession(registry, id));
+                    }}
+                  />
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-ui bg-[color:var(--ui-bg)]">
-          {greetOnOpen ? (
-            <GreetOnOpen sessionId={sessionId} userId={userId} onGreeted={onGreeted} />
-          ) : null}
-          <ChatThread
-            key={greetKey}
-            sessionId={sessionId}
-            userId={userId}
-            onUserSend={(text) => onUserSend(sessionId, text)}
-            onFreshSession={() => commit(createSession(registry))}
-          />
-        </div>
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-ui bg-[color:var(--ui-bg)]">
+                    {greetOnOpen ? (
+                      <GreetOnOpen sessionId={sessionId} userId={userId} onGreeted={onGreeted} />
+                    ) : null}
+                    <ChatThread
+                      key={greetKey}
+                      sessionId={sessionId}
+                      userId={userId}
+                      onUserSend={(text) => onUserSend(sessionId, text)}
+                      onFreshSession={() => commit(createSession(registry))}
+                    />
+                  </div>
 
-        {/* The presence column: her full portrait reacting to the stream, with
+                  {/* The presence column: her full portrait reacting to the stream, with
             whatever the app mounts under it (memory, reminders). Collapsible
             from the header; hidden below xl where the header bust carries the
             face instead. Lives inside the MoodScope so lifecycle-reactive
             panels (MemoryPanel) refresh on turn completion. */}
-        {hasPresence && presenceOpen ? (
-          <aside className="hidden w-60 shrink-0 flex-col gap-3 overflow-y-auto xl:flex 2xl:w-72">
-            {expressions ? (
-              <PersonaStage expressions={expressions} name={displayName} />
-            ) : null}
-            {presencePanel}
-          </aside>
-        ) : null}
-      </div>
-    </div>
-    </VoiceScope>
-    </MoodScope>
-    </VoiceCapsContext.Provider>
-    </PersonaContext.Provider>
+                  {hasPresence && presenceOpen ? (
+                    <aside className="hidden w-60 shrink-0 flex-col gap-3 overflow-y-auto xl:flex 2xl:w-72">
+                      {expressions ? (
+                        <PersonaStage expressions={expressions} name={displayName} />
+                      ) : null}
+                      {presencePanel}
+                    </aside>
+                  ) : null}
+                </div>
+              </div>
+            </VoiceScope>
+          </MoodScope>
+        </VoiceCapsContext.Provider>
+      </PersonaContext.Provider>
     </IdentityContext.Provider>
   );
 }
@@ -405,12 +418,12 @@ function PersonaChip({
     ? "listening…"
     : speaking
       ? "speaking…"
-      : CHIP_STATUS[lifecycle] ?? null;
+      : (CHIP_STATUS[lifecycle] ?? null);
 
   return (
     <div className="flex min-w-0 items-center gap-2.5">
       {src ? (
-        // eslint-disable-next-line @next/next/no-img-element -- dynamic persona art
+        // biome-ignore lint/performance/noImgElement: dynamic persona art
         <img
           src={src}
           alt=""
@@ -578,7 +591,11 @@ function AutoSpeakToggle() {
           ? "border-[color:var(--ui-border-active)] text-[color:var(--ui-ink-accent)]"
           : "border-ui text-[color:var(--ui-ink-subtle)] hover:text-[color:var(--ui-ink)]"
       }`}
-      title={autoSpeak ? "Voice on — replies are spoken aloud" : "Voice off — click to speak replies aloud"}
+      title={
+        autoSpeak
+          ? "Voice on — replies are spoken aloud"
+          : "Voice off — click to speak replies aloud"
+      }
       aria-pressed={autoSpeak}
     >
       <SpeakerIcon muted={!autoSpeak} pulsing={speaking} />
@@ -630,10 +647,7 @@ function GreetOnOpen({
 // --- session rail ------------------------------------------------------------
 // A compact square control for the rail's chrome (collapse toggle, new-chat when
 // collapsed). Shares the composer's icon-button feel but sized for the rail.
-function RailIconButton({
-  children,
-  ...props
-}: ComponentPropsWithoutRef<"button">) {
+function RailIconButton({ children, ...props }: ComponentPropsWithoutRef<"button">) {
   return (
     <button
       type="button"
@@ -646,14 +660,34 @@ function RailIconButton({
 }
 function ChevronLeftIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
       <path d="M15 6l-6 6 6 6" />
     </svg>
   );
 }
 function ChevronRightIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
       <path d="M9 6l6 6-6 6" />
     </svg>
   );
@@ -693,6 +727,7 @@ function SessionRail({
   // sessions deleted from this browser's registry — those are dropped).
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<{ sessionId: string; snippet: string }[] | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed by the query text
   useEffect(() => {
     const q = query.trim();
     if (!q) {
@@ -709,7 +744,6 @@ function SessionRail({
         .catch(() => setHits([]));
     }, 250);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by the query text
   }, [query]);
 
   function startRename(session: ChatSession) {
@@ -726,7 +760,11 @@ function SessionRail({
   if (collapsed) {
     return (
       <aside className="flex w-11 shrink-0 flex-col items-center gap-2 rounded-xl border border-ui bg-[color:var(--ui-bg-soft)] p-2">
-        <RailIconButton onClick={onToggleCollapsed} title="Show conversations" aria-label="Show conversations">
+        <RailIconButton
+          onClick={onToggleCollapsed}
+          title="Show conversations"
+          aria-label="Show conversations"
+        >
           <ChevronRightIcon />
         </RailIconButton>
         <RailIconButton onClick={onNew} title="New chat" aria-label="New chat">
@@ -748,7 +786,11 @@ function SessionRail({
         <OutlineButton variant="accent" controlSize="md" onClick={onNew} className="flex-1">
           + New chat
         </OutlineButton>
-        <RailIconButton onClick={onToggleCollapsed} title="Hide conversations" aria-label="Hide conversations">
+        <RailIconButton
+          onClick={onToggleCollapsed}
+          title="Hide conversations"
+          aria-label="Hide conversations"
+        >
           <ChevronLeftIcon />
         </RailIconButton>
       </div>
@@ -795,74 +837,81 @@ function SessionRail({
           )}
         </ul>
       ) : (
-      <ul className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
-        {visible.map((session) => {
-          const isActive = session.id === registry.activeId;
-          return (
-            <li key={session.id}>
-              {editingId === session.id ? (
-                <TextInput
-                  value={draft}
-                  autoFocus
-                  onChange={(e) => setDraft(e.target.value)}
-                  onBlur={commitRename}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") commitRename();
-                    if (e.key === "Escape") setEditingId(null);
-                  }}
-                  className="w-full text-ui-xs"
-                  aria-label="Rename conversation"
-                />
-              ) : (
-                <div
-                  className={`group flex items-center gap-1 rounded-lg border px-2 py-1.5 ${
-                    isActive
-                      ? "border-accent-cyan/40 bg-[color:var(--ui-bg-info)]"
-                      : "border-transparent hover:border-ui hover:bg-[color:var(--ui-bg)]"
-                  }`}
-                >
-                  {session.pinned ? (
-                    <span aria-hidden className="shrink-0 text-ui-2xs text-[color:var(--ui-ink-accent)]">
-                      ●
-                    </span>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => onSelect(session.id)}
-                    onDoubleClick={() => startRename(session)}
-                    className="min-w-0 flex-1 truncate text-left text-ui-xs text-[color:var(--ui-ink)]"
-                    title={`${session.title}\nDouble-click to rename`}
+        <ul className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+          {visible.map((session) => {
+            const isActive = session.id === registry.activeId;
+            return (
+              <li key={session.id}>
+                {editingId === session.id ? (
+                  <TextInput
+                    value={draft}
+                    autoFocus
+                    onChange={(e) => setDraft(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitRename();
+                      if (e.key === "Escape") setEditingId(null);
+                    }}
+                    className="w-full text-ui-xs"
+                    aria-label="Rename conversation"
+                  />
+                ) : (
+                  <div
+                    className={`group flex items-center gap-1 rounded-lg border px-2 py-1.5 ${
+                      isActive
+                        ? "border-accent-cyan/40 bg-[color:var(--ui-bg-info)]"
+                        : "border-transparent hover:border-ui hover:bg-[color:var(--ui-bg)]"
+                    }`}
                   >
-                    {session.title}
-                  </button>
-                  <SessionRowAction
-                    onClick={() => onTogglePin(session.id)}
-                    title={session.pinned ? "Unpin" : "Pin to top"}
-                  >
-                    {session.pinned ? "◉" : "○"}
-                  </SessionRowAction>
-                  <SessionRowAction onClick={() => startRename(session)} title="Rename">
-                    ✎
-                  </SessionRowAction>
-                  <SessionRowAction
-                    onClick={() => onExport(session, "markdown")}
-                    title="Export as Markdown (Shift-click for JSON)"
-                    onShiftClick={() => onExport(session, "json")}
-                  >
-                    ↓
-                  </SessionRowAction>
-                  <SessionRowAction onClick={() => onToggleArchive(session.id)} title="Archive">
-                    ▣
-                  </SessionRowAction>
-                  <SessionRowAction danger onClick={() => onRemove(session.id)} title="Delete conversation">
-                    ✕
-                  </SessionRowAction>
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+                    {session.pinned ? (
+                      <span
+                        aria-hidden
+                        className="shrink-0 text-ui-2xs text-[color:var(--ui-ink-accent)]"
+                      >
+                        ●
+                      </span>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => onSelect(session.id)}
+                      onDoubleClick={() => startRename(session)}
+                      className="min-w-0 flex-1 truncate text-left text-ui-xs text-[color:var(--ui-ink)]"
+                      title={`${session.title}\nDouble-click to rename`}
+                    >
+                      {session.title}
+                    </button>
+                    <SessionRowAction
+                      onClick={() => onTogglePin(session.id)}
+                      title={session.pinned ? "Unpin" : "Pin to top"}
+                    >
+                      {session.pinned ? "◉" : "○"}
+                    </SessionRowAction>
+                    <SessionRowAction onClick={() => startRename(session)} title="Rename">
+                      ✎
+                    </SessionRowAction>
+                    <SessionRowAction
+                      onClick={() => onExport(session, "markdown")}
+                      title="Export as Markdown (Shift-click for JSON)"
+                      onShiftClick={() => onExport(session, "json")}
+                    >
+                      ↓
+                    </SessionRowAction>
+                    <SessionRowAction onClick={() => onToggleArchive(session.id)} title="Archive">
+                      ▣
+                    </SessionRowAction>
+                    <SessionRowAction
+                      danger
+                      onClick={() => onRemove(session.id)}
+                      title="Delete conversation"
+                    >
+                      ✕
+                    </SessionRowAction>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
       )}
 
       {archived.length > 0 ? (
@@ -887,7 +936,11 @@ function SessionRail({
                   <SessionRowAction onClick={() => onToggleArchive(session.id)} title="Unarchive">
                     ▢
                   </SessionRowAction>
-                  <SessionRowAction danger onClick={() => onRemove(session.id)} title="Delete conversation">
+                  <SessionRowAction
+                    danger
+                    onClick={() => onRemove(session.id)}
+                    title="Delete conversation"
+                  >
                     ✕
                   </SessionRowAction>
                 </li>
@@ -1103,7 +1156,7 @@ function ThreadEmptyState() {
   return (
     <div className="m-auto flex max-w-md flex-col items-center gap-3 text-center">
       {face ? (
-        // eslint-disable-next-line @next/next/no-img-element -- dynamic persona art
+        // biome-ignore lint/performance/noImgElement: dynamic persona art
         <img
           src={face}
           alt=""
@@ -1111,13 +1164,11 @@ function ThreadEmptyState() {
           className="h-24 w-24 select-none rounded-3xl border border-ui object-cover shadow-sm"
         />
       ) : null}
-      <p className="text-ui-lg font-semibold text-[color:var(--ui-ink)]">
-        Chat with {name}
-      </p>
+      <p className="text-ui-lg font-semibold text-[color:var(--ui-ink)]">Chat with {name}</p>
       <p className="text-ui-xs text-[color:var(--ui-ink-subtle)]">
-        Ask anything. Drag in images or files, dictate with the mic, quote earlier
-        replies, and watch the thinking and tool activity stream in. She remembers —
-        durable memory accrues to the active user id.
+        Ask anything. Drag in images or files, dictate with the mic, quote earlier replies, and
+        watch the thinking and tool activity stream in. She remembers — durable memory accrues to
+        the active user id.
       </p>
     </div>
   );
@@ -1143,7 +1194,7 @@ function AssistantAvatar() {
         className="h-7 w-7 shrink-0 select-none overflow-hidden rounded-full border border-ui"
         title={assistantName}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element -- BFF-served, dynamic src */}
+        {/* biome-ignore lint/performance/noImgElement: BFF-served, dynamic src */}
         <img src={src} alt="" className="h-full w-full object-cover" />
       </div>
     );
@@ -1175,7 +1226,9 @@ type MarkdownComponents = Components & {
 const MARKDOWN_COMPONENTS: MarkdownComponents = {
   SyntaxHighlighter: CodeSyntaxHighlighter,
   CodeHeader,
-  p: ({ node, ...props }) => <p className="my-1.5 leading-relaxed first:mt-0 last:mb-0" {...props} />,
+  p: ({ node, ...props }) => (
+    <p className="my-1.5 leading-relaxed first:mt-0 last:mb-0" {...props} />
+  ),
   a: ({ node, ...props }) => (
     <a
       className="text-[color:var(--ui-ink-accent)] underline underline-offset-2 hover:opacity-80"
@@ -1187,11 +1240,20 @@ const MARKDOWN_COMPONENTS: MarkdownComponents = {
   ul: ({ node, ...props }) => <ul className="my-1.5 list-disc pl-5" {...props} />,
   ol: ({ node, ...props }) => <ol className="my-1.5 list-decimal pl-5" {...props} />,
   li: ({ node, ...props }) => <li className="my-0.5" {...props} />,
-  h1: ({ node, ...props }) => <h1 className="mb-1.5 mt-3 text-ui-base font-semibold first:mt-0" {...props} />,
-  h2: ({ node, ...props }) => <h2 className="mb-1.5 mt-3 text-ui-sm font-semibold first:mt-0" {...props} />,
-  h3: ({ node, ...props }) => <h3 className="mb-1 mt-2 text-ui-sm font-semibold first:mt-0" {...props} />,
+  h1: ({ node, ...props }) => (
+    <h1 className="mb-1.5 mt-3 text-ui-base font-semibold first:mt-0" {...props} />
+  ),
+  h2: ({ node, ...props }) => (
+    <h2 className="mb-1.5 mt-3 text-ui-sm font-semibold first:mt-0" {...props} />
+  ),
+  h3: ({ node, ...props }) => (
+    <h3 className="mb-1 mt-2 text-ui-sm font-semibold first:mt-0" {...props} />
+  ),
   h4: ({ node, ...props }) => (
-    <h4 className="mb-1 mt-2 text-ui-xs font-semibold uppercase tracking-wide first:mt-0" {...props} />
+    <h4
+      className="mb-1 mt-2 text-ui-xs font-semibold uppercase tracking-wide first:mt-0"
+      {...props}
+    />
   ),
   code: ({ node, ...props }) => (
     <code
@@ -1218,7 +1280,10 @@ const MARKDOWN_COMPONENTS: MarkdownComponents = {
     </div>
   ),
   th: ({ node, ...props }) => (
-    <th className="border border-ui bg-[color:var(--ui-bg-soft)] px-2 py-1 text-left font-semibold" {...props} />
+    <th
+      className="border border-ui bg-[color:var(--ui-bg-soft)] px-2 py-1 text-left font-semibold"
+      {...props}
+    />
   ),
   td: ({ node, ...props }) => <td className="border border-ui px-2 py-1" {...props} />,
 };
@@ -1281,9 +1346,7 @@ function ToolPart({ toolName, argsText, result, isError }: ToolCallMessagePartPr
           {isError ? "Tool error" : "Tool"}
         </span>
         <span className="font-mono text-[color:var(--ui-ink-accent)]">{toolName}</span>
-        {running ? (
-          <span className="text-[color:var(--ui-ink-subtle)]">· running…</span>
-        ) : null}
+        {running ? <span className="text-[color:var(--ui-ink-subtle)]">· running…</span> : null}
       </summary>
       {argsText && argsText !== "{}" ? (
         <pre className="mt-1 max-h-40 overflow-auto rounded bg-[color:var(--ui-bg)] p-2 text-ui-2xs text-[color:var(--ui-ink-muted)]">
@@ -1302,15 +1365,7 @@ function ToolPart({ toolName, argsText, result, isError }: ToolCallMessagePartPr
 // An image that opens a full-viewport lightbox on click — shared by reply images
 // and composer/message image attachments so any picture in the console can be
 // inspected at size. The overlay closes on click or Escape.
-function ZoomableImage({
-  src,
-  alt,
-  className,
-}: {
-  src: string;
-  alt?: string;
-  className?: string;
-}) {
+function ZoomableImage({ src, alt, className }: { src: string; alt?: string; className?: string }) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -1324,14 +1379,16 @@ function ZoomableImage({
 
   return (
     <>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={src}
-        alt={alt ?? "image"}
+      <button
+        type="button"
         onClick={() => setOpen(true)}
-        className={`cursor-zoom-in ${className ?? ""}`}
-      />
+        className="block cursor-zoom-in appearance-none border-0 bg-transparent p-0"
+      >
+        {/* biome-ignore lint/performance/noImgElement: BFF-served, dynamic src */}
+        <img src={src} alt={alt ?? "image"} className={className} />
+      </button>
       {open ? (
+        // biome-ignore lint/a11y/useKeyWithClickEvents: closes via Escape (see keydown listener above)
         <div
           className="fixed inset-0 z-50 flex cursor-zoom-out items-center justify-center bg-black/75 p-6"
           onClick={() => setOpen(false)}
@@ -1339,7 +1396,7 @@ function ZoomableImage({
           aria-modal="true"
           aria-label={alt ?? "image preview"}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
+          {/* biome-ignore lint/performance/noImgElement: BFF-served, dynamic src */}
           <img
             src={src}
             alt={alt ?? "image"}
@@ -1437,21 +1494,20 @@ function QuotedContext() {
 }
 
 /** A small hover control in a message's action bar (edit / regenerate / copy). */
-const MessageActionButton = forwardRef<
-  HTMLButtonElement,
-  ComponentPropsWithoutRef<"button">
->(function MessageActionButton({ children, ...props }, ref) {
-  return (
-    <button
-      ref={ref}
-      type="button"
-      {...props}
-      className="flex h-6 w-6 items-center justify-center rounded-md border border-ui bg-[color:var(--ui-bg)] text-[color:var(--ui-ink-subtle)] transition-colors hover:text-[color:var(--ui-ink-accent)] disabled:opacity-40"
-    >
-      {children}
-    </button>
-  );
-});
+const MessageActionButton = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<"button">>(
+  function MessageActionButton({ children, ...props }, ref) {
+    return (
+      <button
+        ref={ref}
+        type="button"
+        {...props}
+        className="flex h-6 w-6 items-center justify-center rounded-md border border-ui bg-[color:var(--ui-bg)] text-[color:var(--ui-ink-subtle)] transition-colors hover:text-[color:var(--ui-ink-accent)] disabled:opacity-40"
+      >
+        {children}
+      </button>
+    );
+  },
+);
 
 /** Prev/next through the branches an edit or regenerate created. Renders
  * nothing while the message has a single branch. */
@@ -1494,7 +1550,11 @@ function UserMessage() {
           a new branch; the picker navigates back). */}
       <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
         <BranchPicker />
-        <ActionBarPrimitive.Root hideWhenRunning autohide="never" className="flex items-center gap-1">
+        <ActionBarPrimitive.Root
+          hideWhenRunning
+          autohide="never"
+          className="flex items-center gap-1"
+        >
           <ActionBarPrimitive.Edit asChild>
             <MessageActionButton title="Edit message" aria-label="Edit message">
               <PencilIcon />
@@ -1556,35 +1616,39 @@ function AssistantMessage() {
         </MessagePrimitive.Error>
         {/* Hover actions: regenerate (or retry after an error) + copy. */}
         <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
-        <ActionBarPrimitive.Root hideWhenRunning autohide="never" className="flex items-center gap-1">
-          <ActionBarPrimitive.Reload asChild>
-            <MessageActionButton title="Regenerate reply" aria-label="Regenerate reply">
-              <RefreshIcon />
-            </MessageActionButton>
-          </ActionBarPrimitive.Reload>
-          <ActionBarPrimitive.Copy asChild>
-            <MessageActionButton title="Copy reply" aria-label="Copy reply">
-              <CopyIcon />
-            </MessageActionButton>
-          </ActionBarPrimitive.Copy>
-          {/* Read this reply aloud (TTS sidecar); stop replaces play while
+          <ActionBarPrimitive.Root
+            hideWhenRunning
+            autohide="never"
+            className="flex items-center gap-1"
+          >
+            <ActionBarPrimitive.Reload asChild>
+              <MessageActionButton title="Regenerate reply" aria-label="Regenerate reply">
+                <RefreshIcon />
+              </MessageActionButton>
+            </ActionBarPrimitive.Reload>
+            <ActionBarPrimitive.Copy asChild>
+              <MessageActionButton title="Copy reply" aria-label="Copy reply">
+                <CopyIcon />
+              </MessageActionButton>
+            </ActionBarPrimitive.Copy>
+            {/* Read this reply aloud (TTS sidecar); stop replaces play while
               speaking. Only rendered when the deployment wired TTS. */}
-          {caps.tts ? (
-            <>
-              <ActionBarPrimitive.Speak asChild>
-                <MessageActionButton title="Read aloud" aria-label="Read aloud">
-                  <SpeakerIcon />
-                </MessageActionButton>
-              </ActionBarPrimitive.Speak>
-              <ActionBarPrimitive.StopSpeaking asChild>
-                <MessageActionButton title="Stop reading" aria-label="Stop reading">
-                  <StopIcon />
-                </MessageActionButton>
-              </ActionBarPrimitive.StopSpeaking>
-            </>
-          ) : null}
-        </ActionBarPrimitive.Root>
-        <BranchPicker />
+            {caps.tts ? (
+              <>
+                <ActionBarPrimitive.Speak asChild>
+                  <MessageActionButton title="Read aloud" aria-label="Read aloud">
+                    <SpeakerIcon />
+                  </MessageActionButton>
+                </ActionBarPrimitive.Speak>
+                <ActionBarPrimitive.StopSpeaking asChild>
+                  <MessageActionButton title="Stop reading" aria-label="Stop reading">
+                    <StopIcon />
+                  </MessageActionButton>
+                </ActionBarPrimitive.StopSpeaking>
+              </>
+            ) : null}
+          </ActionBarPrimitive.Root>
+          <BranchPicker />
         </div>
       </div>
     </MessagePrimitive.Root>
@@ -1596,28 +1660,64 @@ function AssistantMessage() {
 // chat composer rather than emoji glyphs.
 function PlusIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+    <svg
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden
+    >
       <path d="M12 5v14M5 12h14" />
     </svg>
   );
 }
 function QuoteIcon({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" className={className} aria-hidden>
+    <svg
+      viewBox="0 0 24 24"
+      width="13"
+      height="13"
+      fill="currentColor"
+      className={className}
+      aria-hidden
+    >
       <path d="M7.5 6C5.6 6 4 7.6 4 9.5S5.6 13 7.5 13c.2 0 .3 0 .5-.1-.3 1.4-1.4 2.5-2.8 2.9-.4.1-.6.5-.5.9.1.3.4.5.7.5h.2c2.6-.6 4.4-2.9 4.4-5.6V9.5C10 7.6 8.4 6 6.5 6h1zm9 0C14.6 6 13 7.6 13 9.5s1.6 3.5 3.5 3.5c.2 0 .3 0 .5-.1-.3 1.4-1.4 2.5-2.8 2.9-.4.1-.6.5-.5.9.1.3.4.5.7.5h.2c2.6-.6 4.4-2.9 4.4-5.6V9.5C19 7.6 17.4 6 15.5 6h1z" />
     </svg>
   );
 }
 function PencilIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg
+      viewBox="0 0 24 24"
+      width="13"
+      height="13"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
       <path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z" />
     </svg>
   );
 }
 function RefreshIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg
+      viewBox="0 0 24 24"
+      width="13"
+      height="13"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
       <path d="M21 12a9 9 0 1 1-2.6-6.4" />
       <path d="M21 3v6h-6" />
     </svg>
@@ -1625,7 +1725,17 @@ function RefreshIcon() {
 }
 function CopyIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg
+      viewBox="0 0 24 24"
+      width="13"
+      height="13"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
       <rect x="9" y="9" width="12" height="12" rx="2" />
       <path d="M5 15V5a2 2 0 0 1 2-2h10" />
     </svg>
@@ -1633,7 +1743,17 @@ function CopyIcon() {
 }
 function UserIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg
+      viewBox="0 0 24 24"
+      width="12"
+      height="12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
       <circle cx="12" cy="8" r="4" />
       <path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" />
     </svg>
@@ -1641,7 +1761,17 @@ function UserIcon() {
 }
 function PanelRightIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg
+      viewBox="0 0 24 24"
+      width="12"
+      height="12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
       <rect x="3" y="4" width="18" height="16" rx="2" />
       <path d="M15 4v16" />
     </svg>
@@ -1649,7 +1779,17 @@ function PanelRightIcon() {
 }
 function MicIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
       <rect x="9" y="2" width="6" height="12" rx="3" />
       <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
     </svg>
@@ -1690,7 +1830,17 @@ function StopIcon() {
 }
 function SendIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
       <path d="M12 19V5M5 12l7-7 7 7" />
     </svg>
   );
@@ -1748,147 +1898,149 @@ function Composer({
 
   return (
     <ComposerPrimitive.Root className="flex flex-col border-t border-ui bg-[color:var(--ui-bg-soft)] px-3 py-3">
-     {/* Centered to the same readable column as the transcript. */}
-     <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
-      {/* One integrated field: attachments, transcript, textarea, and a toolbar
+      {/* Centered to the same readable column as the transcript. */}
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
+        {/* One integrated field: attachments, transcript, textarea, and a toolbar
           row all live inside a single rounded surface (Claude-style). */}
-      <div className="flex flex-col gap-1.5 rounded-2xl border border-ui bg-[color:var(--ui-bg)] px-2 py-2 transition-colors focus-within:border-[color:var(--ui-border-active)]">
-        {/* Pending quote captured from a reply — previewed here until sent or
+        <div className="flex flex-col gap-1.5 rounded-2xl border border-ui bg-[color:var(--ui-bg)] px-2 py-2 transition-colors focus-within:border-[color:var(--ui-border-active)]">
+          {/* Pending quote captured from a reply — previewed here until sent or
             dismissed (assistant-ui only renders this when a quote is set). */}
-        <ComposerPrimitive.Quote className="mx-1 mt-1 flex items-start gap-2 rounded-lg border-l-2 border-accent-cyan/50 bg-[color:var(--ui-bg-soft)] px-2 py-1">
-          <QuoteIcon className="mt-0.5 shrink-0 text-[color:var(--ui-ink-subtle)]" />
-          <ComposerPrimitive.QuoteText className="line-clamp-3 min-w-0 flex-1 text-ui-2xs italic text-[color:var(--ui-ink-muted)]" />
-          <ComposerPrimitive.QuoteDismiss
-            className="shrink-0 rounded text-ui-2xs text-[color:var(--ui-ink-subtle)] hover:text-[color:var(--ui-ink-danger)]"
-            aria-label="Remove quote"
-          >
-            ✕
-          </ComposerPrimitive.QuoteDismiss>
-        </ComposerPrimitive.Quote>
+          <ComposerPrimitive.Quote className="mx-1 mt-1 flex items-start gap-2 rounded-lg border-l-2 border-accent-cyan/50 bg-[color:var(--ui-bg-soft)] px-2 py-1">
+            <QuoteIcon className="mt-0.5 shrink-0 text-[color:var(--ui-ink-subtle)]" />
+            <ComposerPrimitive.QuoteText className="line-clamp-3 min-w-0 flex-1 text-ui-2xs italic text-[color:var(--ui-ink-muted)]" />
+            <ComposerPrimitive.QuoteDismiss
+              className="shrink-0 rounded text-ui-2xs text-[color:var(--ui-ink-subtle)] hover:text-[color:var(--ui-ink-danger)]"
+              aria-label="Remove quote"
+            >
+              ✕
+            </ComposerPrimitive.QuoteDismiss>
+          </ComposerPrimitive.Quote>
 
-        <div className="flex flex-wrap gap-2 px-1 pt-1 empty:hidden">
-          <ComposerPrimitive.Attachments components={{ Attachment: AttachmentTile }} />
-        </div>
+          <div className="flex flex-wrap gap-2 px-1 pt-1 empty:hidden">
+            <ComposerPrimitive.Attachments components={{ Attachment: AttachmentTile }} />
+          </div>
 
-        {/* Live dictation transcript sits above the input while recording. */}
-        <ComposerPrimitive.If dictation={true}>
-          <ComposerPrimitive.DictationTranscript className="px-2 text-ui-2xs italic text-[color:var(--ui-ink-subtle)]" />
-        </ComposerPrimitive.If>
+          {/* Live dictation transcript sits above the input while recording. */}
+          <ComposerPrimitive.If dictation={true}>
+            <ComposerPrimitive.DictationTranscript className="px-2 text-ui-2xs italic text-[color:var(--ui-ink-subtle)]" />
+          </ComposerPrimitive.If>
 
-        <ComposerPrimitive.Input
-          placeholder={`Message ${assistantName ?? "the assistant"}…  (Enter to send, Shift+Enter for a newline)`}
-          className="max-h-40 min-h-[2.5rem] w-full resize-none bg-transparent px-2 py-1.5 text-ui-sm text-[color:var(--ui-ink)] outline-none placeholder:text-[color:var(--ui-ink-subtle)]"
-        />
+          <ComposerPrimitive.Input
+            placeholder={`Message ${assistantName ?? "the assistant"}…  (Enter to send, Shift+Enter for a newline)`}
+            className="max-h-40 min-h-[2.5rem] w-full resize-none bg-transparent px-2 py-1.5 text-ui-sm text-[color:var(--ui-ink)] outline-none placeholder:text-[color:var(--ui-ink-subtle)]"
+          />
 
-        <div className="flex items-center gap-1">
-          <ComposerPrimitive.AddAttachment asChild>
-            <IconButton title="Attach an image or file" aria-label="Attach an image or file">
-              <PlusIcon />
-            </IconButton>
-          </ComposerPrimitive.AddAttachment>
+          <div className="flex items-center gap-1">
+            <ComposerPrimitive.AddAttachment asChild>
+              <IconButton title="Attach an image or file" aria-label="Attach an image or file">
+                <PlusIcon />
+              </IconButton>
+            </ComposerPrimitive.AddAttachment>
 
-          {/* Voice → text. Mic when idle, stop while dictating (assistant-ui only
+            {/* Voice → text. Mic when idle, stop while dictating (assistant-ui only
               renders StopDictation when a session is active). Where the browser
               has no SpeechRecognition, the mic is present but disabled. */}
-          {micSupported ? (
-            <>
-              <ComposerPrimitive.If dictation={false}>
-                <ComposerPrimitive.Dictate asChild>
-                  <IconButton
-                    title="Dictate (voice to text)"
-                    aria-label="Dictate (voice to text)"
-                    onClick={onDismissDictationError}
-                  >
-                    <MicIcon />
-                  </IconButton>
-                </ComposerPrimitive.Dictate>
-              </ComposerPrimitive.If>
-              <ComposerPrimitive.If dictation={true}>
-                <ComposerPrimitive.StopDictation asChild>
-                  <IconButton
-                    variant="danger"
-                    className="animate-pulse"
-                    title="Stop dictation"
-                    aria-label="Stop dictation"
-                  >
+            {micSupported ? (
+              <>
+                <ComposerPrimitive.If dictation={false}>
+                  <ComposerPrimitive.Dictate asChild>
+                    <IconButton
+                      title="Dictate (voice to text)"
+                      aria-label="Dictate (voice to text)"
+                      onClick={onDismissDictationError}
+                    >
+                      <MicIcon />
+                    </IconButton>
+                  </ComposerPrimitive.Dictate>
+                </ComposerPrimitive.If>
+                <ComposerPrimitive.If dictation={true}>
+                  <ComposerPrimitive.StopDictation asChild>
+                    <IconButton
+                      variant="danger"
+                      className="animate-pulse"
+                      title="Stop dictation"
+                      aria-label="Stop dictation"
+                    >
+                      <StopIcon />
+                    </IconButton>
+                  </ComposerPrimitive.StopDictation>
+                </ComposerPrimitive.If>
+              </>
+            ) : (
+              <IconButton
+                disabled
+                title="Dictation needs a browser with speech recognition (Chrome, Edge, or Safari)"
+                aria-label="Dictation unavailable in this browser"
+              >
+                <MicIcon />
+              </IconButton>
+            )}
+
+            {/* Cite something said in a previous conversation (engine archive). */}
+            <ArchiveReference userId={userId} />
+
+            <div className="ml-auto flex items-center gap-2">
+              {isRunning ? (
+                <ComposerPrimitive.Cancel asChild>
+                  <IconButton variant="danger" title="Stop generating" aria-label="Stop generating">
                     <StopIcon />
                   </IconButton>
-                </ComposerPrimitive.StopDictation>
-              </ComposerPrimitive.If>
-            </>
-          ) : (
-            <IconButton
-              disabled
-              title="Dictation needs a browser with speech recognition (Chrome, Edge, or Safari)"
-              aria-label="Dictation unavailable in this browser"
+                </ComposerPrimitive.Cancel>
+              ) : (
+                <ComposerPrimitive.Send asChild>
+                  <IconButton variant="accent" title="Send message" aria-label="Send message">
+                    <SendIcon />
+                  </IconButton>
+                </ComposerPrimitive.Send>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer: a dictation error (dismissible) on the left, the turn's mood +
+          the live context-window fill for the last turn on the right. Hidden
+          until either has something to show, so a fresh thread stays clean. */}
+        <div className="flex min-h-[1rem] items-center justify-between gap-3 empty:hidden">
+          {dictationError ? (
+            <button
+              type="button"
+              onClick={onDismissDictationError}
+              className="flex items-center gap-1.5 text-left text-ui-2xs text-[color:var(--ui-ink-danger)] hover:opacity-80"
+              title="Dismiss"
             >
-              <MicIcon />
-            </IconButton>
+              <span aria-hidden>⚠</span>
+              <span>{dictationError}</span>
+              <span aria-hidden className="opacity-60">
+                ✕
+              </span>
+            </button>
+          ) : (
+            <span />
           )}
-
-          {/* Cite something said in a previous conversation (engine archive). */}
-          <ArchiveReference userId={userId} />
-
-          <div className="ml-auto flex items-center gap-2">
-            {isRunning ? (
-              <ComposerPrimitive.Cancel asChild>
-                <IconButton variant="danger" title="Stop generating" aria-label="Stop generating">
-                  <StopIcon />
-                </IconButton>
-              </ComposerPrimitive.Cancel>
-            ) : (
-              <ComposerPrimitive.Send asChild>
-                <IconButton variant="accent" title="Send message" aria-label="Send message">
-                  <SendIcon />
-                </IconButton>
-              </ComposerPrimitive.Send>
-            )}
+          <div className="flex items-center gap-3">
+            <MoodBadge />
+            {/* assistant-ui's ContextDisplay, fed our streamed usage (bar tracks
+              total/context window; hover breaks the turn down). Shown only once a
+              reply reports a context window, so a fresh thread stays clean. */}
+            {usage?.contextWindow ? (
+              <div className="flex items-center gap-2 text-ui-2xs text-[color:var(--ui-ink-subtle)]">
+                <span className="font-medium uppercase tracking-wide">Context</span>
+                <ContextDisplay.Bar
+                  modelContextWindow={usage.contextWindow}
+                  usage={toTokenUsage(usage)}
+                  side="top"
+                />
+              </div>
+            ) : null}
+            {/* The engine-truth inspector: per-section sizes + the flush valve. */}
+            <ContextInspector
+              sessionId={sessionId}
+              userId={userId}
+              onFreshSession={onFreshSession}
+            />
           </div>
         </div>
       </div>
-
-      {/* Footer: a dictation error (dismissible) on the left, the turn's mood +
-          the live context-window fill for the last turn on the right. Hidden
-          until either has something to show, so a fresh thread stays clean. */}
-      <div className="flex min-h-[1rem] items-center justify-between gap-3 empty:hidden">
-        {dictationError ? (
-          <button
-            type="button"
-            onClick={onDismissDictationError}
-            className="flex items-center gap-1.5 text-left text-ui-2xs text-[color:var(--ui-ink-danger)] hover:opacity-80"
-            title="Dismiss"
-          >
-            <span aria-hidden>⚠</span>
-            <span>{dictationError}</span>
-            <span aria-hidden className="opacity-60">✕</span>
-          </button>
-        ) : (
-          <span />
-        )}
-        <div className="flex items-center gap-3">
-          <MoodBadge />
-          {/* assistant-ui's ContextDisplay, fed our streamed usage (bar tracks
-              total/context window; hover breaks the turn down). Shown only once a
-              reply reports a context window, so a fresh thread stays clean. */}
-          {usage && usage.contextWindow ? (
-            <div className="flex items-center gap-2 text-ui-2xs text-[color:var(--ui-ink-subtle)]">
-              <span className="font-medium uppercase tracking-wide">Context</span>
-              <ContextDisplay.Bar
-                modelContextWindow={usage.contextWindow}
-                usage={toTokenUsage(usage)}
-                side="top"
-              />
-            </div>
-          ) : null}
-          {/* The engine-truth inspector: per-section sizes + the flush valve. */}
-          <ContextInspector
-            sessionId={sessionId}
-            userId={userId}
-            onFreshSession={onFreshSession}
-          />
-        </div>
-      </div>
-     </div>
     </ComposerPrimitive.Root>
   );
 }

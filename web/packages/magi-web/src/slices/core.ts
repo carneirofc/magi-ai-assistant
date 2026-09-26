@@ -19,7 +19,7 @@ export interface SliceEntryPoints {
 export interface FeatureSliceContract<
   TTypes extends Record<string, unknown> = Record<string, unknown>,
   THooks extends Record<string, unknown> = Record<string, unknown>,
-  TComponents extends Record<string, ComponentType<any>> = Record<string, ComponentType<any>>,
+  TComponents extends Record<string, ComponentType<never>> = Record<string, ComponentType<never>>,
 > {
   key: string;
   title: string;

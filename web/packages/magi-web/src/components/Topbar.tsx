@@ -32,7 +32,7 @@ export function Topbar() {
 
   const crumbs = segments.map((seg, i) => ({
     label: labelFor(seg),
-    href: "/" + segments.slice(0, i + 1).join("/"),
+    href: `/${segments.slice(0, i + 1).join("/")}`,
     last: i === segments.length - 1,
   }));
 

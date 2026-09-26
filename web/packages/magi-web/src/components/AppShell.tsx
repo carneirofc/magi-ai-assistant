@@ -6,10 +6,10 @@
 // navigations and reloads). Children are passed through untouched, so pages can
 // still be server components.
 
-import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 
-import { Sidebar, type NavItem } from "./Sidebar";
+import { type NavItem, Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
 const STORAGE_KEY = "magi:rail-collapsed";

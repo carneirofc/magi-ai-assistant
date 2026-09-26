@@ -34,8 +34,7 @@ export async function TeamPageView({ copy }: { copy?: PageCopy } = {}) {
   }
 
   const toolCount = snapshot
-    ? snapshot.team_tools.length +
-      snapshot.members.reduce((n, m) => n + m.tools.length, 0)
+    ? snapshot.team_tools.length + snapshot.members.reduce((n, m) => n + m.tools.length, 0)
     : 0;
 
   return (
@@ -58,9 +57,7 @@ export async function TeamPageView({ copy }: { copy?: PageCopy } = {}) {
                 <span className="font-mono">{snapshot.lead_model}</span>
               </StatusBadge>
             ) : null}
-            {snapshot ? (
-              <StatusBadge tone="neutral">{toolCount} tools</StatusBadge>
-            ) : null}
+            {snapshot ? <StatusBadge tone="neutral">{toolCount} tools</StatusBadge> : null}
           </>
         }
       />

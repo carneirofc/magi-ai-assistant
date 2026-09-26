@@ -8,8 +8,8 @@
 // public allow-list defaults to the login page + login route; an overlay can pass
 // its own.
 
-import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
 import { authEnabled, session, verifySession } from "./lib/session";
 

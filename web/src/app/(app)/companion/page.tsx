@@ -6,11 +6,10 @@
 // monogram placeholder. The app owns this composition; the library brings
 // CompanionSurface + the chat slice.
 
-import { PageHeader, StatusBadge, StatusMessage } from "@carneirofc/ui";
-
-import { CompanionSurface, MemoryPanel } from "@carneirofc/magi-web/slices/companion/components";
-import { ChatConsole } from "@carneirofc/magi-web/slices/chat/components";
 import { getChatHealth, getIdentity } from "@carneirofc/magi-web/lib/chat-api";
+import { ChatConsole } from "@carneirofc/magi-web/slices/chat/components";
+import { CompanionSurface, MemoryPanel } from "@carneirofc/magi-web/slices/companion/components";
+import { PageHeader, StatusBadge, StatusMessage } from "@carneirofc/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -52,8 +51,8 @@ export default async function CompanionPage() {
         </CompanionSurface>
       ) : (
         <StatusMessage role="alert" tone="error">
-          Could not reach the chat API. Check CHAT_API_URL and API_AUTH_TOKEN, and that
-          `python main.py api` is running.
+          Could not reach the chat API. Check CHAT_API_URL and API_AUTH_TOKEN, and that `python
+          main.py api` is running.
         </StatusMessage>
       )}
     </div>

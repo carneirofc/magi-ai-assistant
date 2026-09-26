@@ -3,8 +3,6 @@
 // Create / rename / delete subjects (the controlled vocabulary). Calls the BFF
 // subject routes and refreshes the server-rendered list.
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
 import {
   ConfirmationDialog,
   EditIcon,
@@ -16,6 +14,8 @@ import {
   TextInput,
   TrashIcon,
 } from "@carneirofc/ui";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 type Subject = { id: string; name: string; description: string };
 

@@ -1,7 +1,7 @@
 // Add knowledge — paste text or upload a file, assign a subject + tags.
 
-import Link from "next/link";
 import { PageHeader, StatusMessage } from "@carneirofc/ui";
+import Link from "next/link";
 
 import { AddKnowledge } from "../components/AddKnowledge";
 import { AppPage } from "../components/AppPage";
@@ -38,15 +38,19 @@ export async function AddKnowledgeView({ copy }: { copy?: PageCopy } = {}) {
           ← all documents
         </Link>
       </div>
-      <PageHeader subtitle={header.subtitle} title={header.title} description={header.description} />
+      <PageHeader
+        subtitle={header.subtitle}
+        title={header.title}
+        description={header.description}
+      />
       <ScrollRegion className="flex flex-col gap-6">
-      {error ? (
-        <StatusMessage role="alert" tone="error">
-          {error}
-        </StatusMessage>
-      ) : (
-        <AddKnowledge subjects={subjects} allTags={tags} />
-      )}
+        {error ? (
+          <StatusMessage role="alert" tone="error">
+            {error}
+          </StatusMessage>
+        ) : (
+          <AddKnowledge subjects={subjects} allTags={tags} />
+        )}
       </ScrollRegion>
     </AppPage>
   );

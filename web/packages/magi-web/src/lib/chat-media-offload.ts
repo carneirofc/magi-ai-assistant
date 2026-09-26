@@ -80,8 +80,7 @@ export async function offloadReplyMedia(media: unknown): Promise<unknown> {
     if (!item || typeof item !== "object") continue;
     const m = item as WireMediaItem;
     if (m.url || typeof m.data_base64 !== "string" || !m.data_base64) continue;
-    const mime =
-      m.mime_type || (m.kind === "image" ? "image/png" : "application/octet-stream");
+    const mime = m.mime_type || (m.kind === "image" ? "image/png" : "application/octet-stream");
     try {
       const id = await store.put(Buffer.from(m.data_base64, "base64"), mime);
       m.url = `${BLOB_URL_PREFIX}${id}`;
