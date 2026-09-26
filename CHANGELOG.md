@@ -8,6 +8,23 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Added
 
+- **Runtime validation of untrusted JSON (web).** Admin-api responses are now
+  parsed with zod schemas generated from the OpenAPI spec
+  (`src/lib/api-schemas.ts`, via `openapi-zod-client` in `npm run gen:api`;
+  `OPENAPI_SPEC_PATH` generates from a local spec file). Chat-api responses,
+  transcripts, and localStorage records use hand-written schemas
+  (`lib/wire-schemas.ts`, `lib/runtime-config-schema.ts`), and BFF routes
+  answer 400 on a malformed body (`lib/route-body.ts`). New `fetchJson` helper
+  in `lib/utils` (`@carneirofc/magi-web` 0.9.0, adds `zod` as a dependency).
+- **Pydantic validation at the engine's JSON boundaries.** Settings, identity,
+  subjects, memory windows and fact sheets, reminders, evolution proposals,
+  storage sidecars, the STT sidecar, upstream tool APIs, the client SDK, and
+  curator/mood LLM output are validated with pydantic. Bad input still
+  degrades exactly as before. New `magi.core.types` (`JsonValue`,
+  `JsonObject`, `parse_json_object`, `parse_json_array`).
+- **Biome** lints and formats the web workspace (`npm run lint`,
+  `npm run format`, `npm run check:fix`), replacing the unconfigured
+  `next lint`.
 - **Web operator auth is now optional.** When `ADMIN_PASSWORD` is unset or
   empty the BFF runs open: the auth middleware skips the session gate and the
   login route sends visitors straight into the app. There is no default
@@ -17,6 +34,13 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Changed
 
+- **Stricter ruff rules, enforced format.** ruff now selects `E, F, I, UP, B,
+  ANN`: annotations are required and `typing.Any` is banned (`ANN401`). The
+  tree is reformatted with `ruff format`, and CI plus pre-commit gate
+  `ruff check .`, `ruff format --check .`, and `biome ci .`.
+- `typing.Any` is removed from the engine, replaced with precise types,
+  `Protocol`s, and `JsonValue`. `HttpClient.context_stats()` now returns
+  `JsonObject`.
 - **`ChatConsole` absorbs the companion presence and reads like an LLM
   chatbot.** New optional props merge the two surfaces into one: `expressions`
   (mood → portrait URL) puts a mood-reactive bust in a new header bar, the full
