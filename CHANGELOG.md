@@ -42,6 +42,14 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Changed
 
+- **Typed, validated config.** `Config` is now a frozen pydantic model:
+  `configure(...)` checks value types as well as names (a failed call changes
+  nothing), `model_provider`, `embeddings_provider`, and `storage_backend` are
+  `Literal`s, and free-form blobs are `JsonObject`. New helpers: `derive()`
+  (validated copy), `reset_config()`, `load_secrets(home)`, and
+  `secret_fields()` (the masked-in-logs list is now derived from it). Tests
+  restore the singleton automatically after each test.
+
 - **Typed upstream parsing.** The Ollama tools validate `/api/tags`,
   `/api/show`, and `/api/ps` with pydantic wire models instead of `.get()`
   chains. MCP server specs are validated into an `McpServerSpec` model (a

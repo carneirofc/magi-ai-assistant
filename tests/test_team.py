@@ -9,7 +9,6 @@ A second regression: storage tools were built but never spliced into the lead's
 even with storage enabled. The build test below pins them onto the lead.
 """
 
-from dataclasses import fields
 from types import SimpleNamespace
 
 import pytest
@@ -38,7 +37,7 @@ def test_introspection_returns_serializable_payload():
 @pytest.fixture
 def restore_config():
     """Snapshot/restore the global config singleton around a test that mutates it."""
-    snapshot = {f.name: getattr(config, f.name) for f in fields(config)}
+    snapshot = config.model_dump()
     yield
     configure(**snapshot)
 

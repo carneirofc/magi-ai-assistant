@@ -7,9 +7,8 @@ faithful-retrieval contract (chunks stored verbatim) is covered by the chunker
 tests; the tool-facing contract lives in test_knowledge_tools.py.
 """
 
-import dataclasses
-
 import magi.core.knowledge.store as store_mod
+from magi.core.config import derive
 from magi.core.knowledge import KnowledgeStore, build_knowledge_from_config, chunk_text
 from magi.core.knowledge.store import KnowledgeHit, blend_by_tags
 
@@ -148,15 +147,11 @@ def test_blend_is_case_insensitive():
 
 # --- config gating ----------------------------------------------------------
 def test_build_from_config_off_returns_none(monkeypatch):
-    monkeypatch.setattr(
-        store_mod, "config", dataclasses.replace(store_mod.config, knowledge_enabled=False)
-    )
+    monkeypatch.setattr(store_mod, "config", derive(store_mod.config, knowledge_enabled=False))
     assert build_knowledge_from_config() is None
 
 
 def test_build_from_config_on_returns_store(monkeypatch):
-    monkeypatch.setattr(
-        store_mod, "config", dataclasses.replace(store_mod.config, knowledge_enabled=True)
-    )
+    monkeypatch.setattr(store_mod, "config", derive(store_mod.config, knowledge_enabled=True))
     store = build_knowledge_from_config()
     assert isinstance(store, KnowledgeStore)

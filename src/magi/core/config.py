@@ -10,22 +10,36 @@ prints the effective values at runtime.
 Only *secrets* come from the environment / `.env` (tokens and API keys never
 belong in code): DISCORD_BOT_TOKEN, LITELLM_MASTER_KEY, LLAMACPP_API_KEY,
 OPENAI_API_KEY, QDRANT_API_KEY, API_AUTH_TOKEN.
+
+`Config` is a frozen pydantic model: every value set through `configure(...)` is
+validated (names AND types), so a typo or a wrong-typed value fails at startup
+instead of deep inside a run.
 """
 
 import os
-from dataclasses import dataclass, field, fields
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Literal
 
 from agno.utils.log import log_info
 from dotenv import load_dotenv
+from pydantic import BaseModel, ConfigDict, Field
 
 from magi.core.prompts import load_prompt
+from magi.core.types import JsonObject
 
-load_dotenv()  # secrets only — see module docstring
+load_dotenv()  # ./.env, for back-compat; `load_secrets(home)` adds $MAGI_HOME/.env
+
+# Marks a field as a secret read from this environment variable (masked in logs).
+_SECRET_ENV = "secret_env"
 
 
 def _secret(name: str) -> str | None:
-    """A dataclass default that reads a secret from the environment at startup."""
-    return field(default_factory=lambda: os.getenv(name) or None)
+    """A field default that reads a secret from the environment at startup."""
+    return Field(
+        default_factory=lambda: os.getenv(name) or None,
+        json_schema_extra={_SECRET_ENV: name},
+    )
 
 
 def _mask(secret: str | None) -> str:
@@ -35,10 +49,20 @@ def _mask(secret: str | None) -> str:
     return f"<set, {len(secret)} chars, ...{secret[-4:]}>"
 
 
-@dataclass(frozen=True)
-class Config:
+type ModelProvider = Literal["litellm", "llamacpp", "openai", "ollama"]
+
+
+class Config(BaseModel):
     """All app settings. Override per deployment via `configure(...)` — never
     mutate directly (frozen catches accidental writes)."""
+
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        validate_default=True,
+        # Fields like `model_provider` are ours, not pydantic's `model_*` API.
+        protected_namespaces=(),
+    )
 
     # --- LiteLLM proxy: gateway to remote backends (Databricks Claude, …) ---
     litellm_base_url: str = "http://localhost:4000"
@@ -66,7 +90,7 @@ class Config:
     # --- Models. Which builder serves the roles: `litellm` (proxy gateway),
     # `llamacpp` (direct to llamacpp_base_url), `openai` (a remote OpenAI-compatible
     # server at openai_base_url), or `ollama` (dormant). ---
-    model_provider: str = "litellm"
+    model_provider: ModelProvider = "litellm"
     # Lead / router brain. For the proxy the id is a litellm model_name
     # (litellm.config.yaml); for direct llama-server it is cosmetic.
     lead_model_id: str = "qwen3.5-9b-llamacpp"
@@ -85,11 +109,11 @@ class Config:
     # Extra request-body params for every chat call. llama-server accepts its
     # native sampling params (top_k, min_p, ...) and chat_template_kwargs on
     # /v1/chat/completions; rides extra_body on the litellm path too.
-    model_extra_body: dict = field(default_factory=dict)
+    model_extra_body: JsonObject = Field(default_factory=dict)
 
     # --- Agent behavior. Edit prompts/system.md to change the default brain;
     # override `system_prompt` in configure() for per-deploy customization. ---
-    system_prompt: str = field(default_factory=lambda: load_prompt("system.md"))
+    system_prompt: str = Field(default_factory=lambda: load_prompt("system.md"))
 
     # --- Persistence (sessions + long-term user memories) ---
     db_file: str = "data/chatbot.db"
@@ -139,7 +163,7 @@ class Config:
     # fallback when the pass fails or returns something unusable. Bump
     # mood_vocab_version when the vocabulary changes so clients can re-sync. ---
     mood_enabled: bool = False
-    mood_vocabulary: dict[str, str] = field(
+    mood_vocabulary: dict[str, str] = Field(
         default_factory=lambda: {
             "neutral": "composed, matter-of-fact delivery — the resting default",
             "warm": "friendly, encouraging, genuinely pleased to help",
@@ -164,7 +188,7 @@ class Config:
     tts_model: str = "tts-1"
     tts_voice: str = "af_heart"
     tts_format: str = "mp3"
-    tts_mood_styles: dict[str, dict] = field(default_factory=dict)
+    tts_mood_styles: dict[str, JsonObject] = Field(default_factory=dict)
     stt_enabled: bool = False
     stt_base_url: str = "http://127.0.0.1:8890/v1"
     stt_api_key: str | None = _secret("STT_API_KEY")
@@ -189,7 +213,7 @@ class Config:
     # skipped with a warning, never a boot failure. Operator-added servers from
     # the admin settings file merge over this list by name (restart to apply).
     # Needs the optional `mcp` extra. ---
-    mcp_servers: list[dict] = field(default_factory=list)
+    mcp_servers: list[JsonObject] = Field(default_factory=list)
 
     # --- Web search tool (ddgs-backed; optional `websearch` extra). Gives the
     # lead `web_search` — result titles/urls/snippets it then reads via the
@@ -210,7 +234,7 @@ class Config:
     # identity prompts do not belong in the allowlist — tone bends, identity
     # doesn't. ---
     evolution_enabled: bool = False
-    evolution_proposable: list[str] = field(default_factory=lambda: ["curation.md", "greet.md"])
+    evolution_proposable: list[str] = Field(default_factory=lambda: ["curation.md", "greet.md"])
     evolution_queue_max: int = 20
 
     # --- Team behavior / robustness ---
@@ -238,7 +262,7 @@ class Config:
     # warn-only behavior (nothing truncates). Persona is never clamped — it IS
     # the assistant. Trim generously: these are a seatbelt against one runaway
     # section eating the window, not a tuning knob. ---
-    context_section_budgets: dict[str, int] = field(default_factory=dict)
+    context_section_budgets: dict[str, int] = Field(default_factory=dict)
 
     # --- Pressure-triggered session fold. The turn-count fold (summarize_every)
     # can lag a session full of LONG turns; with this > 0 the per-turn fold also
@@ -318,7 +342,7 @@ class Config:
     # deployment run chat on a local llama-server while sourcing embeddings from a
     # remote model — llama-server serves only one model per instance, so semantic
     # memory + knowledge otherwise need a second local instance.
-    embeddings_provider: str = "litellm"  # "litellm" | "openai"
+    embeddings_provider: Literal["litellm", "openai"] = "litellm"
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str | None = _secret("QDRANT_API_KEY")
     semantic_top_k: int = 5
@@ -368,7 +392,7 @@ class Config:
     # Credentials are secrets (.env); the rest lives here in code. The legacy
     # `s3_enabled=True` still works (configure() maps it to storage_enabled). ---
     storage_enabled: bool = False
-    storage_backend: str = "local"  # "local" | "s3"
+    storage_backend: Literal["local", "s3"] = "local"
     storage_local_dir: str = "data/artifacts"
     s3_endpoint_url: str | None = "http://localhost:9000"
     s3_region: str = "us-east-1"
@@ -425,7 +449,7 @@ class Config:
     # ["https://app.example.com"], or ["*"] to allow any). Empty = no CORS
     # headers (same-origin / non-browser clients only). Auth is a Bearer token,
     # not a cookie, so credentials are not allowed and "*" is safe.
-    api_cors_origins: list[str] = field(default_factory=list)
+    api_cors_origins: list[str] = Field(default_factory=list)
 
     # --- Admin service (magi/channels/admin). An operator-only tool to view and
     # manage memory + organize the knowledge corpus. ADR 0002's default is a
@@ -510,49 +534,65 @@ class Config:
         Single startup banner so you can confirm *which* settings are live —
         backend urls, model ids, context windows, paths — in one place.
         """
-        # Secrets that must never hit the log verbatim.
-        masked = {
-            "litellm_api_key",
-            "llamacpp_api_key",
-            "openai_api_key",
-            "DISCORD_BOT_TOKEN",
-            "qdrant_api_key",
-            "api_auth_token",
-            "admin_auth_token",
-            "seanime_token",
-            "s3_access_key_id",
-            "s3_secret_access_key",
-            "admin_password",
-            "session_secret",
-            "tts_api_key",
-            "stt_api_key",
-        }
+        # Secrets (fields declared via `_secret`) never hit the log verbatim.
+        masked = set(secret_fields())
         # Long prose: log the length, not the body.
         prose = {"system_prompt", "persona_seed"}
 
         log_info("=== effective config ===")
-        for f in fields(self):
-            value = getattr(self, f.name)
-            if f.name in masked:
-                shown = _mask(value)
-            elif f.name in prose:
+        for name in type(self).model_fields:
+            value = getattr(self, name)
+            if name in masked:
+                shown = _mask(value if isinstance(value, str) else None)
+            elif name in prose and isinstance(value, str):
                 shown = f"<{len(value)} chars>"
             else:
                 shown = value
-            log_info(f"  {f.name} = {shown}")
+            log_info(f"  {name} = {shown}")
         log_info("========================")
 
 
+def secret_fields() -> dict[str, str]:
+    """Secret field name -> the environment variable it is read from."""
+    out: dict[str, str] = {}
+    for name, info in Config.model_fields.items():
+        extra = info.json_schema_extra
+        if extra is None or callable(extra):
+            continue
+        env = extra.get(_SECRET_ENV)
+        if isinstance(env, str):
+            out[name] = env
+    return out
+
+
 config = Config()
+
+
+def _apply(values: Config, names: Iterable[str]) -> None:
+    """Copy `names` from a validated `values` onto the shared singleton.
+
+    The singleton is mutated in place (not rebound) so every module already
+    holding `from magi.core.config import config` sees the change; frozen still
+    blocks any other write path."""
+    for name in names:
+        object.__setattr__(config, name, getattr(values, name))
+
+
+def derive(base: Config, **overrides: object) -> Config:
+    """A validated copy of `base` with `overrides` applied (the singleton is
+    untouched). Raises `pydantic.ValidationError` on an unknown field or a
+    wrong-typed value."""
+    return Config.model_validate({**base.model_dump(), **overrides})
 
 
 def configure(**overrides: object) -> Config:
     """Set deployment configuration in code — call once, at the entrypoint,
     before building any channel/team (values are read at build/run time).
 
-    Mutates the shared singleton in place so every `from magi.core.config import
-    config` already holding the object sees the new values. The dataclass
-    stays frozen so only this deliberate path can write.
+    Every override is validated against `Config` (unknown names and wrong
+    types raise `pydantic.ValidationError`). Mutates the shared singleton in
+    place so every `from magi.core.config import config` already holding the
+    object sees the new values.
     """
     # Back-compat: object storage used to be S3-only and gated by `s3_enabled`.
     # It's now backend-agnostic (`storage_enabled` + `storage_backend`); honor the
@@ -565,9 +605,24 @@ def configure(**overrides: object) -> Config:
         if legacy:
             overrides.setdefault("storage_backend", "s3")
 
-    valid = {f.name for f in fields(config)}
-    for name, value in overrides.items():
-        if name not in valid:
-            raise ValueError(f"unknown config field {name!r}; valid: {sorted(valid)}")
-        object.__setattr__(config, name, value)
+    _apply(derive(config, **overrides), list(overrides))
     return config
+
+
+def reset_config() -> Config:
+    """Restore every field to its default (secrets re-read from the environment).
+    For tests and long-lived tools that reconfigure; entrypoints never need it."""
+    _apply(Config(), list(Config.model_fields))
+    return config
+
+
+def load_secrets(home: Path | None = None) -> None:
+    """Load secrets from `<home>/.env` (then `./.env`) into the environment and
+    fill any secret field that is still unset. Existing environment variables
+    always win over file values."""
+    if home is not None:
+        load_dotenv(home / ".env", override=False)
+    load_dotenv(override=False)
+    for name, env in secret_fields().items():
+        if getattr(config, name) is None and (value := os.getenv(env)):
+            object.__setattr__(config, name, value)

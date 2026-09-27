@@ -1,7 +1,7 @@
 # Configuration
 
-magi is **code-first**. All settings are plain Python on the frozen `Config`
-dataclass in [`magi/core/config.py`](../src/magi/core/config.py); each entrypoint
+magi is **code-first**. All settings are plain Python on the frozen, validated
+`Config` pydantic model in [`magi/core/config.py`](../src/magi/core/config.py); each entrypoint
 overrides what its deployment needs via `configure(...)` *before* building
 anything. To learn what a value is, read the entrypoint and that file — there is no
 env-var archaeology.
@@ -12,7 +12,7 @@ confirm what's live.
 
 ```mermaid
 flowchart LR
-    ENV[.env<br/>secrets only] --> CFG[Config dataclass<br/>defaults]
+    ENV[.env<br/>secrets only] --> CFG[Config model<br/>defaults]
     ENT[entrypoint<br/>configure overrides] --> CFG
     CFG --> BANNER[log_settings<br/>startup banner]
     CFG --> APP[whole app reads the singleton]
@@ -34,9 +34,14 @@ def apply_deployment_config() -> None:
     )
 ```
 
-- `configure(**overrides)` mutates the shared singleton in place (the dataclass is
-  frozen so only this deliberate path can write). An unknown field raises with the
-  valid list — typos fail loud.
+- `configure(**overrides)` validates every override against `Config` — an
+  unknown field or a wrong-typed value raises `pydantic.ValidationError`, and a
+  failed call changes nothing. It then mutates the shared singleton in place
+  (the model is frozen so only this deliberate path can write).
+- `derive(config, **overrides)` returns a validated copy without touching the
+  singleton; `reset_config()` restores the defaults (tests use both).
+- `load_secrets(home)` loads `<home>/.env` then `./.env` and fills any secret
+  that is still unset; environment variables always win.
 - Call it **once, at the entrypoint, before** building any channel/team. Values are
   read at build/run time.
 

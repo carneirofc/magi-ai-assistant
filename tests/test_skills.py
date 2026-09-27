@@ -7,8 +7,6 @@ attaches its tools at team build, honoring the gate and degrading (never
 aborting) on a broken skill.
 """
 
-from dataclasses import fields
-
 import pytest
 
 from magi.agent.skills import (
@@ -142,7 +140,7 @@ def test_build_team_composes_skill_prompt_and_tools(tmp_path):
         )
     )
 
-    snapshot = {f.name: getattr(config, f.name) for f in fields(config)}
+    snapshot = config.model_dump()
     try:
         configure(memory_dir=str(tmp_path / "memory"))
         team = build_team(build_memory_from_config())
@@ -176,7 +174,7 @@ def test_skill_prompt_proposal_end_to_end(tmp_path, restore_overlay):
     skill = Skill(name="dice", prompt="Roll dice honestly.")
     register_skill(skill)
 
-    snapshot = {f.name: getattr(config, f.name) for f in fields(config)}
+    snapshot = config.model_dump()
     try:
         configure(memory_dir=str(tmp_path / "memory"), evolution_enabled=True)
         memory = build_memory_from_config()
