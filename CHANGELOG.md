@@ -15,7 +15,8 @@ All notable changes to **magi** are documented here. The format follows
   transcripts, and localStorage records use hand-written schemas
   (`lib/wire-schemas.ts`, `lib/runtime-config-schema.ts`), and BFF routes
   answer 400 on a malformed body (`lib/route-body.ts`). New `fetchJson` helper
-  in `lib/utils` (`@carneirofc/magi-web` 0.9.0, adds `zod` as a dependency).
+  in `lib/utils` (`@carneirofc/magi-web` 0.9.1, adds `zod` as a dependency; 0.9.0 was tagged but
+  never published).
 - **Pydantic validation at the engine's JSON boundaries.** Settings, identity,
   subjects, memory windows and fact sheets, reminders, evolution proposals,
   storage sidecars, the STT sidecar, upstream tool APIs, the client SDK, and
@@ -38,7 +39,7 @@ All notable changes to **magi** are documented here. The format follows
   ANN`: annotations are required and `typing.Any` is banned (`ANN401`). The
   tree is reformatted with `ruff format`, and CI plus pre-commit gate
   `ruff check .`, `ruff format --check .`, and `biome ci .`.
-- **`@carneirofc/magi-web` moves to assistant-ui 0.15** (`@assistant-ui/react`
+- **`@carneirofc/magi-web` 0.9.1 moves to assistant-ui 0.15** (`@assistant-ui/react`
   ^0.15.22, `@assistant-ui/react-markdown` ^0.14.17). The removed legacy hooks
   are replaced with `useAui` / `useAuiState` in `ChatConsole` and
   `ArchiveReference`. `react-markdown` 0.14.8+ requires react ^0.15, so fresh
