@@ -14,6 +14,7 @@ Wiring order:
 """
 
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 from agno.agent import Agent
 from agno.db.base import BaseDb
@@ -25,6 +26,7 @@ from magi.core.config import config
 from magi.core.conversation import ConversationService
 from magi.core.knowledge import build_knowledge_from_config
 from magi.core.memory import build_memory_from_config
+from magi.core.session_index import open_session_index
 
 
 def build_conversation_service(
@@ -79,7 +81,14 @@ def build_conversation_service(
     # injected into both consumers: the team (its search tool) and the conversation
     # service (context auto-injection). One instance, one connection lifecycle.
     knowledge = build_knowledge_from_config()
-    team = build_team(memory, db, member_builders, knowledge=knowledge)
+    # Full-text index of finished turns: written by the service, searched by
+    # the lead's search_sessions tool. None when off or FTS5 is missing.
+    session_index = (
+        open_session_index(Path(config.session_index_path))
+        if config.session_search_enabled
+        else None
+    )
+    team = build_team(memory, db, member_builders, knowledge=knowledge, session_index=session_index)
     return ConversationService(
         runner=team,
         memory=memory,
@@ -91,4 +100,5 @@ def build_conversation_service(
         knowledge=knowledge,
         knowledge_top_k=config.knowledge_context_top_k,
         mood_fn=mood_fn,
+        session_index=session_index,
     )

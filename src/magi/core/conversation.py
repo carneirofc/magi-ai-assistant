@@ -27,6 +27,7 @@ from magi.core.media import (
     open_media_outbox,
 )
 from magi.core.memory import MemoryManager
+from magi.core.session_index import TurnIndexer
 
 if TYPE_CHECKING:
     from magi.core.knowledge import KnowledgeSearcher
@@ -272,8 +273,12 @@ class ConversationService:
         knowledge: KnowledgeSearcher | None = None,
         knowledge_top_k: int = 0,
         mood_fn: MoodFn | None = None,
+        session_index: TurnIndexer | None = None,
     ) -> None:
         self.runner = runner
+        # Full-text index of finished turns (core/session_index.py) backing the
+        # session-search tool. None = off.
+        self.session_index = session_index
         self.memory = memory
         # The pre-reply mood pass (see `MoodFn`). None = feature off: no mood
         # events, `reply.mood` stays None.
@@ -404,6 +409,21 @@ class ConversationService:
             log_warning(f"conversation: mood pass failed: {type(exc).__name__}: {exc}")
             return next(iter(config.mood_vocabulary), None)
 
+    def _index_turn(self, user_id: str, session_id: str, user_text: str, reply: str) -> None:
+        """Append this turn to the session-search index; never breaks the turn."""
+        if self.session_index is None or not user_id:
+            return
+        try:
+            if user_text:
+                self.session_index.add(
+                    user_id=user_id, session_id=session_id, role="user", text=user_text
+                )
+            self.session_index.add(
+                user_id=user_id, session_id=session_id, role="assistant", text=reply
+            )
+        except Exception as exc:  # noqa: BLE001 — search is a convenience, not the turn.
+            log_warning(f"session index: turn not indexed ({type(exc).__name__}: {exc})")
+
     async def _finish_turn(
         self,
         reply: str,
@@ -413,6 +433,8 @@ class ConversationService:
         usage: ConversationUsage | None = None,
         mood: str | None = None,
         curate: bool = True,
+        user_id: str = "",
+        session_id: str = "",
     ) -> ConversationReply:
         """Record the reply + fold/curate memory; the one tail both run modes share.
 
@@ -422,6 +444,7 @@ class ConversationService:
         """
         media = media or {}
         if reply:
+            self._index_turn(user_id, session_id, user_text if curate else "", reply)
             self.memory.record_assistant_turn(reply)
             # Fold rolled-off turns (no-op unless enabled), then let the post-turn
             # curator revise durable memory from this turn (no-op unless enabled).
@@ -481,6 +504,8 @@ class ConversationService:
             user_text=text,
             usage=self._usage_from(response),
             mood=mood,
+            user_id=user_id,
+            session_id=session_id,
         )
 
     async def handle_stream(
@@ -647,6 +672,8 @@ class ConversationService:
             usage=self._usage_from(final) if final is not None else None,
             mood=mood,
             curate=curate,
+            user_id=user_id,
+            session_id=session_id,
         )
 
     # --- control commands (channel formats the reply text) ------------------

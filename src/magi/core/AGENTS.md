@@ -24,6 +24,10 @@ layer a persona reuses unchanged.
 
 - **Logging in new code**: import `log_info` / `log_warning` from `core/log.py`
   (typed wrappers over agno's logger) so strict typing stays clean.
+- **Session index (`session_index.py`)**: FTS5 over finished turns, written by
+  `ConversationService` through the `TurnIndexer` protocol; reads are always
+  filtered by the scoped `user_id`, and user text is quoted into the MATCH
+  expression (never raw FTS5 syntax). Indexing failures are logged, never raised.
 - **Skills library (`skills_fs.py`)**: SKILL.md parsing, discovery, and
   atomic writes — pure IO; approved `skill` proposals (`evolution.py`) land
   through `write_skill`.

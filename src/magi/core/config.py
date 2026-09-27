@@ -256,6 +256,22 @@ class Config(BaseModel):
     # turn and at GET /v1/reminders. No push infra — surfacing is on-open. ---
     reminders_enabled: bool = False
 
+    # --- Session search (magi/core/session_index + agent/tools/session_search).
+    # Every finished turn is appended to a local SQLite FTS5 index so the lead
+    # can search what was actually said in past conversations (scoped to the
+    # current user). Needs an SQLite with FTS5 (`magi doctor` checks). ---
+    session_search_enabled: bool = False
+    session_index_path: str = "data/session_index.db"
+
+    # --- Delegation (agent/tools/delegate). A `delegate_task` tool that hands a
+    # self-contained subtask to a fresh, isolated agent (member model, the
+    # member default tools — no memory, no further delegation) and returns its
+    # answer, keeping the lead's context small. Bounded by a timeout and its
+    # own tool-call cap. ---
+    delegation_enabled: bool = False
+    delegate_timeout_seconds: float = 120.0
+    delegate_tool_call_limit: int = 8
+
     # --- Self-evolution with a human in the loop (see magi/core/evolution).
     # The assistant may PROPOSE changes to allowlisted prompts and new
     # declarative HTTP tools; nothing applies until the operator approves it in

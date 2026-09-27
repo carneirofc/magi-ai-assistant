@@ -26,7 +26,8 @@ from magi.agent.introspect import mark_origin
 from magi.agent.members import MEMBER_BUILDERS
 from magi.agent.model import build_lead_model, build_member_model
 from magi.agent.skills import compose_skill_prompts, file_skills, skill_lead_tools
-from magi.agent.tools import registered_lead_tools
+from magi.agent.tools import enabled_tools, registered_lead_tools
+from magi.agent.tools.delegate import build_delegate_tools
 from magi.agent.tools.evolution import build_evolution_tools
 from magi.agent.tools.http import HTTP_TOOLS
 from magi.agent.tools.identity import build_identity_tools
@@ -37,6 +38,7 @@ from magi.agent.tools.memory import build_memory_tools
 from magi.agent.tools.outputs import ToolOutput, ok
 from magi.agent.tools.recipes import build_recipe_tools
 from magi.agent.tools.reminders import build_reminder_tools
+from magi.agent.tools.session_search import build_session_search_tools
 from magi.agent.tools.skills import build_skill_tools
 from magi.agent.tools.storage import build_storage_tools
 from magi.agent.tools.thinking import build_thinking_tools
@@ -49,6 +51,7 @@ from magi.core.items import build_item_archive_from_config
 from magi.core.knowledge import KnowledgeStore, build_knowledge_from_config
 from magi.core.memory import MemoryManager
 from magi.core.prompts import load_prompt
+from magi.core.session_index import SessionIndex
 from magi.core.skills_fs import skill_write_root
 from magi.core.storage import build_object_store_from_config
 
@@ -122,12 +125,14 @@ def build_team(
     db: BaseDb | None = None,
     member_builders: Sequence[Callable[[Model], Agent]] | None = None,
     knowledge: KnowledgeStore | None = None,
+    session_index: SessionIndex | None = None,
 ) -> Team:
     """Assemble the chatbot team: a multimodal lead routing to specialist members.
 
     `memory` is injected so the lead's memory tools are bound to it (no globals).
     `member_builders` defaults to the full registry; a channel that can't host a
     specialist (e.g. the Discord member outside Discord) passes a trimmed list.
+    `session_index` (None = off) backs the search_sessions tool.
     `knowledge` is the RAG store backing the search tool; the composition root
     injects the same instance it also hands to `ConversationService` for context
     auto-injection, so one store powers both. When None (e.g. a direct/test call)
@@ -222,6 +227,23 @@ def build_team(
         else []
     )
     log_info(f"skills: {len(library)} file skill(s), agent_write={write_mode}")
+
+    # Look back through past conversations (FTS5; off unless session_search_enabled).
+    session_tools = (
+        build_session_search_tools(session_index, memory) if session_index is not None else []
+    )
+    # An isolated helper agent for self-contained subtasks (delegation_enabled):
+    # member model + member default tools, no memory, no further delegation.
+    delegate_tools = (
+        build_delegate_tools(
+            build_member_model,
+            enabled_tools,
+            timeout_seconds=config.delegate_timeout_seconds,
+            tool_call_limit=config.delegate_tool_call_limit,
+        )
+        if config.delegation_enabled
+        else []
+    )
     if typos := unknown_disabled():
         log_info(f"toolsets: ignoring unknown names in toolsets.disabled: {typos}")
 
@@ -307,6 +329,8 @@ def build_team(
             # Self-evolution: propose tools + approved recipe tools (empty
             # unless evolution_enabled).
             *toolset("evolution", [*evolution_tools, *recipe_tools]),
+            *toolset("session_search", session_tools),
+            *toolset("delegate", delegate_tools),
             # The SKILL.md library: open / create / patch skills.
             *toolset("skills", mark_origin(skill_tools, "skill")),
             # Persona seam: lead toolkits registered from outside the engine

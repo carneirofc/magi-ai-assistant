@@ -137,13 +137,15 @@ def check_qdrant(cfg: Config) -> list[CheckResult]:
     return [_probe("qdrant", f"{cfg.qdrant_url.rstrip('/')}/readyz", headers)]
 
 
-def check_sqlite_fts5(_cfg: Config) -> list[CheckResult]:
+def check_sqlite_fts5(cfg: Config) -> list[CheckResult]:
     try:
         with sqlite3.connect(":memory:") as conn:
             conn.execute("CREATE VIRTUAL TABLE t USING fts5(x)")
     except sqlite3.OperationalError as exc:
-        return [CheckResult("sqlite fts5", "warn", f"unavailable ({exc}); session search off")]
-    return [CheckResult("sqlite fts5", "ok", "available")]
+        status: Status = "fail" if cfg.session_search_enabled else "warn"
+        return [CheckResult("sqlite fts5", status, f"unavailable ({exc}); session search off")]
+    state = "on" if cfg.session_search_enabled else "off (session_search_enabled)"
+    return [CheckResult("session search", "ok", f"FTS5 available; {state}")]
 
 
 def check_skills(cfg: Config) -> list[CheckResult]:

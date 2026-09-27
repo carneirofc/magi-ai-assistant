@@ -8,6 +8,13 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Added
 
+- **Session search** (`session_search_enabled`). Finished turns are indexed in
+  a local SQLite FTS5 file and the lead gets `search_sessions`, always scoped
+  to the current user. `magi doctor` checks FTS5.
+- **Delegation** (`delegation_enabled`). `delegate_task` runs a self-contained
+  subtask on an isolated helper agent (member model and default tools, no
+  memory, no recursion) with its own timeout and tool-call cap.
+
 - **File skills (SKILL.md).** Skills in the agentskills.io format under
   `$MAGI_HOME/skills` (plus `skills.dirs`) join the Python skill registry.
   Progressive disclosure: the lead sees `name: description`, `skill_view`

@@ -103,6 +103,16 @@ Defaults shown are the engine defaults; the repo's `magi.yaml` overrides several
 | `channels.enabled` | `[api]` | What `magi run` serves when no channel is named: `api`, `discord`, `telegram`, `admin` (together, in one process), or `desktop` (alone) |
 | `telegram_allowed_users` | `[]` | Numeric Telegram user ids allowed to chat; empty = nobody |
 
+### Session search and delegation
+
+| Field | Default | Notes |
+|---|---|---|
+| `session_search_enabled` | `False` | Index every turn in SQLite FTS5 and give the lead `search_sessions` |
+| `session_index_path` | `data/session_index.db` | The index file (relative to the data root) |
+| `delegation_enabled` | `False` | Give the lead `delegate_task` (isolated helper agent) |
+| `delegate_timeout_seconds` | `120.0` | Hard cap per delegated task |
+| `delegate_tool_call_limit` | `8` | Tool calls the helper may make |
+
 ### Skills and toolsets
 
 | Field | Default | Notes |

@@ -101,6 +101,17 @@ with `ok(...)` / `fail(...)`.
 | `store_file`, `retrieve_file`, `list_files` | [storage.py](../src/magi/agent/tools/storage.py) | Durable byte archive (only if storage enabled) |
 | `search_knowledge` | [knowledge.py](../src/magi/agent/tools/knowledge.py) | Query the global RAG corpus (only if knowledge enabled) |
 | `set_thinking`, `get_thinking` | [thinking.py](../src/magi/agent/tools/thinking.py) | Flip the backend's thinking mode at runtime |
+| `skill_view` (+ `skill_create`, `skill_patch`) | [skills.py](../src/magi/agent/tools/skills.py) | Open the SKILL.md library; save/improve skills per `skills.agent_write` |
+| `search_sessions` | [session_search.py](../src/magi/agent/tools/session_search.py) | FTS5 search over this user's past conversations (only if `session_search_enabled`) |
+| `delegate_task` | [delegate.py](../src/magi/agent/tools/delegate.py) | Hand a self-contained subtask to an isolated helper agent (only if `delegation_enabled`) |
+
+**Session search** indexes every finished turn (user message + reply) in a
+local SQLite FTS5 file (`session_index_path`), scoped by the memory user —
+memory keeps what the curator judged durable; the index keeps what was said.
+**Delegation** builds a fresh agent per call from the member model and the
+member default tools: no memory, no further delegation, its own tool-call cap
+(`delegate_tool_call_limit`) and timeout (`delegate_timeout_seconds`); only its
+final answer returns to the lead.
 
 ### Wired into members by default
 
