@@ -46,10 +46,10 @@ import {
   SelectionToolbarPrimitive,
   ThreadPrimitive,
   type ToolCallMessagePartProps,
-  useAttachment,
+  useAui,
+  useAuiState,
   useLocalRuntime,
   useMessageQuote,
-  useThread,
 } from "@assistant-ui/react";
 import type { CodeHeaderProps, SyntaxHighlighterProps } from "@assistant-ui/react-markdown";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
@@ -1444,8 +1444,9 @@ const ASSISTANT_PART_COMPONENTS = {
 // attachments render as an inline thumbnail, everything else as a labeled chip.
 // Removability is derived from the attachment source (composer = removable).
 function AttachmentTile() {
-  const attachment = useAttachment();
-  const removable = attachment.source !== "message";
+  const aui = useAui();
+  const attachment = useAuiState((s) => s.attachment);
+  const removable = aui.attachment.source !== "message";
   const imageSrc =
     attachment.type === "image"
       ? attachment.content?.find((p) => p.type === "image")?.image
@@ -1891,7 +1892,7 @@ function Composer({
   userId: string;
   onFreshSession?: () => void;
 }) {
-  const isRunning = useThread((t) => t.isRunning);
+  const isRunning = useAuiState((s) => s.thread.isRunning);
   const persona = useContext(PersonaContext);
   const identity = useContext(IdentityContext);
   const assistantName = persona.name || identity.name;

@@ -8,9 +8,9 @@
 // assistant sees exactly what's being referred back to.
 //
 // Must live inside the assistant-ui runtime (it writes through
-// useComposerRuntime); the Composer toolbar mounts it.
+// useAui().composer); the Composer toolbar mounts it.
 
-import { useComposerRuntime } from "@assistant-ui/react";
+import { useAui } from "@assistant-ui/react";
 import { useEffect, useRef, useState } from "react";
 
 import type { ArchiveHit } from "../lib/chat-api";
@@ -24,7 +24,7 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 export function ArchiveReference({ userId }: { userId: string }) {
-  const composer = useComposerRuntime();
+  const aui = useAui();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<ArchiveHit[] | null>(null);
@@ -81,8 +81,8 @@ export function ArchiveReference({ userId }: { userId: string }) {
       .map((line) => `> ${line}`)
       .join("\n");
     const block = `${quote}\n> — ${where}\n\n`;
-    const existing = composer.getState().text;
-    composer.setText(existing ? `${block}${existing}` : block);
+    const existing = aui.composer.getState().text;
+    aui.composer.setText(existing ? `${block}${existing}` : block);
     setOpen(false);
     setQuery("");
     setHits(null);

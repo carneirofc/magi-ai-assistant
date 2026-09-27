@@ -38,6 +38,11 @@ All notable changes to **magi** are documented here. The format follows
   ANN`: annotations are required and `typing.Any` is banned (`ANN401`). The
   tree is reformatted with `ruff format`, and CI plus pre-commit gate
   `ruff check .`, `ruff format --check .`, and `biome ci .`.
+- **`@carneirofc/magi-web` moves to assistant-ui 0.15** (`@assistant-ui/react`
+  ^0.15.22, `@assistant-ui/react-markdown` ^0.14.17). The removed legacy hooks
+  are replaced with `useAui` / `useAuiState` in `ChatConsole` and
+  `ArchiveReference`. `react-markdown` 0.14.8+ requires react ^0.15, so fresh
+  installs (CI, publish) could no longer resolve the 0.14 pin.
 - `typing.Any` is removed from the engine, replaced with precise types,
   `Protocol`s, and `JsonValue`. `HttpClient.context_stats()` now returns
   `JsonObject`.
