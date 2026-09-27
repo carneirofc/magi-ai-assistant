@@ -22,6 +22,11 @@ layer a persona reuses unchanged.
 
 # Work Guidance
 
+- **Logging in new code**: import `log_info` / `log_warning` from `core/log.py`
+  (typed wrappers over agno's logger) so strict typing stays clean.
+- **Skills library (`skills_fs.py`)**: SKILL.md parsing, discovery, and
+  atomic writes — pure IO; approved `skill` proposals (`evolution.py`) land
+  through `write_skill`.
 - **Config (`config.py`, `config_file.py`)**: add a setting as a typed field on
   `Config` (use `Literal`/nested `BaseModel` for closed sets and groups, `_secret`
   for env-only values). File loading stays in `config_file.py`, pure IO.

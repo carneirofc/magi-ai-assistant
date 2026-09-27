@@ -15,6 +15,10 @@ files like the rest of deliberate memory):
       prompts-runtime/<target>.md      # APPROVED prompt overlays
       tools-runtime/<name>.json        # APPROVED http-tool recipes
 
+Approved *skill* proposals (a full SKILL.md) land outside the memory tree, in
+the skills library (`$MAGI_HOME/skills/<name>/SKILL.md`, core/skills_fs.py),
+and are live on the next team build.
+
 `prompts-runtime` is registered FIRST in the entrypoint's prompt overlay
 (`set_prompt_overlay(<memory_dir>/prompts-runtime, <persona>/prompts)`), so an
 approved change wins over the repo prompt while the repo stays pristine —
@@ -39,9 +43,10 @@ from agno.utils.log import log_info, log_warning
 
 from magi.core.config import config
 from magi.core.memory.adapters import emit_write
+from magi.core.skills_fs import SkillFileError, parse_skill_md, skill_write_root, write_skill
 from magi.core.types import parse_json_object
 
-ProposalKind = Literal["prompt", "tool"]
+ProposalKind = Literal["prompt", "tool", "skill"]
 ProposalStatus = Literal["pending", "approved", "rejected"]
 
 # Prompt targets are overlay-relative markdown paths (e.g. "curation.md",
@@ -106,8 +111,11 @@ class EvolutionStore:
         *,
         proposable: list[str] | None = None,
         queue_max: int | None = None,
+        skills_root: Path | None = None,
     ) -> None:
         self.root = Path(root)
+        # Where approved skill proposals are written (None = $MAGI_HOME/skills).
+        self.skills_root = skills_root
         self.proposals_dir = self.root / "evolution" / "proposals"
         self.prompts_runtime = self.root / "prompts-runtime"
         self.tools_runtime = self.root / "tools-runtime"
@@ -144,6 +152,12 @@ class EvolutionStore:
                     f"prompt {target!r} is not proposable here (allowed: "
                     f"{', '.join(self.proposable) or 'none'})"
                 )
+        elif kind == "skill":
+            try:
+                meta, _body = parse_skill_md(proposed_text, source="proposed skill")
+            except SkillFileError as exc:
+                raise ProposalError(str(exc)) from exc
+            target = meta.name
         else:
             recipe = validate_recipe(proposed_text)
             target = str(recipe["name"])
@@ -216,6 +230,8 @@ class EvolutionStore:
     def _apply(self, proposal: Proposal) -> Path:
         """Write the approved change into the runtime overlay. The write rides
         `emit_write`, so git-backed memory commits it like any deliberate write."""
+        if proposal.kind == "skill":
+            return write_skill(self.skills_root or skill_write_root(), proposal.proposed_text)
         if proposal.kind == "prompt":
             path = self.prompts_runtime / proposal.target
             content = proposal.proposed_text + "\n"

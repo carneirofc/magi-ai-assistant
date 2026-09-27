@@ -7,7 +7,7 @@ editing Python.
 # Ownership
 
 - `__init__.py` — argparse tree and dispatch (`setup`, `run`, `doctor`,
-  `config path|show|get|set`).
+  `skills`, `gateway`, `config path|show|get|set`).
 - `run.py` — `prepare()` (secrets → config files → chdir to the data root) and
   the channel runners `main.py` also uses.
 - `config_cmd.py` — `magi config …`; edits go through
@@ -16,6 +16,7 @@ editing Python.
 - `service.py` — `magi gateway install|uninstall|status|logs`: a systemd
   *user* unit (`render_unit` is pure; systemctl/journalctl go through an
   injected runner).
+- `skills_cmd.py` — `magi skills list`: skills (source, active) and toolsets.
 - `setup.py` — first-run wizard writing `$MAGI_HOME/config.yaml` and
   `$MAGI_HOME/.env` (0600).
 

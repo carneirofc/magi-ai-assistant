@@ -188,6 +188,55 @@ the inline default — the seam self-evolution enhances. A disabled or raising
 skill degrades to "not attached"; the bot always boots. Runnable demo:
 [`examples/custom_skill.py`](../examples/custom_skill.py).
 
+### File skills — `SKILL.md` (no code)
+
+The quickest way to teach a procedure is a skill *file* in the
+[agentskills.io](https://agentskills.io) format, under `$MAGI_HOME/skills`
+(or any dir in `skills.dirs`):
+
+```markdown
+<!-- ~/.magi/skills/release-notes/SKILL.md -->
+---
+name: release-notes
+description: Draft release notes from merged PRs. Use when asked for a changelog or release summary.
+---
+
+1. List the PRs merged since the last tag.
+2. Group them by Conventional Commit type.
+3. …
+```
+
+Bundled files (templates, references, scripts) sit beside `SKILL.md`.
+**Progressive disclosure** keeps the prompt small: the lead's instructions
+list only each file skill's `name: description`; it calls `skill_view(name)`
+to load the body (and `skill_view(name, file=…)` for a bundled file) when a
+request matches.
+
+The assistant can also **write** skills after a task worth repeating —
+`skill_create` / `skill_patch`, governed by `skills.agent_write`:
+
+| Mode | Effect |
+|---|---|
+| `propose` (default) | queued in the evolution queue for operator approval; needs `evolution_enabled` |
+| `direct` | written to `$MAGI_HOME/skills` immediately (validated, atomic) |
+| `off` | read-only: only `skill_view` |
+
+A registered (Python) skill wins a name collision; `skills.disabled` hides any
+skill. `magi skills list` shows what is active; `magi doctor` flags broken
+files. See [ADR 0006](adr/0006-file-skills-and-toolsets.md).
+
+### Toolsets
+
+The lead's tools are grouped into named **toolsets** (`vision`, `media`,
+`http`, `memory`, `websearch`, `skills`, `extensions`, …; the list is in
+[`agent/toolsets.py`](../src/magi/agent/toolsets.py) and `magi skills list`).
+Switch groups off in config — e.g. an offline deployment:
+
+```yaml
+toolsets:
+  disabled: [http, websearch]
+```
+
 ## Memory tools
 
 Durable memory is written by the **curator** (see [memory.md](memory.md#the-curator--who-writes-durable-memory)),

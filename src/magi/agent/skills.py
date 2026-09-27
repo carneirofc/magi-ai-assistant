@@ -19,22 +19,23 @@ broken skill (raising gate or toolkit) degrades to "not attached" with a
 warning — the bot always boots.
 """
 
-import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from agno.utils.log import log_warning
 
 from magi.core.config import config
 from magi.core.prompts import load_prompt
+from magi.core.skills_fs import SKILL_NAME_RE, FileSkill, discover
 
 if TYPE_CHECKING:
     from magi.core.memory import MemoryManager
 
-# Skill names double as the overlay-relative prompt filename (skills/<name>.md),
-# so they must stay proposable-target-safe (see magi/core/evolution.py).
-_NAME_RE = re.compile(r"^[a-z][a-z0-9_\-]{1,40}$")
+# Skill names double as the overlay-relative prompt filename (skills/<name>.md)
+# and the SKILL.md directory name, so they must stay proposable-target-safe
+# (see magi/core/evolution.py). Shared with the file-skill parser.
+_NAME_RE = SKILL_NAME_RE
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,12 @@ class Skill:
     # magi/core/evolution.py). The manifest owns the choice; identity-class
     # prompts are never proposable regardless.
     proposable: bool = True
+    # One line the lead sees in its skills index (file skills: the frontmatter
+    # description). Python skills inline their prompt instead.
+    description: str = ""
+    # "file" = a SKILL.md under the skills library (magi/core/skills_fs.py): its
+    # body loads on demand via skill_view, it is never inlined.
+    source: Literal["python", "file"] = "python"
 
     @property
     def prompt_path(self) -> str:
@@ -89,10 +96,42 @@ def register_skill(skill: Skill | Callable[[], Skill]) -> Skill | Callable[[], S
     return skill
 
 
+def _from_file(skill: FileSkill) -> Skill:
+    return Skill(
+        name=skill.name,
+        description=skill.description,
+        source="file",
+        # File skills evolve through skill proposals, not prompt overlays.
+        proposable=False,
+    )
+
+
+def file_skills() -> list[FileSkill]:
+    """The SKILL.md library (configured dirs, then $MAGI_HOME/skills), minus
+    names a Python skill already owns — a registered skill always wins."""
+    taken = {s.name for s in SKILLS}
+    out: list[FileSkill] = []
+    for skill in discover():
+        if skill.name in taken:
+            log_warning(f"skill file '{skill.name}' ignored: a registered skill has that name")
+            continue
+        out.append(skill)
+    return out
+
+
+def all_skills() -> list[Skill]:
+    """Registered (Python) skills followed by the file skills."""
+    return [*SKILLS, *(_from_file(f) for f in file_skills())]
+
+
 def active_skills() -> list[Skill]:
-    """The registered skills whose gate passes; a raising gate means skipped."""
+    """Every skill whose gate passes and that config doesn't disable; a raising
+    gate means skipped."""
+    disabled = set(config.skills.disabled)
     active: list[Skill] = []
-    for skill in SKILLS:
+    for skill in all_skills():
+        if skill.name in disabled:
+            continue
         try:
             enabled = skill.enabled() if callable(skill.enabled) else bool(skill.enabled)
         except Exception as exc:  # noqa: BLE001 — degrade, don't abort startup.
@@ -112,12 +151,25 @@ def skill_prompt(skill: Skill) -> str:
 
 
 def compose_skill_prompts() -> list[str]:
-    """One labeled fragment per active skill, for the lead's instructions."""
-    fragments = []
+    """The lead's skill instructions: one labeled fragment per active Python
+    skill, then ONE index of the file skills (name: description only — the
+    body loads on demand through `skill_view`, keeping the prompt small)."""
+    fragments: list[str] = []
+    library: list[Skill] = []
     for skill in active_skills():
+        if skill.source == "file":
+            library.append(skill)
+            continue
         text = skill_prompt(skill)
         if text:
             fragments.append(f"### Skill: {skill.name}\n\n{text}")
+    if library:
+        index = "\n".join(f"- {s.name}: {s.description}" for s in library)
+        fragments.append(
+            "### Skills library\n\n"
+            "Saved procedures for recurring tasks. When a request matches one, call "
+            "`skill_view` with its name FIRST and follow the instructions it returns.\n\n" + index
+        )
     return fragments
 
 

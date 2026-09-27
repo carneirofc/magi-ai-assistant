@@ -53,6 +53,28 @@ type ModelProvider = Literal["litellm", "llamacpp", "openai", "ollama"]
 type ChannelName = Literal["api", "discord", "telegram", "admin", "desktop"]
 
 
+class SkillsConfig(BaseModel):
+    """File-based skills (SKILL.md directories; see magi/core/skills_fs.py)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    # Extra directories searched before $MAGI_HOME/skills (first wins on a name).
+    dirs: list[str] = Field(default_factory=list)
+    # Skill names never offered to the model (file or Python skills).
+    disabled: list[str] = Field(default_factory=list)
+    # May the assistant write skills? "propose" queues them for operator
+    # approval (needs evolution_enabled), "direct" writes $MAGI_HOME/skills.
+    agent_write: Literal["off", "propose", "direct"] = "propose"
+
+
+class ToolsetsConfig(BaseModel):
+    """Named groups of lead tools (see magi/agent/toolsets.py)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    disabled: list[str] = Field(default_factory=list)
+
+
 class ChannelsConfig(BaseModel):
     """Which channels `magi run` serves when none are named on the command line."""
 
@@ -446,6 +468,10 @@ class Config(BaseModel):
 
     # --- Channels `magi run` starts by default (config file: `channels.enabled`). ---
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+
+    # --- Skills (SKILL.md files) and toolsets (groups of lead tools). ---
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    toolsets: ToolsetsConfig = Field(default_factory=ToolsetsConfig)
 
     # --- Discord bot ---
     DISCORD_BOT_TOKEN: str | None = _secret("DISCORD_BOT_TOKEN")

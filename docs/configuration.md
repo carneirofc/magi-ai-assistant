@@ -103,6 +103,15 @@ Defaults shown are the engine defaults; the repo's `magi.yaml` overrides several
 | `channels.enabled` | `[api]` | What `magi run` serves when no channel is named: `api`, `discord`, `telegram`, `admin` (together, in one process), or `desktop` (alone) |
 | `telegram_allowed_users` | `[]` | Numeric Telegram user ids allowed to chat; empty = nobody |
 
+### Skills and toolsets
+
+| Field | Default | Notes |
+|---|---|---|
+| `skills.dirs` | `[]` | Extra SKILL.md directories, searched before `$MAGI_HOME/skills` |
+| `skills.disabled` | `[]` | Skill names never offered (file or Python) |
+| `skills.agent_write` | `propose` | `off` \| `propose` (evolution queue; needs `evolution_enabled`) \| `direct` (writes `$MAGI_HOME/skills`) |
+| `toolsets.disabled` | `[]` | Lead tool groups to drop, e.g. `[http, websearch]` — see `magi skills list` |
+
 ### Model backends
 
 | Field | Default | Notes |

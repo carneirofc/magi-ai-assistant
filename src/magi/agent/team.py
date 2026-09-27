@@ -25,7 +25,7 @@ from magi.agent.hooks import tool_call_hook
 from magi.agent.introspect import mark_origin
 from magi.agent.members import MEMBER_BUILDERS
 from magi.agent.model import build_lead_model, build_member_model
-from magi.agent.skills import compose_skill_prompts, skill_lead_tools
+from magi.agent.skills import compose_skill_prompts, file_skills, skill_lead_tools
 from magi.agent.tools import registered_lead_tools
 from magi.agent.tools.evolution import build_evolution_tools
 from magi.agent.tools.http import HTTP_TOOLS
@@ -37,16 +37,19 @@ from magi.agent.tools.memory import build_memory_tools
 from magi.agent.tools.outputs import ToolOutput, ok
 from magi.agent.tools.recipes import build_recipe_tools
 from magi.agent.tools.reminders import build_reminder_tools
+from magi.agent.tools.skills import build_skill_tools
 from magi.agent.tools.storage import build_storage_tools
 from magi.agent.tools.thinking import build_thinking_tools
 from magi.agent.tools.vision import VISION_TOOLS
 from magi.agent.tools.websearch import build_websearch_tools
+from magi.agent.toolsets import toolset, unknown_disabled
 from magi.core.config import config
 from magi.core.db import get_db
 from magi.core.items import build_item_archive_from_config
 from magi.core.knowledge import KnowledgeStore, build_knowledge_from_config
 from magi.core.memory import MemoryManager
 from magi.core.prompts import load_prompt
+from magi.core.skills_fs import skill_write_root
 from magi.core.storage import build_object_store_from_config
 
 
@@ -187,20 +190,40 @@ def build_team(
     # runtime dir. Both empty when the feature is off.
     evolution_tools: list = []
     recipe_tools: list = []
+    evolution_store = None
     if config.evolution_enabled:
         from magi.agent.skills import evolution_proposable_targets
         from magi.core.evolution import EvolutionStore
 
-        evolution_tools = build_evolution_tools(
-            # Config targets + registered skills' prompts (core stays
-            # agent-free, so the allowlist extension composes here).
-            EvolutionStore(memory.store.root, proposable=evolution_proposable_targets())
+        # Config targets + registered skills' prompts (core stays agent-free,
+        # so the allowlist extension composes here).
+        evolution_store = EvolutionStore(
+            memory.store.root, proposable=evolution_proposable_targets()
         )
+        evolution_tools = build_evolution_tools(evolution_store)
         recipe_tools = mark_origin(build_recipe_tools(memory.store.root), "recipe")
         log_info(
             f"evolution: ENABLED (proposable={config.evolution_proposable}, "
             f"{len(recipe_tools)} approved recipe tool(s))"
         )
+
+    # File skills (SKILL.md library): skill_view whenever there is a library;
+    # create/patch per skills.agent_write — "propose" needs the evolution
+    # queue, so without it the assistant can read skills but not write them.
+    write_mode = config.skills.agent_write
+    if write_mode == "propose" and evolution_store is None:
+        write_mode = "off"
+    library = file_skills()
+    skill_tools = (
+        build_skill_tools(
+            file_skills, write_root=skill_write_root(), mode=write_mode, store=evolution_store
+        )
+        if library or write_mode != "off"
+        else []
+    )
+    log_info(f"skills: {len(library)} file skill(s), agent_write={write_mode}")
+    if typos := unknown_disabled():
+        log_info(f"toolsets: ignoring unknown names in toolsets.disabled: {typos}")
 
     # The lead's prompt is its soul (who Alyssa is) followed by the operational
     # router (how she delegates and wields tools). SOUL.md establishes identity
@@ -255,46 +278,50 @@ def build_team(
         # Bound runaway delegation loops (lead → member → lead → …).
         tool_call_limit=config.tool_call_limit,
         tools=[
-            _build_introspection_tool(lead, members),
+            *toolset("introspection", [_build_introspection_tool(lead, members)]),
             # Lead is multimodal; this lets it pull an image URL into its own
             # context and actually look, instead of guessing from the link text.
-            *VISION_TOOLS,
+            *toolset("vision", VISION_TOOLS),
             # Deliver a URL's actual bytes to the user as an attachment (image,
             # audio, file) instead of pasting a link (see magi/core/media.py outbox).
-            *MEDIA_TOOLS,
+            *toolset("media", MEDIA_TOOLS),
             # The bot's own profile picture: look at it, or send it to the user
             # (bound to this run's identity; empty-safe when no picture is set).
-            *build_identity_tools(memory),
+            *toolset("identity", build_identity_tools(memory)),
             # Read a URL (http_get) and perform an explicit user-described request
             # (http_request) without round-tripping through a member.
-            *HTTP_TOOLS,
-            *build_memory_tools(memory),
+            *toolset("http", HTTP_TOOLS),
+            *toolset("memory", build_memory_tools(memory)),
             # Durable byte archive: keep a file/image for later, recall by
             # reference (empty unless storage is enabled).
-            *storage_tools,
+            *toolset("storage", storage_tools),
             # Search the global knowledge corpus (empty unless the feature is on).
-            *knowledge_tools,
+            *toolset("knowledge", knowledge_tools),
             # Web search (empty unless websearch_enabled + the ddgs extra).
-            *build_websearch_tools(),
+            *toolset("websearch", build_websearch_tools()),
             # Reminders (empty unless reminders_enabled).
-            *build_reminder_tools(memory),
+            *toolset("reminders", build_reminder_tools(memory)),
             # Config-declared MCP servers attached at the lead level
             # (attach: "lead"); member-attached ones join the roster above.
-            *build_mcp_lead_toolkits(),
+            *toolset("mcp", build_mcp_lead_toolkits()),
             # Self-evolution: propose tools + approved recipe tools (empty
             # unless evolution_enabled).
-            *evolution_tools,
-            *recipe_tools,
+            *toolset("evolution", [*evolution_tools, *recipe_tools]),
+            # The SKILL.md library: open / create / patch skills.
+            *toolset("skills", mark_origin(skill_tools, "skill")),
             # Persona seam: lead toolkits registered from outside the engine
-            # tree via register_lead_toolkit (empty when none are registered).
+            # tree via register_lead_toolkit, and each active Python skill's
+            # lead tools (its prompt fragment joined the instructions above).
             # Origin stamps feed the introspection roster's by-origin grouping.
-            *mark_origin(registered_lead_tools(memory), "registered"),
-            # Skill manifests: each active skill's lead tools (see
-            # magi/agent/skills.py; its prompt fragment joined the
-            # instructions above).
-            *mark_origin(skill_lead_tools(memory), "skill"),
+            *toolset(
+                "extensions",
+                [
+                    *mark_origin(registered_lead_tools(memory), "registered"),
+                    *mark_origin(skill_lead_tools(memory), "skill"),
+                ],
+            ),
             # Bound to the live model objects: members all share `member_model`,
             # so one mutation flips the whole team.
-            *build_thinking_tools([lead, member_model]),
+            *toolset("thinking", build_thinking_tools([lead, member_model])),
         ],
     )

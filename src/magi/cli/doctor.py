@@ -146,7 +146,45 @@ def check_sqlite_fts5(_cfg: Config) -> list[CheckResult]:
     return [CheckResult("sqlite fts5", "ok", "available")]
 
 
-CHECKS: list[Check] = [check_channels, check_model, check_extras, check_qdrant, check_sqlite_fts5]
+def check_skills(cfg: Config) -> list[CheckResult]:
+    from magi.agent.toolsets import TOOLSETS
+    from magi.core.skills_fs import SKILL_FILE, SkillFileError, load_skill, skill_dirs
+
+    out: list[CheckResult] = []
+    count = 0
+    for base in skill_dirs():
+        if not base.is_dir():
+            continue
+        for child in sorted(base.iterdir()):
+            if not (child / SKILL_FILE).is_file():
+                continue
+            try:
+                load_skill(child)
+                count += 1
+            except SkillFileError as exc:
+                out.append(CheckResult(f"skill {child.name}", "warn", str(exc)))
+    out.insert(0, CheckResult("skills", "ok", f"{count} file skill(s)"))
+    if typos := [n for n in cfg.toolsets.disabled if n not in TOOLSETS]:
+        out.append(CheckResult("toolsets", "warn", f"unknown in toolsets.disabled: {typos}"))
+    if cfg.skills.agent_write == "propose" and not cfg.evolution_enabled:
+        out.append(
+            CheckResult(
+                "skill writing",
+                "warn",
+                "agent_write=propose needs evolution_enabled — the assistant can't save skills",
+            )
+        )
+    return out
+
+
+CHECKS: list[Check] = [
+    check_channels,
+    check_model,
+    check_extras,
+    check_qdrant,
+    check_sqlite_fts5,
+    check_skills,
+]
 
 _ICON: dict[Status, str] = {"ok": "✓", "warn": "!", "fail": "✗"}
 

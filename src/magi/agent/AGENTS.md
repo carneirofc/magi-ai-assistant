@@ -28,8 +28,16 @@ allowed to name/construct a model.
     point — never duplicate the default set in a builder. Registration is idempotent.
   - Deliberate-memory tools are **not** in `DEFAULT_TOOLS`: they bind to the injected
     `MemoryManager` (`tools/memory.py`) and attach to the lead in `team.py`.
-- **Skills (`skills.py`)** bundle a prompt fragment + tools + an `enabled` gate under
-  one `register_skill`; skill prompts are evolution-proposable by default.
+- **Skills (`skills.py`)** come from two sources: Python `register_skill` (prompt
+  fragment + tools + gate; prompt inlined, evolution-proposable) and SKILL.md
+  files (`core/skills_fs.py`; only `name: description` reaches the prompt, the
+  body loads via `skill_view`). `all_skills()` / `active_skills()` merge them —
+  a Python skill wins a name collision; `config.skills.disabled` filters both.
+  Agent-written skills (`tools/skills.py`) follow `skills.agent_write`
+  (`propose` goes through the evolution queue, never straight to disk).
+- **Toolsets (`toolsets.py`)**: every lead tool group in `team.py` is wrapped in
+  `toolset("<name>", …)`; a new group needs a `TOOLSETS` entry (a test enforces
+  it).
 - A tool hook logs every member/tool call and converts a raising tool into a
   lead-visible error instead of aborting the run; `tool_call_limit` bounds runaway
   delegation.
@@ -43,4 +51,5 @@ and no-op when missing — keep that contract.
 # Verification
 
 `uv run pytest -q` (`tests/test_team.py`, `test_model.py`, `test_curator.py`,
-`test_skills.py`, `test_tool_registry.py`, and the per-tool suites).
+`test_skills.py`, `test_skills_fs.py`, `test_tool_registry.py`, and the per-tool
+suites).

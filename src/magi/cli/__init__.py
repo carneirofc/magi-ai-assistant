@@ -56,6 +56,10 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="check the config, backends, and extras")
     _add_config_option(doctor)
 
+    skills = sub.add_parser("skills", help="list skills and toolsets")
+    _add_config_option(skills)
+    skills.add_argument("action", nargs="?", choices=["list"], default="list")
+
     gw = sub.add_parser("gateway", help="run magi as a systemd user service")
     gw_sub = gw.add_subparsers(dest="action", metavar="ACTION", required=True)
     gw_install = gw_sub.add_parser(
@@ -126,6 +130,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 path = prepare(args.config)
                 out.write(f"config: {path or '(none — defaults only)'}\n\n")
                 return report(run_checks(config), out)
+            case "skills":
+                from magi.cli.run import prepare
+                from magi.cli.skills_cmd import cmd_list
+
+                prepare(args.config)
+                return cmd_list(out)
             case "gateway":
                 from magi.cli import service
                 from magi.cli.run import prepare

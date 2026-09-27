@@ -8,6 +8,17 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Added
 
+- **File skills (SKILL.md).** Skills in the agentskills.io format under
+  `$MAGI_HOME/skills` (plus `skills.dirs`) join the Python skill registry.
+  Progressive disclosure: the lead sees `name: description`, `skill_view`
+  loads the body and bundled files. The assistant can save and improve skills
+  (`skill_create`, `skill_patch`) per `skills.agent_write` — `propose` routes
+  through the evolution queue (new `skill` proposal kind), `direct` writes
+  immediately. `magi skills list` and new doctor checks. See ADR 0006.
+- **Toolsets.** The lead's tools are grouped (`http`, `media`, `websearch`,
+  `skills`, …) and `toolsets.disabled` switches groups off.
+- `magi.core.log` — typed `log_info` / `log_warning` for strict-mode code.
+
 - **Bare-metal deploy.** `scripts/install.sh` installs magi with
   `uv tool install` (extras via `MAGI_EXTRAS`) and runs `magi setup`.
   `magi gateway install|uninstall|status|logs` manages a systemd user service
