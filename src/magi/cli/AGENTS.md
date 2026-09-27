@@ -13,6 +13,9 @@ editing Python.
 - `config_cmd.py` — `magi config …`; edits go through
   `core/config_file.write_config_value` (validated, atomic).
 - `doctor.py` — ok/warn/fail checks over the effective `Config`.
+- `service.py` — `magi gateway install|uninstall|status|logs`: a systemd
+  *user* unit (`render_unit` is pure; systemctl/journalctl go through an
+  injected runner).
 - `setup.py` — first-run wizard writing `$MAGI_HOME/config.yaml` and
   `$MAGI_HOME/.env` (0600).
 
@@ -29,7 +32,9 @@ editing Python.
 - **Doctor checks are pure over `Config`**; network probes go through
   `doctor.http_status` so tests replace it. A crashing check reports `fail`.
 - Interactive input goes through the `Prompter` protocol (tests script it).
+- **No root, no system files**: the service is a user unit under
+  `~/.config/systemd/user`; `scripts/install.sh` installs with `uv tool`.
 
 # Verification
 
-`uv run pytest -q tests/test_cli.py tests/test_config_file.py`
+`uv run pytest -q tests/test_cli.py tests/test_config_file.py tests/test_service.py`

@@ -8,6 +8,11 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Added
 
+- **Bare-metal deploy.** `scripts/install.sh` installs magi with
+  `uv tool install` (extras via `MAGI_EXTRAS`) and runs `magi setup`.
+  `magi gateway install|uninstall|status|logs` manages a systemd user service
+  that runs `magi run` and restarts on failure.
+
 - **One process, many channels.** `magi run api discord telegram admin` (or
   `channels.enabled`) builds the brain once and serves every channel from it
   (`channels/registry.py`, ADR 0005). Adapters get the shared service through
@@ -61,6 +66,15 @@ All notable changes to **magi** are documented here. The format follows
   (`@carneirofc/magi-web` 0.8.0, new `authEnabled()` in `lib/session`).
 
 ### Changed
+
+- **One compose file, opt-in profiles.** `docker-compose.app.yaml` is merged
+  into `docker-compose.yaml`; every service now sits behind a profile
+  (`qdrant`, `s3`, `litellm`, `monitoring`, `app`, `admin`), so a bare
+  `docker compose up` starts nothing. Qdrant, LiteLLM, and the admin API gained
+  healthchecks. The container runs `magi run` with `docker/magi.docker.yaml`
+  (one process for every enabled channel; the separate `discord` service is
+  gone — list `discord` in `channels.enabled`). `MAGI_HOME` lives under
+  `data/` in the image.
 
 - **`main.py` is a thin wrapper.** The repo's deployment settings moved to
   `magi.yaml` and the `--docker` deltas to `docker/magi.docker.yaml`;

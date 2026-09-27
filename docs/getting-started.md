@@ -1,26 +1,36 @@
 # Getting started
 
-This walks from a clean checkout to a running assistant. magi is a Python ≥3.14
-project managed with [uv](https://docs.astral.sh/uv/).
+This goes from nothing to a running assistant. magi is a Python ≥3.14 tool
+managed with [uv](https://docs.astral.sh/uv/); the default deployment is
+**bare-metal as your own user** — no Docker required.
 
 ## 1. Install
 
 ```bash
-uv sync                       # base install
-# optional features (lazy-imported; skip what you don't need):
-uv sync --extra semantic      # Qdrant-backed semantic memory
-uv sync --extra s3            # S3-compatible byte archive
-uv sync --extra mcp           # Seanime-over-MCP specialist
+curl -LsSf https://raw.githubusercontent.com/carneirofc/magi-ai-assistant/master/scripts/install.sh | bash
 ```
+
+The script installs `uv` if needed, then `uv tool install "magi-ai-assistant[telegram]"`
+(the `magi` command lands in `~/.local/bin`), then runs `magi setup`. Pick
+extras with `MAGI_EXTRAS` — optional features are lazy-imported, so skip what
+you don't need:
+
+```bash
+MAGI_EXTRAS=telegram,semantic,mcp bash scripts/install.sh   # from a checkout
+# telegram · semantic (Qdrant) · s3 · mcp · git · websearch · docs · desktop
+```
+
+Working on the engine itself? `uv sync --dev --all-extras` in a checkout and
+prefix commands with `uv run`.
 
 ## 2. Configure
 
-Run the wizard — it asks for the model backend and channels, writes
+The wizard asks for the model backend and channels, writes
 `~/.magi/config.yaml`, and puts secrets in `~/.magi/.env` (mode 0600):
 
 ```bash
-uv run magi setup
-uv run magi doctor      # re-check any time
+magi setup
+magi doctor      # config valid? backend reachable? extras installed?
 ```
 
 From a checkout the repo's own [`magi.yaml`](../magi.yaml) is used instead
@@ -39,21 +49,32 @@ The bundled entrypoints expect a local `llama.cpp` `llama-server` on
 model and an `mmproj` for vision; set `--ctx-size` to match `lead_num_ctx` (128k by
 default). To use Claude or another remote model instead, set
 `model_provider: litellm` (`magi config set model_provider litellm`) and bring up the proxy
-(`docker compose up -d litellm postgres`). See
+(`docker compose --profile litellm up -d`). See
 [infrastructure.md](infrastructure.md).
 
 ## 4. Run
 
-Both entrypoints serve the **same brain** (`magi/channels/bootstrap.py`); only the
-transport differs.
+Every channel serves the **same brain**, and any mix runs in one process:
 
 ```bash
-uv run magi run discord  # Discord bot (needs DISCORD_BOT_TOKEN)
-uv run magi run api      # standalone HTTP service on 127.0.0.1:8000
+magi run                      # channels.enabled from the config
+magi run api discord telegram # or name them
 ```
 
 The startup banner prints every effective setting (secrets masked) — confirm your
 backend URL, model ids, and feature flags there.
+
+### As a service
+
+```bash
+magi gateway install          # ~/.config/systemd/user/magi.service, enabled + started
+magi gateway status
+magi gateway logs -f
+loginctl enable-linger $USER  # keep it running while you're logged out
+```
+
+The unit runs `magi run` with the same config, restarts on failure, and starts at
+login. `magi gateway uninstall` removes it.
 
 ## 5. Talk to it over HTTP
 
@@ -117,7 +138,7 @@ storage_backend: local            # bytes under data/artifacts — zero setup
 storage_local_dir: data/artifacts
 ```
 
-For the S3 backend, run a bucket (`docker compose up -d rustfs rustfs-init`),
+For the S3 backend, run a bucket (`docker compose --profile s3 up -d`),
 `uv sync --extra s3`, put `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` in `.env`, and
 set `storage_backend: s3`. See [infrastructure.md](infrastructure.md#object-storage-byte-archive).
 

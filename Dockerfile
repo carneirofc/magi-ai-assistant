@@ -35,13 +35,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Run as the venv interpreter directly (no `uv run` indirection at start).
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Everything the app writes (sqlite db, memory markdown, local byte archive) lives
-# under data/ — mount a volume over it in compose to persist across rebuilds.
+# Everything the app writes (sqlite db, memory markdown, local byte archive, and
+# MAGI_HOME: skills, logs) lives under data/ — mount a volume over it in compose
+# to persist across rebuilds. Secrets arrive as env vars (compose env_file).
+ENV MAGI_HOME=/app/data/.magi
 RUN mkdir -p /app/data
 
-# HTTP service by default. One entrypoint, `python main.py <channel> --docker`;
-# --docker overlays only the bits that differ in a container (bind 0.0.0.0, reach
-# the host llama-server). The Discord bot / admin API are alternate commands
-# (see docker-compose.app.yaml).
+# Serve channels.enabled from magi.yaml with the container overlay (bind
+# 0.0.0.0, reach host backends via host.docker.internal). Append channel names
+# to serve others, e.g. `... docker/magi.docker.yaml api discord`.
 EXPOSE 8000
-CMD ["python", "main.py", "api", "--docker"]
+CMD ["magi", "run", "-c", "magi.yaml", "-c", "docker/magi.docker.yaml"]

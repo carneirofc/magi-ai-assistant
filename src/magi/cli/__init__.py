@@ -56,6 +56,25 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="check the config, backends, and extras")
     _add_config_option(doctor)
 
+    gw = sub.add_parser("gateway", help="run magi as a systemd user service")
+    gw_sub = gw.add_subparsers(dest="action", metavar="ACTION", required=True)
+    gw_install = gw_sub.add_parser(
+        "install", help="write + enable ~/.config/systemd/user/magi.service"
+    )
+    _add_config_option(gw_install)
+    gw_install.add_argument(
+        "channels",
+        nargs="*",
+        choices=get_args(ChannelName.__value__),
+        metavar="CHANNEL",
+        help="channels to serve (default: channels.enabled at runtime)",
+    )
+    gw_sub.add_parser("uninstall", help="stop, disable, and remove the service")
+    gw_sub.add_parser("status", help="systemctl --user status magi")
+    gw_logs = gw_sub.add_parser("logs", help="journalctl for the service")
+    gw_logs.add_argument("-f", "--follow", action="store_true")
+    gw_logs.add_argument("-n", "--lines", type=int, default=100)
+
     cfg = sub.add_parser("config", help="inspect or edit the config file")
     _add_config_option(cfg)
     cfg_sub = cfg.add_subparsers(dest="action", metavar="ACTION", required=True)
@@ -107,6 +126,30 @@ def main(argv: Sequence[str] | None = None) -> int:
                 path = prepare(args.config)
                 out.write(f"config: {path or '(none — defaults only)'}\n\n")
                 return report(run_checks(config), out)
+            case "gateway":
+                from magi.cli import service
+                from magi.cli.run import prepare
+                from magi.core.config_file import magi_home
+
+                match args.action:
+                    case "install":
+                        # Resolve before prepare() changes into the data root.
+                        given = [p.expanduser().resolve() for p in args.config]
+                        primary = prepare(given)
+                        files = given or ([primary] if primary else [])
+                        return service.install(
+                            home=magi_home(),
+                            workdir=Path.cwd(),  # prepare() moved us to the data root
+                            config_files=files,
+                            channels=args.channels,
+                            out=out,
+                        )
+                    case "uninstall":
+                        return service.uninstall(out=out)
+                    case "status":
+                        return service.status()
+                    case _:
+                        return service.logs(follow=args.follow, lines=args.lines)
             case "config":
                 from magi.cli import config_cmd
                 from magi.cli.run import prepare

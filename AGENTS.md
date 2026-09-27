@@ -121,7 +121,9 @@ Owned here at the root (no child doc):
   and ADRs (`docs/adr/`). Update alongside behavior changes they describe.
 - `clients/` — Discord presentation layer (`mydiscord.py`) driven by the injected
   `ConversationService`; constructed by `src/magi/channels/discord.py`.
-- `scripts/` — out-of-band operational scripts (e.g. `ingest_knowledge.py`).
+- `scripts/` — out-of-band operational scripts (`install.sh` — the bare-metal
+  installer, `ingest_knowledge.py`).
 - `examples/` — runnable persona/desktop examples of the extension points.
-- `.github/`, `Dockerfile`, `docker-compose*.yaml`, `pyproject.toml` — CI,
-  packaging, and container wiring.
+- `.github/`, `Dockerfile`, `docker-compose.yaml` (every service behind a
+  profile), `pyproject.toml` — CI, packaging, and container wiring. Bare-metal
+  (`magi gateway install`) is the default deployment; containers are optional.

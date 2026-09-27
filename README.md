@@ -166,10 +166,12 @@ Domain vocabulary is defined in [CONTEXT.md](https://github.com/carneirofc/magi-
 ## Run
 
 ```bash
+curl -LsSf https://raw.githubusercontent.com/carneirofc/magi-ai-assistant/master/scripts/install.sh | bash
 magi setup              # pick a model backend + channels; writes ~/.magi/config.yaml + .env
 magi doctor             # verify config, backend reachability, and extras
-magi run                # serve the configured channels
-magi run discord        # or name one: api | discord | admin | desktop
+magi run                # serve the configured channels, all in one process
+magi run api telegram   # or name them: api | discord | telegram | admin (| desktop, alone)
+magi gateway install    # run as a systemd user service (restarts on failure)
 ```
 
 Every chat channel serves the same brain (`magi/channels/bootstrap.py`); only the
