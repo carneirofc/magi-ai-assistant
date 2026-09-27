@@ -112,8 +112,11 @@ When the user requests a durable behavior change, record it here or in the relev
 
 Owned here at the root (no child doc):
 
-- `main.py` — the single entrypoint; picks a channel and sets all non-secret
-  config in code via `configure(...)`.
+- `main.py` — thin repo entrypoint (`python main.py <channel> [--docker]`) over
+  `magi.cli.run`; loads `magi.yaml` (+ `docker/magi.docker.yaml` with
+  `--docker`). Code-only extensions (persona registration) go here.
+- `magi.yaml` — this checkout's deployment config (validated `Config` keys);
+  `docker/magi.docker.yaml` — the container-only overlay.
 - `docs/` — human documentation: architecture, memory, channels, configuration,
   and ADRs (`docs/adr/`). Update alongside behavior changes they describe.
 - `clients/` — Discord presentation layer (`mydiscord.py`) driven by the injected

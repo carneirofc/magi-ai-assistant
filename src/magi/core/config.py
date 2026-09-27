@@ -50,6 +50,15 @@ def _mask(secret: str | None) -> str:
 
 
 type ModelProvider = Literal["litellm", "llamacpp", "openai", "ollama"]
+type ChannelName = Literal["api", "discord", "admin", "desktop"]
+
+
+class ChannelsConfig(BaseModel):
+    """Which channels `magi run` serves when none are named on the command line."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    enabled: list[ChannelName] = Field(default_factory=lambda: ["api"])
 
 
 class Config(BaseModel):
@@ -435,6 +444,9 @@ class Config(BaseModel):
     seanime_use_mcp: bool = False
     seanime_mcp_url: str = "http://127.0.0.1:43211/api/v1/mcp"
 
+    # --- Channels `magi run` starts by default (config file: `channels.enabled`). ---
+    channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+
     # --- Discord bot ---
     DISCORD_BOT_TOKEN: str | None = _secret("DISCORD_BOT_TOKEN")
 
@@ -528,18 +540,13 @@ class Config(BaseModel):
     # How long to wait (seconds) for the Node child to start serving before giving up.
     desktop_server_ready_timeout: float = 30.0
 
-    def log_settings(self) -> None:
-        """Dump the effective config to the console (secrets masked).
-
-        Single startup banner so you can confirm *which* settings are live —
-        backend urls, model ids, context windows, paths — in one place.
-        """
-        # Secrets (fields declared via `_secret`) never hit the log verbatim.
+    def settings_lines(self) -> list[str]:
+        """`name = value` for every setting, secrets masked and long prose
+        reduced to its length — what the startup banner and `magi config show`
+        print."""
         masked = set(secret_fields())
-        # Long prose: log the length, not the body.
         prose = {"system_prompt", "persona_seed"}
-
-        log_info("=== effective config ===")
+        lines: list[str] = []
         for name in type(self).model_fields:
             value = getattr(self, name)
             if name in masked:
@@ -548,7 +555,18 @@ class Config(BaseModel):
                 shown = f"<{len(value)} chars>"
             else:
                 shown = value
-            log_info(f"  {name} = {shown}")
+            lines.append(f"{name} = {shown}")
+        return lines
+
+    def log_settings(self) -> None:
+        """Dump the effective config to the console (secrets masked).
+
+        Single startup banner so you can confirm *which* settings are live —
+        backend urls, model ids, context windows, paths — in one place.
+        """
+        log_info("=== effective config ===")
+        for line in self.settings_lines():
+            log_info(f"  {line}")
         log_info("========================")
 
 

@@ -1,0 +1,9 @@
+# Container-only deltas, layered over ../magi.yaml by `--docker`
+# (`python main.py <channel> --docker`, or `magi run -c magi.yaml -c docker/magi.docker.yaml`).
+# Bind every interface so published ports are reachable (127.0.0.1 inside a
+# container is the container's own loopback), and reach host-run backends via
+# host.docker.internal (compose: extra_hosts host.docker.internal:host-gateway).
+api_host: 0.0.0.0
+admin_host: 0.0.0.0
+llamacpp_base_url: http://host.docker.internal:8888/v1
+qdrant_url: http://host.docker.internal:6333

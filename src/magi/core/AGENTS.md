@@ -22,6 +22,10 @@ layer a persona reuses unchanged.
 
 # Work Guidance
 
+- **Config (`config.py`, `config_file.py`)**: add a setting as a typed field on
+  `Config` (use `Literal`/nested `BaseModel` for closed sets and groups, `_secret`
+  for env-only values). File loading stays in `config_file.py`, pure IO.
+
 - **Memory (`memory/`)** is deliberate: durable, inspectable files the model
   reads/writes on purpose, never auto-extracted. It is per-kind (long-term,
   episode, session, persona) — one kind = one module with its own storage, render,

@@ -13,15 +13,20 @@ uv sync --extra s3            # S3-compatible byte archive
 uv sync --extra mcp           # Seanime-over-MCP specialist
 ```
 
-## 2. Secrets
+## 2. Configure
 
-Copy the template and fill in only what you use. **Configuration is code-first** —
-`.env` holds *secrets only*; everything else is set in the entrypoint (see
-[configuration.md](configuration.md)).
+Run the wizard — it asks for the model backend and channels, writes
+`~/.magi/config.yaml`, and puts secrets in `~/.magi/.env` (mode 0600):
 
 ```bash
-cp .env.example .env
+uv run magi setup
+uv run magi doctor      # re-check any time
 ```
+
+From a checkout the repo's own [`magi.yaml`](../magi.yaml) is used instead
+(`./magi.yaml` wins). `.env` holds *secrets only* — see
+[configuration.md](configuration.md). To start from the template:
+`cp .env.example ~/.magi/.env`.
 
 At minimum: `DISCORD_BOT_TOKEN` for the Discord bot, or `API_AUTH_TOKEN` for a
 network-exposed HTTP service. The rest depends on your backend (e.g.
@@ -32,8 +37,8 @@ network-exposed HTTP service. The rest depends on your backend (e.g.
 The bundled entrypoints expect a local `llama.cpp` `llama-server` on
 `http://127.0.0.1:8888/v1` (`model_provider="llamacpp"`). Launch one with your
 model and an `mmproj` for vision; set `--ctx-size` to match `lead_num_ctx` (128k by
-default). To use Claude or another remote model instead, switch the entrypoint to
-`model_provider="litellm"` and bring up the proxy
+default). To use Claude or another remote model instead, set
+`model_provider: litellm` (`magi config set model_provider litellm`) and bring up the proxy
 (`docker compose up -d litellm postgres`). See
 [infrastructure.md](infrastructure.md).
 
@@ -43,8 +48,8 @@ Both entrypoints serve the **same brain** (`magi/channels/bootstrap.py`); only t
 transport differs.
 
 ```bash
-python main.py discord  # Discord bot (needs DISCORD_BOT_TOKEN)
-python main.py api      # standalone HTTP service on 127.0.0.1:8000
+uv run magi run discord  # Discord bot (needs DISCORD_BOT_TOKEN)
+uv run magi run api      # standalone HTTP service on 127.0.0.1:8000
 ```
 
 The startup banner prints every effective setting (secrets masked) — confirm your
@@ -81,7 +86,7 @@ The full contract is in [channels.md](channels.md).
 end. Point it at the OpenAI-compatible shim and you get a full UI for free.
 
 Open WebUI runs in Docker, so the app must be reachable from the container: bind it
-to `0.0.0.0` (`api_host="0.0.0.0"` in `main.py` (configure_api)) and set `API_AUTH_TOKEN`, since
+to `0.0.0.0` (`magi config set api_host 0.0.0.0`) and set `API_AUTH_TOKEN`, since
 the port is now non-local.
 
 ```bash
@@ -104,19 +109,17 @@ server-side session.
 
 ## Object storage
 
-Turn on the model's durable file/image archive in the entrypoint:
+Turn on the model's durable file/image archive in the config file:
 
-```python
-configure(
-    storage_enabled=True,
-    storage_backend="local",          # bytes under data/artifacts — zero setup
-    storage_local_dir="data/artifacts",
-)
+```yaml
+storage_enabled: true
+storage_backend: local            # bytes under data/artifacts — zero setup
+storage_local_dir: data/artifacts
 ```
 
 For the S3 backend, run a bucket (`docker compose up -d rustfs rustfs-init`),
 `uv sync --extra s3`, put `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` in `.env`, and
-set `storage_backend="s3"`. See [infrastructure.md](infrastructure.md#object-storage-byte-archive).
+set `storage_backend: s3`. See [infrastructure.md](infrastructure.md#object-storage-byte-archive).
 
 ## 6. Tests
 

@@ -58,9 +58,14 @@ dependencies = [
     "ollama>=0.6.2",
     "openai>=2.40.0",
     "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.2",
     "sqlalchemy>=2.0.50",
     "uvicorn[standard]>=0.48.0",
 ]
+
+# `magi setup | run | config | doctor | skills` — see src/magi/cli/.
+[project.scripts]
+magi = "magi.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/carneirofc/magi-ai-assistant"
@@ -155,6 +160,7 @@ dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "ruff>=0.9.0",
+    "types-pyyaml>=6.0.12.20260906",
 ]
 
 [tool.pytest.ini_options]

@@ -8,6 +8,15 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Added
 
+- **`magi` CLI and typed config file.** A validated YAML config
+  (`./magi.yaml`, else `$MAGI_HOME/config.yaml`; `MAGI_HOME` defaults to
+  `~/.magi`) replaces editing Python to deploy. New commands: `magi setup`
+  (wizard; secrets go to `$MAGI_HOME/.env` with mode 0600), `magi run
+  [channel]`, `magi doctor` (backend reachability, missing extras, tokens,
+  FTS5), and `magi config path|show|get|set`. Relative data paths resolve
+  against the config file's directory. New `channels.enabled` setting. See
+  ADR 0004.
+
 - **Static type checking (basedpyright).** `uv run basedpyright` now gates CI
   and pre-commit: `standard` mode everywhere, `strict` for the model-free
   `src/magi/core`. Pre-existing findings are frozen in
@@ -41,6 +50,11 @@ All notable changes to **magi** are documented here. The format follows
   (`@carneirofc/magi-web` 0.8.0, new `authEnabled()` in `lib/session`).
 
 ### Changed
+
+- **`main.py` is a thin wrapper.** The repo's deployment settings moved to
+  `magi.yaml` and the `--docker` deltas to `docker/magi.docker.yaml`;
+  `python main.py <channel> [--docker]` behaves as before. `pyyaml` is now a
+  direct dependency.
 
 - **Typed, validated config.** `Config` is now a frozen pydantic model:
   `configure(...)` checks value types as well as names (a failed call changes

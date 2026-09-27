@@ -6,17 +6,21 @@ persona overlay installs this as a dependency and extends it from the outside.
 
 # Local Contracts
 
-- **Dependency direction is strictly downward**: `channels` → `agent` → `core`.
-  `core` depends on nothing above it. Never import `agent` or `channels` from
-  `core`.
+- **Dependency direction is strictly downward**: `cli` → `channels` → `agent` →
+  `core`. `core` depends on nothing above it. Never import `agent`, `channels`,
+  or `cli` from `core`.
 - **`core/` is model-free.** Anything needing an LLM (curator, summarizers) lives
   in `agent/` and is passed into `core` as an injected callable, never imported.
 - **Dependency injection, no globals.** Team, `MemoryManager`, and DB are built at
   composition roots (`channels/bootstrap.py`) and passed in. The only ambient state
   is the per-message memory **scope**, carried via a `ContextVar` — never a tool
   argument.
-- **Code-first config.** Settings are plain Python set at the entrypoint via
-  `configure(...)` (`core/config.py`). Only *secrets* come from `.env`.
+- **Typed config: file or code.** `Config` (`core/config.py`) is a frozen
+  pydantic model. A deployment sets it from a YAML file (`./magi.yaml` or
+  `$MAGI_HOME/config.yaml`, `core/config_file.py`) and/or `configure(...)` at
+  the entrypoint (code wins). Both paths validate names and types. Only
+  *secrets* come from `.env` (`$MAGI_HOME/.env`, `./.env`). Loading is always
+  explicit — never at import. See ADR 0004.
 - **Graceful degradation.** Optional backends (storage, knowledge, semantic search,
   MCP, git memory, websearch) lazy-import their heavy dep and degrade to
   "tool not attached" / no-op when absent or down. The bot must always boot. Each
@@ -52,6 +56,8 @@ and `uv run pytest -q` (from repo root, after `uv sync --dev --all-extras`).
 
 # Child Index
 
+- `cli/` — the `magi` command (setup wizard, run, config, doctor); own child
+  doc.
 - `core/` — model-free mechanism (conversation runner, config, memory, knowledge,
   storage, db, media, embeddings).
 - `agent/` — model-bound brain (team, members, model builders, curator,

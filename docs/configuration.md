@@ -1,37 +1,68 @@
 # Configuration
 
-magi is **code-first**. All settings are plain Python on the frozen, validated
-`Config` pydantic model in [`magi/core/config.py`](../src/magi/core/config.py); each entrypoint
-overrides what its deployment needs via `configure(...)` *before* building
-anything. To learn what a value is, read the entrypoint and that file — there is no
-env-var archaeology.
+All settings are fields on the frozen, validated `Config` pydantic model in
+[`magi/core/config.py`](../src/magi/core/config.py). A deployment sets them in
+a **YAML config file**, in **code** via `configure(...)`, or both — every path
+validates names *and* types, so a typo fails at startup naming the key. See
+[ADR 0004](adr/0004-typed-config-file-and-cli.md).
 
-Only **secrets** come from the environment / `.env`. The effective values (secrets
-masked) are printed at startup by `config.log_settings()` — one banner so you can
-confirm what's live.
+Only **secrets** come from the environment / `.env`. The effective values
+(secrets masked) are printed at startup and by `magi config show`.
 
 ```mermaid
 flowchart LR
-    ENV[.env<br/>secrets only] --> CFG[Config model<br/>defaults]
-    ENT[entrypoint<br/>configure overrides] --> CFG
-    CFG --> BANNER[log_settings<br/>startup banner]
+    DEF[Config defaults] --> CFG[effective config]
+    FILE[magi.yaml /<br/>$MAGI_HOME/config.yaml] --> CFG
+    CODE[configure in code] --> CFG
+    ENV[.env<br/>secrets only] --> CFG
     CFG --> APP[whole app reads the singleton]
 ```
 
-## How it works
+## The config file
+
+Keys are `Config` field names; groups are nested (`channels:`). Anything not
+listed keeps its default.
+
+```yaml
+# ~/.magi/config.yaml  (or ./magi.yaml for a project-local deployment)
+model_provider: llamacpp
+llamacpp_base_url: http://127.0.0.1:8888/v1
+lead_num_ctx: 128000
+session_summary: true
+memory_curation: true
+channels:
+  enabled: [api]
+```
+
+- **Lookup**: `./magi.yaml`, else `$MAGI_HOME/config.yaml`. `MAGI_HOME`
+  defaults to `~/.magi` and also holds `.env`, skills, and logs.
+- **Data root**: relative paths (`memory_dir`, `db_file`, …) resolve against the
+  config file's directory, or `MAGI_HOME` when there is no file.
+- **Precedence** (lowest → highest): defaults < config file(s) (later `-c`
+  wins) < `configure()` in code < CLI flags.
+- The repo's own deployment is [`magi.yaml`](../magi.yaml); containers layer
+  [`docker/magi.docker.yaml`](../docker/magi.docker.yaml) on top (`--docker`).
+
+## The `magi` CLI
+
+```bash
+magi setup                          # wizard → ~/.magi/config.yaml + ~/.magi/.env (0600)
+magi doctor                         # config valid? backend reachable? extras installed?
+magi config path                    # MAGI_HOME and the file in use
+magi config show                    # every effective setting, secrets masked
+magi config get channels.enabled
+magi config set api_port 8001       # validated, atomic; YAML values: true, [a, b]
+magi run                            # serve channels.enabled
+magi run discord                    # or name the channel
+magi run -c magi.yaml -c docker/magi.docker.yaml api   # explicit files, later wins
+```
+
+## In code
 
 ```python
-# in main.py
 from magi.core.config import configure
 
-def apply_deployment_config() -> None:
-    configure(
-        model_provider="llamacpp",
-        llamacpp_base_url="http://127.0.0.1:8888/v1",
-        session_summary=True,
-        memory_curation=True,
-        # …
-    )
+configure(model_provider="llamacpp", session_summary=True)
 ```
 
 - `configure(**overrides)` validates every override against `Config` — an
@@ -40,10 +71,8 @@ def apply_deployment_config() -> None:
   (the model is frozen so only this deliberate path can write).
 - `derive(config, **overrides)` returns a validated copy without touching the
   singleton; `reset_config()` restores the defaults (tests use both).
-- `load_secrets(home)` loads `<home>/.env` then `./.env` and fills any secret
-  that is still unset; environment variables always win.
-- Call it **once, at the entrypoint, before** building any channel/team. Values are
-  read at build/run time.
+- `load_config(path)` / `load_secrets(home)` are what the CLI uses; call them
+  from a custom entrypoint to get the same file + `.env` behavior.
 
 ## Secrets (`.env` only)
 
@@ -63,8 +92,14 @@ These never belong in code. See [`.env.example`](../.env.example).
 
 ## Settings reference
 
-Defaults shown are the engine defaults; the bundled entrypoints override several
-(notably `model_provider="llamacpp"`, `session_summary=True`, `memory_curation=True`).
+Defaults shown are the engine defaults; the repo's `magi.yaml` overrides several
+(notably `model_provider: llamacpp`, `session_summary: true`, `memory_curation: true`).
+
+### Channels
+
+| Field | Default | Notes |
+|---|---|---|
+| `channels.enabled` | `[api]` | What `magi run` serves when no channel is named: `api`, `discord`, `admin`, `desktop` |
 
 ### Model backends
 

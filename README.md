@@ -166,18 +166,17 @@ Domain vocabulary is defined in [CONTEXT.md](https://github.com/carneirofc/magi-
 ## Run
 
 ```bash
-python main.py api      # standalone HTTP service (+ OpenAI shim) for external clients
-python main.py discord  # Discord bot (needs DISCORD_BOT_TOKEN)
-python main.py desktop  # frameless native shell over the web frontend (uv sync --extra desktop)
-python main.py admin    # operator admin API (memory + knowledge)
+magi setup              # pick a model backend + channels; writes ~/.magi/config.yaml + .env
+magi doctor             # verify config, backend reachability, and extras
+magi run                # serve the configured channels
+magi run discord        # or name one: api | discord | admin | desktop
 ```
 
 Every chat channel serves the same brain (`magi/channels/bootstrap.py`); only the
-transport differs. Config is code-first: each channel's settings live in its
-`configure_*` function in [`main.py`](https://github.com/carneirofc/magi-ai-assistant/blob/master/main.py), and defaults in
-`magi/core/config.py`. Only *secrets* come from `.env` (`DISCORD_BOT_TOKEN`,
-`API_AUTH_TOKEN`, `QDRANT_API_KEY`, …). Add `--docker` to any chat channel to
-overlay the container-only deltas. Full walkthroughs — first chat, Open WebUI,
+transport differs. Settings are a validated YAML file (`./magi.yaml` or
+`~/.magi/config.yaml`, keys = `magi/core/config.py` fields); only *secrets* come
+from `.env`. From a checkout, `python main.py <channel> [--docker]` still works
+and reads the repo's [`magi.yaml`](https://github.com/carneirofc/magi-ai-assistant/blob/master/magi.yaml). Full walkthroughs — first chat, Open WebUI,
 Docker, storage backends — are in [docs/](https://github.com/carneirofc/magi-ai-assistant/blob/master/docs/getting-started.md).
 
 ## Clients
