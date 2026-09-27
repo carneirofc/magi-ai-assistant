@@ -73,12 +73,19 @@ def test_prepare_overlays_later_files(home, tmp_path):
     assert Path.cwd() == tmp_path.resolve()
 
 
-def test_run_channels_dispatch(monkeypatch):
-    called: list[str] = []
-    monkeypatch.setattr("magi.cli.run.run_api", lambda: called.append("api"))
-    configure(channels={"enabled": ["api"]})
+def test_run_channels_defaults_to_config(monkeypatch):
+    called: list[list[str]] = []
+    monkeypatch.setattr("magi.channels.registry.serve", lambda names: called.append(list(names)))
+    configure(channels={"enabled": ["api", "telegram"]})
     run_channels([])
-    assert called == ["api"]
+    assert called == [["api", "telegram"]]
+
+
+def test_run_channels_desktop_runs_alone(monkeypatch):
+    called: list[bool] = []
+    monkeypatch.setattr("magi.cli.run.run_desktop", lambda frameless: called.append(frameless))
+    run_channels(["desktop"])
+    assert called == [True]
 
 
 def test_doctor_reports_missing_discord_token(monkeypatch):
@@ -150,3 +157,16 @@ def test_setup_rerun_keeps_previous_answers(tmp_path):
     run_setup(tmp_path, _Scripted({"Model backend": "ollama"}, {}))
     result = run_setup(tmp_path, _Scripted({}, {}))
     assert result.config["model_provider"] == "ollama"
+
+
+def test_doctor_telegram_needs_token_and_warns_on_empty_allowlist(monkeypatch):
+    monkeypatch.setattr(doctor_mod, "http_status", lambda url, headers=None: 200)
+    cfg = derive(
+        config,
+        channels={"enabled": ["telegram"]},
+        telegram_bot_token=None,
+        telegram_allowed_users=[],
+    )
+    by_name = {r.name: r for r in doctor_mod.check_channels(cfg)}
+    assert by_name["telegram token"].status == "fail"
+    assert by_name["telegram access"].status == "warn"

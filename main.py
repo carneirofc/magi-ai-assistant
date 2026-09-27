@@ -17,7 +17,7 @@ express (registering a persona's skills, members, prompt overlays).
 import argparse
 from pathlib import Path
 
-from magi.cli.run import prepare, run_channels, run_discord
+from magi.cli.run import check_discord, prepare, run_channels
 from magi.core.config import configure
 
 ROOT = Path(__file__).resolve().parent
@@ -40,11 +40,12 @@ def main() -> None:
     args = build_parser().parse_args()
     prepare([CONFIG, DOCKER_OVERLAY] if args.docker else [CONFIG])
     if args.channel == "discord":
+        if args.check:
+            check_discord()
+            return
         # The bot serves the admin surface only when asked; the file's
         # admin_enabled is meant for the API's single-app shape.
         configure(admin_enabled=False)
-        run_discord(check=args.check)
-        return
     run_channels([args.channel], frameless=not args.no_frameless)
 
 

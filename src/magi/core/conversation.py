@@ -9,6 +9,7 @@ plain inputs in and render the plain `ConversationReply` out.
 injected — nothing is constructed here.
 """
 
+import copy
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
@@ -289,6 +290,17 @@ class ConversationService:
         # auto-injection) when the searcher is None or top_k <= 0.
         self.knowledge = knowledge
         self.knowledge_top_k = knowledge_top_k
+
+    def with_guidance(self, channel_guidance: str) -> ConversationService:
+        """A view of this service with another channel's output rules.
+
+        Shares everything else — runner, memory manager, knowledge, mood pass —
+        so several channels in one process (the gateway, ADR 0005) drive ONE
+        brain. Safe because scope is per-message ambient state, never stored on
+        the service."""
+        view = copy.copy(self)
+        view.channel_guidance = channel_guidance
+        return view
 
     def _usage_from(self, run_output: RunOutputLike | None) -> ConversationUsage | None:
         """Lift agno's `RunMetrics` off a run output into channel-neutral usage.

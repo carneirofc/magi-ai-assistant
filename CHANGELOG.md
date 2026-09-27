@@ -8,6 +8,17 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Added
 
+- **One process, many channels.** `magi run api discord telegram admin` (or
+  `channels.enabled`) builds the brain once and serves every channel from it
+  (`channels/registry.py`, ADR 0005). Adapters get the shared service through
+  `ConversationService.with_guidance`; the API and admin servers stop
+  gracefully (`gateway.Stoppable`, `run_gateway(on_first_exit=…)`). `api` and
+  `admin` port collisions fail at startup.
+- **Telegram channel** (`telegram` extra, python-telegram-bot). Long polling,
+  deny-by-default allowlist (`telegram_allowed_users`, `/whoami` to find an
+  id), photos/documents as media, 4096-char chunking, `/new` to reset. New
+  secret `TELEGRAM_BOT_TOKEN`; `magi setup` and `magi doctor` know about it.
+
 - **`magi` CLI and typed config file.** A validated YAML config
   (`./magi.yaml`, else `$MAGI_HOME/config.yaml`; `MAGI_HOME` defaults to
   `~/.magi`) replaces editing Python to deploy. New commands: `magi setup`

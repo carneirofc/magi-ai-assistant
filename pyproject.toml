@@ -124,6 +124,9 @@ websearch = [
 docs = [
     "pypdf>=5.0.0",
 ]
+telegram = [
+    "python-telegram-bot>=22.0",
+]
 
 [build-system]
 requires = ["hatchling"]

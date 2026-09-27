@@ -113,6 +113,13 @@ def run_setup(home: Path, prompter: Prompter) -> SetupResult:
 
     if "discord" in chosen and (token := prompter.secret("DISCORD_BOT_TOKEN")):
         env["DISCORD_BOT_TOKEN"] = token
+    if "telegram" in chosen:
+        if token := prompter.secret("TELEGRAM_BOT_TOKEN"):
+            env["TELEGRAM_BOT_TOKEN"] = token
+        ids = prompter.ask("Telegram user ids allowed to chat (comma-separated)", "")
+        data["telegram_allowed_users"] = [
+            int(i) for i in ids.replace(" ", "").split(",") if i.isdigit()
+        ]
     if "api" in chosen or "admin" in chosen or "desktop" in chosen:
         if prompter.ask("Generate API/admin bearer tokens?", "yes").lower().startswith("y"):
             env.setdefault("API_AUTH_TOKEN", secrets.token_urlsafe(32))

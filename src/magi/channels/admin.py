@@ -1284,3 +1284,35 @@ def build_admin_app(memory_manager: MemoryManager | None = None) -> FastAPI:
         memory_manager=manager,
         settings_store=operator_settings_store(),
     )
+
+
+class AdminAdapter:
+    """The admin surface as a `gateway.PlatformAdapter`: its own uvicorn server on
+    `admin_host:admin_port`, run beside the chat channels in one process
+    (`channels/registry.py`). It has no users of its own — `platform` only
+    satisfies the protocol."""
+
+    platform: str = "admin"
+
+    def __init__(self, app: FastAPI, host: str, port: int) -> None:
+        import uvicorn
+
+        self._server = uvicorn.Server(uvicorn.Config(app, host=host, port=port))
+
+    def request_stop(self) -> None:
+        """Let uvicorn finish in-flight requests and its lifespan (gateway.Stoppable)."""
+        self._server.should_exit = True
+
+    async def serve_async(self) -> None:
+        await self._server.serve()
+
+
+def build_admin_adapter(memory_manager: MemoryManager | None = None) -> AdminAdapter:
+    """`build_admin_app` wrapped as an adapter bound to the configured admin port."""
+    from magi.core.config import config
+
+    return AdminAdapter(
+        build_admin_app(memory_manager=memory_manager),
+        host=config.admin_host,
+        port=config.admin_port,
+    )

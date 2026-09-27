@@ -81,6 +81,7 @@ These never belong in code. See [`.env.example`](../.env.example).
 | Variable | Used for |
 |---|---|
 | `DISCORD_BOT_TOKEN` | Discord bot auth |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot auth (`telegram` extra) |
 | `LITELLM_MASTER_KEY` | LiteLLM proxy auth |
 | `LLAMACPP_API_KEY` | Only if `llama-server` runs with `--api-key` |
 | `OPENAI_API_KEY` | Remote OpenAI-compatible serving (`model_provider="openai"` / `embeddings_provider="openai"`) |
@@ -99,7 +100,8 @@ Defaults shown are the engine defaults; the repo's `magi.yaml` overrides several
 
 | Field | Default | Notes |
 |---|---|---|
-| `channels.enabled` | `[api]` | What `magi run` serves when no channel is named: `api`, `discord`, `admin`, `desktop` |
+| `channels.enabled` | `[api]` | What `magi run` serves when no channel is named: `api`, `discord`, `telegram`, `admin` (together, in one process), or `desktop` (alone) |
+| `telegram_allowed_users` | `[]` | Numeric Telegram user ids allowed to chat; empty = nobody |
 
 ### Model backends
 

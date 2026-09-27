@@ -41,22 +41,6 @@ def prepare(config_paths: Sequence[Path] = ()) -> Path | None:
     return primary
 
 
-def run_api() -> None:
-    import uvicorn
-
-    from magi.channels.api import build_api_app
-
-    uvicorn.run(build_api_app(), host=config.api_host, port=config.api_port)
-
-
-def run_admin() -> None:
-    import uvicorn
-
-    from magi.channels.admin import build_admin_app
-
-    uvicorn.run(build_admin_app(), host=config.admin_host, port=config.admin_port)
-
-
 def run_desktop(*, frameless: bool = True) -> None:
     # Lazy: the optional `desktop` extra (PySide6) is only needed here.
     from magi.desktop import run_desktop as _run_desktop
@@ -66,41 +50,30 @@ def run_desktop(*, frameless: bool = True) -> None:
     sys.exit(_run_desktop())
 
 
-def run_discord(*, check: bool = False) -> None:
-    if check:
-        # Phase 1 — raw discord.py, no agno. See channels/discord_check.py.
-        import asyncio
+def check_discord() -> None:
+    """`python main.py discord --check`: raw discord.py connect, no agno
+    (channels/discord_check.py) — isolates token/intent problems."""
+    import asyncio
 
-        from magi.channels import discord_check
+    from magi.channels import discord_check
 
-        if not config.DISCORD_BOT_TOKEN:
-            raise SystemExit("DISCORD_BOT_TOKEN is not set (add it to $MAGI_HOME/.env)")
-        asyncio.run(discord_check.run(config.DISCORD_BOT_TOKEN))
-        return
-
-    from magi.channels.discord import build_discord_client, serve_with_admin
-
-    discord_client = build_discord_client()
-    if config.admin_enabled:
-        serve_with_admin(discord_client)
-    else:
-        discord_client.serve()
+    if not config.DISCORD_BOT_TOKEN:
+        raise SystemExit("DISCORD_BOT_TOKEN is not set (add it to $MAGI_HOME/.env)")
+    asyncio.run(discord_check.run(config.DISCORD_BOT_TOKEN))
 
 
 def run_channels(names: Sequence[ChannelName], *, frameless: bool = True) -> None:
-    """Serve `names` (default: `config.channels.enabled`)."""
+    """Serve `names` (default: `config.channels.enabled`).
+
+    `desktop` runs on its own (it owns the Qt loop); everything else runs in one
+    gateway process around a single shared brain (`channels/registry.py`)."""
+    from magi.channels.registry import ChannelConfigError, serve
+
     chosen = list(names) or list(config.channels.enabled)
-    if len(chosen) != 1:
-        raise SystemExit(
-            f"one channel per process for now (got {', '.join(chosen) or 'none'}); "
-            "run `magi run <channel>`"
-        )
-    match chosen[0]:
-        case "api":
-            run_api()
-        case "admin":
-            run_admin()
-        case "discord":
-            run_discord()
-        case "desktop":
-            run_desktop(frameless=frameless)
+    if chosen == ["desktop"]:
+        run_desktop(frameless=frameless)
+        return
+    try:
+        serve(chosen)
+    except ChannelConfigError as exc:
+        raise SystemExit(f"magi: {exc}") from exc

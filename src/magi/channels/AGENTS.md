@@ -14,6 +14,13 @@ API, and the shared wiring live here.
 - **Adapters satisfy `PlatformAdapter` by shape** (`gateway.py`, a `Protocol`; see
   [ADR 0003](../../../docs/adr/0003-gateway-and-platform-adapters.md)), not by
   inheritance. The gateway owns `scoped_user_id` and hands scope to the service.
+- **One brain per process.** `registry.py` builds the stack once and hands each
+  adapter `service.with_guidance(<its prompt>)`; adapter builders must accept an
+  injected `ConversationService` (keep a standalone wrapper for back-compat).
+  Long-running servers implement `request_stop()` (`gateway.Stoppable`) so
+  shutdown is graceful. See ADR 0005.
+- **Deny by default on open networks.** Telegram serves only
+  `telegram_allowed_users`; new chat platforms follow the same allowlist rule.
 - **Channels hold no conversation logic.** Run + memory flow belong to
   `core/conversation.py`; a channel only translates transport ↔ the service's
   `handle` / `handle_stream` calls.
@@ -30,4 +37,5 @@ When an endpoint's shape changes, the web BFF and its generated API types
 
 # Verification
 
-`uv run pytest -q` (`tests/test_api.py`, `test_gateway.py`, `test_admin.py`).
+`uv run pytest -q` (`tests/test_api.py`, `test_gateway.py`, `test_admin.py`,
+`test_telegram.py`).

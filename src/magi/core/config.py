@@ -50,7 +50,7 @@ def _mask(secret: str | None) -> str:
 
 
 type ModelProvider = Literal["litellm", "llamacpp", "openai", "ollama"]
-type ChannelName = Literal["api", "discord", "admin", "desktop"]
+type ChannelName = Literal["api", "discord", "telegram", "admin", "desktop"]
 
 
 class ChannelsConfig(BaseModel):
@@ -449,6 +449,13 @@ class Config(BaseModel):
 
     # --- Discord bot ---
     DISCORD_BOT_TOKEN: str | None = _secret("DISCORD_BOT_TOKEN")
+
+    # --- Telegram bot (magi/channels/telegram; optional `telegram` extra). Long
+    # polling, so no public URL is needed. Deny by default: only the numeric
+    # Telegram user ids listed here may talk to the bot — an empty list means
+    # nobody (the bot logs each refused id so you can add yours). ---
+    telegram_bot_token: str | None = _secret("TELEGRAM_BOT_TOKEN")
+    telegram_allowed_users: list[int] = Field(default_factory=list)
 
     # --- HTTP API service (magi/channels/api). The standalone integration point for
     # external clients (desktop app, web UI, ...). Bound to localhost by

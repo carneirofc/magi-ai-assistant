@@ -74,6 +74,17 @@ def check_channels(cfg: Config) -> list[CheckResult]:
     out.append(CheckResult("channels", "ok", ", ".join(cfg.channels.enabled) or "none"))
     if "discord" in enabled and not cfg.DISCORD_BOT_TOKEN:
         out.append(CheckResult("discord token", "fail", "DISCORD_BOT_TOKEN is not set"))
+    if "telegram" in enabled:
+        if not cfg.telegram_bot_token:
+            out.append(CheckResult("telegram token", "fail", "TELEGRAM_BOT_TOKEN is not set"))
+        if not cfg.telegram_allowed_users:
+            out.append(
+                CheckResult(
+                    "telegram access",
+                    "warn",
+                    "telegram_allowed_users is empty — everyone is refused (send /whoami)",
+                )
+            )
     public_api = "api" in enabled and cfg.api_host not in ("127.0.0.1", "localhost", "::1")
     if public_api and not cfg.api_auth_token:
         out.append(
@@ -98,6 +109,8 @@ def _needed_extras(cfg: Config) -> list[tuple[str, str, str]]:
         needs.append(("git memory", "git", "git"))
     if cfg.websearch_enabled:
         needs.append(("web search", "ddgs", "websearch"))
+    if "telegram" in cfg.channels.enabled:
+        needs.append(("telegram bot", "telegram", "telegram"))
     if "desktop" in cfg.channels.enabled:
         needs.append(("desktop shell", "PySide6", "desktop"))
     return needs
