@@ -150,6 +150,7 @@ include = [
 
 [dependency-groups]
 dev = [
+    "basedpyright>=1.40.1",
     "pre-commit>=4.2.0",
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
@@ -182,3 +183,16 @@ ignore = ["E501"]
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI's dependency markers are meant to be call defaults.
 extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Query", "fastapi.Form"]
+
+# Static typing gate (CI + pre-commit). `standard` everywhere; the model-free
+# core is held to `strict`. Existing findings are frozen in
+# .basedpyright/baseline.json — new code must be clean, and the baseline only
+# ever shrinks (basedpyright rewrites it as errors are fixed). The baseline is
+# recorded against `uv sync --dev --all-extras` — the same env CI uses.
+[tool.basedpyright]
+pythonVersion = "3.14"
+include = ["src", "tests", "clients", "main.py"]
+exclude = ["web", "examples", "scripts", "**/__pycache__", ".venv"]
+typeCheckingMode = "standard"
+strict = ["src/magi/core"]
+reportMissingTypeStubs = false

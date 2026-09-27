@@ -41,6 +41,10 @@ except (ImportError, ModuleNotFoundError) as exc:
         "`discord.py` not installed. Please install using `pip install discord.py`"
     ) from exc
 
+# Every chat `_resolve_target` can reply into. All three expose `history` and
+# `get_partial_message`, so they satisfy the tools' `DiscordChannel` protocol.
+type ReplyTarget = discord.Thread | discord.DMChannel | discord.TextChannel
+
 
 # Intent verbs that, when paired with the word "thread", signal the user wants a
 # brand-new thread. Kept narrow on purpose so a passing mention of "thread" alone
@@ -368,7 +372,7 @@ class DiscordClient:
         self,
         *,
         message: discord.Message,
-        target: discord.abc.Messageable,
+        target: ReplyTarget,
         message_text: str,
         message_user: str,
         message_user_id: int,
@@ -508,7 +512,7 @@ class DiscordClient:
         channel: discord.abc.Messageable,
         message_text: str,
         message_user: str,
-    ) -> tuple[discord.abc.Messageable | None, str]:
+    ) -> tuple[ReplyTarget | None, str]:
         """Pick the reply target and its session id.
 
         Default = same chat (current channel / thread / DM). A brand-new thread is
@@ -679,8 +683,8 @@ class DiscordClient:
         return "\n".join(f"_{line}_" for line in text.split("\n"))
 
     async def _send_discord_messages(
-        self, thread: discord.channel, message: str, italics: bool = False
-    ) -> bool:  # type: ignore
+        self, thread: discord.abc.Messageable, message: str, italics: bool = False
+    ) -> bool:
         if not message or not message.strip():
             log_warning(
                 f"skipping empty Discord message for target id={getattr(thread, 'id', '?')}"
@@ -691,7 +695,7 @@ class DiscordClient:
         numbered = len(parts) > 1
         for i, part in enumerate(parts, 1):
             body = f"[{i}/{len(parts)}] {part}" if numbered else part
-            await thread.send(self._italicize(body) if italics else body)  # type: ignore
+            await thread.send(self._italicize(body) if italics else body)
         return True
 
     def serve(self) -> None:

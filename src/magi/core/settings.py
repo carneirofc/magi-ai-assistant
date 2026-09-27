@@ -25,6 +25,12 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from magi.core.types import JsonObject, parse_json_object
 
 
+def _has_name(entry: JsonObject) -> bool:
+    """An MCP entry is keyed by a non-blank string `name`; others are dropped."""
+    name = entry.get("name")
+    return isinstance(name, str) and bool(name.strip())
+
+
 @dataclass(frozen=True)
 class MemoryOverrides:
     """Operator overrides for the memory subsystem. Every field is optional — `None`
@@ -103,16 +109,14 @@ class OperatorSettingsStore:
             git_author_email=(section.git_author_email or "").strip() or None,
         )
 
-    def read_mcp(self) -> list[dict]:
+    def read_mcp(self) -> list[JsonObject]:
         """The operator-added MCP server specs (see config.mcp_servers for the
         shape), or [] when none are set. Entries merge over the code list by
         name at team assembly (magi/agent/tools/mcp.py)."""
         section = self._read_json().get("mcp")
         if not isinstance(section, list):
             return []
-        return [
-            dict(e) for e in section if isinstance(e, dict) and str(e.get("name") or "").strip()
-        ]
+        return [e for e in section if isinstance(e, dict) and _has_name(e)]
 
     def version(self) -> str:
         """Optimistic-concurrency token over the raw file bytes (empty token when
@@ -143,14 +147,12 @@ class OperatorSettingsStore:
         self._write_json(data)
         return self.read_memory()
 
-    def set_mcp(self, servers: list[dict]) -> list[dict]:
+    def set_mcp(self, servers: list[JsonObject]) -> list[JsonObject]:
         """Persist the operator MCP server list, replacing that section (an
         empty list clears it). The team reads the merge at startup — changes
         apply on restart. Returns the stored list (as read back)."""
         data = self._read_json()
-        cleaned = [
-            dict(e) for e in servers if isinstance(e, dict) and str(e.get("name") or "").strip()
-        ]
+        cleaned = [dict(e) for e in servers if _has_name(e)]
         if cleaned:
             data["mcp"] = cleaned
         else:

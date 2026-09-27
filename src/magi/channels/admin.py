@@ -57,6 +57,7 @@ from magi.core.memory import (
 from magi.core.memory.semantic import MemoryRetriever
 from magi.core.memory.store import FileMemoryStore
 from magi.core.settings import MemoryOverrides, OperatorSettingsStore
+from magi.core.types import JsonObject
 
 if TYPE_CHECKING:
     from magi.core.evolution import EvolutionStore
@@ -398,8 +399,8 @@ class McpSettingsOut(BaseModel):
     (context, edited in main.py) and the operator's own entries (editable here;
     merged over the code list by name at team assembly). Restart to apply."""
 
-    code_servers: list[dict] = Field(default_factory=list)
-    operator_servers: list[dict] = Field(default_factory=list)
+    code_servers: list[JsonObject] = Field(default_factory=list)
+    operator_servers: list[JsonObject] = Field(default_factory=list)
     version: str = ""
     restart_required: bool = False
 
@@ -407,7 +408,7 @@ class McpSettingsOut(BaseModel):
 class UpdateMcpSettings(BaseModel):
     """Replace the operator's MCP server list (empty = clear)."""
 
-    servers: list[dict] = Field(default_factory=list)
+    servers: list[JsonObject] = Field(default_factory=list)
     expected_version: str | None = Field(default=None)
 
 

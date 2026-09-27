@@ -16,5 +16,6 @@ The engine's pytest suite. One `tests/test_<area>.py` per subsystem, mirroring
 
 # Verification
 
-`uv run pytest -q` (from repo root). Add or update the matching `test_*` file with
+`uv run pytest -q` and `uv run basedpyright` (from repo root). Tests are
+type-checked too. Add or update the matching `test_*` file with
 every behavior change to `src/magi/`.

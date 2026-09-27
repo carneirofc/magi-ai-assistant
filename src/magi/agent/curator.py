@@ -24,7 +24,7 @@ from magi.agent.model import build_member_model
 from magi.core.config import config
 from magi.core.memory import CurateFn, CurationInput, CurationResult, FactOp, PromptProposal
 from magi.core.prompts import load_prompt
-from magi.core.types import parse_json_object
+from magi.core.types import JsonObject, parse_json_object
 
 if TYPE_CHECKING:
     from magi.core.evolution import EvolutionStore
@@ -47,7 +47,7 @@ def _format_input(inp: CurationInput) -> str:
     )
 
 
-def _str_field(data: dict, key: str) -> str | None:
+def _str_field(data: JsonObject, key: str) -> str | None:
     value = data.get(key)
     return value.strip() if isinstance(value, str) and value.strip() else None
 
@@ -73,7 +73,7 @@ def _parse_op(item: object) -> FactOp | None:
     return None
 
 
-def _parse_proposal(data: dict) -> PromptProposal | None:
+def _parse_proposal(data: JsonObject) -> PromptProposal | None:
     """The optional `proposal` object -> a `PromptProposal`, or None.
 
     All three fields must be non-empty strings; anything less is dropped (the

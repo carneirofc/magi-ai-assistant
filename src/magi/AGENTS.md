@@ -47,8 +47,8 @@ persona overlay installs this as a dependency and extends it from the outside.
 
 # Verification
 
-`uv run ruff check .`, `uv run ruff format --check .`, and `uv run pytest -q`
-(from repo root).
+`uv run ruff check .`, `uv run ruff format --check .`, `uv run basedpyright`,
+and `uv run pytest -q` (from repo root, after `uv sync --dev --all-extras`).
 
 # Child Index
 

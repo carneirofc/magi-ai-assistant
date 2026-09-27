@@ -89,9 +89,13 @@ Default section order:
   bodies, `JSON.parse`/`json.loads`, files, localStorage, env, and LLM output go
   through **zod** in `web/` and **pydantic** (`BaseModel` / `TypeAdapter`) in
   Python. No `as T` on parsed data.
-- **Tooling:** Python uses **ruff** (lint + format), web uses **Biome** (lint +
-  format). Both gate CI and pre-commit; do not add ESLint, Prettier, black, or
-  isort.
+- **Tooling:** Python uses **ruff** (lint + format) and **basedpyright**
+  (types: `standard`, `strict` for `src/magi/core`), web uses **Biome** (lint +
+  format) and `tsc`. All gate CI and pre-commit; do not add ESLint, Prettier,
+  black, isort, or mypy.
+- **Type baseline only shrinks.** Pre-existing type errors live in
+  `.basedpyright/baseline.json` (recorded under `uv sync --dev --all-extras`).
+  New code must be clean; never regenerate the baseline to hide a new error.
 
 ## User Preferences
 

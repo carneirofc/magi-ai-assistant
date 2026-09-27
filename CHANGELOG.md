@@ -8,6 +8,13 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Added
 
+- **Static type checking (basedpyright).** `uv run basedpyright` now gates CI
+  and pre-commit: `standard` mode everywhere, `strict` for the model-free
+  `src/magi/core`. Pre-existing findings are frozen in
+  `.basedpyright/baseline.json`; new code must be clean and a PR check
+  rejects a baseline that grows. CI now syncs `--all-extras` so the lazily
+  imported optional backends are typed.
+
 - **Runtime validation of untrusted JSON (web).** Admin-api responses are now
   parsed with zod schemas generated from the OpenAPI spec
   (`src/lib/api-schemas.ts`, via `openapi-zod-client` in `npm run gen:api`;
@@ -34,6 +41,14 @@ All notable changes to **magi** are documented here. The format follows
   (`@carneirofc/magi-web` 0.8.0, new `authEnabled()` in `lib/session`).
 
 ### Changed
+
+- **Typed upstream parsing.** The Ollama tools validate `/api/tags`,
+  `/api/show`, and `/api/ps` with pydantic wire models instead of `.get()`
+  chains. MCP server specs are validated into an `McpServerSpec` model (a
+  wrong-typed field now skips that server with a warning); the operator
+  settings and admin MCP endpoints are typed `JsonObject`. The Discord reply
+  target is typed as `Thread | DMChannel | TextChannel`, and the client's two
+  `# type: ignore` comments are gone.
 
 - **Stricter ruff rules, enforced format.** ruff now selects `E, F, I, UP, B,
   ANN`: annotations are required and `typing.Any` is banned (`ANN401`). The
