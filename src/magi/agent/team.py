@@ -38,6 +38,7 @@ from magi.agent.tools.memory import build_memory_tools
 from magi.agent.tools.outputs import ToolOutput, ok
 from magi.agent.tools.recipes import build_recipe_tools
 from magi.agent.tools.reminders import build_reminder_tools
+from magi.agent.tools.sandbox import build_sandbox_tools
 from magi.agent.tools.session_search import build_session_search_tools
 from magi.agent.tools.skills import build_skill_tools
 from magi.agent.tools.storage import build_storage_tools
@@ -51,6 +52,7 @@ from magi.core.items import build_item_archive_from_config
 from magi.core.knowledge import KnowledgeStore, build_knowledge_from_config
 from magi.core.memory import MemoryManager
 from magi.core.prompts import load_prompt
+from magi.core.sandbox import SandboxService
 from magi.core.session_index import SessionIndex
 from magi.core.skills_fs import skill_write_root
 from magi.core.storage import build_object_store_from_config
@@ -126,13 +128,15 @@ def build_team(
     member_builders: Sequence[Callable[[Model], Agent]] | None = None,
     knowledge: KnowledgeStore | None = None,
     session_index: SessionIndex | None = None,
+    sandbox: SandboxService | None = None,
 ) -> Team:
     """Assemble the chatbot team: a multimodal lead routing to specialist members.
 
     `memory` is injected so the lead's memory tools are bound to it (no globals).
     `member_builders` defaults to the full registry; a channel that can't host a
     specialist (e.g. the Discord member outside Discord) passes a trimmed list.
-    `session_index` (None = off) backs the search_sessions tool.
+    `session_index` (None = off) backs the search_sessions tool; `sandbox`
+    (None = off) backs run_command.
     `knowledge` is the RAG store backing the search tool; the composition root
     injects the same instance it also hands to `ConversationService` for context
     auto-injection, so one store powers both. When None (e.g. a direct/test call)
@@ -331,6 +335,10 @@ def build_team(
             *toolset("evolution", [*evolution_tools, *recipe_tools]),
             *toolset("session_search", session_tools),
             *toolset("delegate", delegate_tools),
+            # Shell commands in the user's sandbox (off unless sandbox.backend).
+            *toolset(
+                "terminal", build_sandbox_tools(sandbox, memory) if sandbox is not None else []
+            ),
             # The SKILL.md library: open / create / patch skills.
             *toolset("skills", mark_origin(skill_tools, "skill")),
             # Persona seam: lead toolkits registered from outside the engine

@@ -113,6 +113,21 @@ Defaults shown are the engine defaults; the repo's `magi.yaml` overrides several
 | `delegate_timeout_seconds` | `120.0` | Hard cap per delegated task |
 | `delegate_tool_call_limit` | `8` | Tool calls the helper may make |
 
+### Sandbox (`run_command`)
+
+| Field | Default | Notes |
+|---|---|---|
+| `sandbox.backend` | `off` | `docker` (hardened throwaway container) \| `local` (no isolation) \| `off` |
+| `sandbox.approval` | `dangerous` | `always` (every command) \| `dangerous` (risky ones) \| `deny_dangerous` (risky ones refused) |
+| `sandbox.allowed_users` | `[]` | Scoped ids that may run commands (`discord:123`, `telegram:42`, `api:me`); empty = nobody |
+| `sandbox.timeout_seconds` | `60` | Per command |
+| `sandbox.output_max_chars` | `8000` | Output cap (head + tail kept) |
+| `sandbox.approval_ttl_seconds` | `600` | How long an approval id stays valid |
+| `sandbox.workspace_dir` | `None` | Per-user workspaces root (`None` = `$MAGI_HOME/workspace`) |
+| `sandbox.docker_image` | `python:3.14-slim` | Needs `bash` |
+| `sandbox.docker_network` | `False` | Give containers network access |
+| `sandbox.docker_memory` / `docker_pids` / `docker_cpus` | `1g` / `256` / `1.0` | Container limits |
+
 ### Skills and toolsets
 
 | Field | Default | Notes |

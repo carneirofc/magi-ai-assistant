@@ -9,6 +9,7 @@ plain inputs in and render the plain `ConversationReply` out.
 injected — nothing is constructed here.
 """
 
+import asyncio
 import copy
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ from magi.core.media import (
     open_media_outbox,
 )
 from magi.core.memory import MemoryManager
+from magi.core.sandbox.service import SandboxService, approval_turn_text, parse_approval
 from magi.core.session_index import TurnIndexer
 
 if TYPE_CHECKING:
@@ -274,8 +276,12 @@ class ConversationService:
         knowledge_top_k: int = 0,
         mood_fn: MoodFn | None = None,
         session_index: TurnIndexer | None = None,
+        sandbox: SandboxService | None = None,
     ) -> None:
         self.runner = runner
+        # The run_command sandbox (core/sandbox). Held here so `/approve <id>` and
+        # `/deny <id>` work identically on every channel. None = off.
+        self.sandbox = sandbox
         # Full-text index of finished turns (core/session_index.py) backing the
         # session-search tool. None = off.
         self.session_index = session_index
@@ -409,6 +415,18 @@ class ConversationService:
             log_warning(f"conversation: mood pass failed: {type(exc).__name__}: {exc}")
             return next(iter(config.mood_vocabulary), None)
 
+    async def _resolve_approval(self, user_id: str, text: str) -> str:
+        """A `/approve <id>` or `/deny <id>` message becomes the command's outcome
+        (run off the event loop), which the model then continues from; any other
+        text passes through unchanged."""
+        if self.sandbox is None or (parsed := parse_approval(text)) is None:
+            return text
+        approve, approval_id = parsed
+        outcome = await asyncio.to_thread(
+            self.sandbox.decide, user_id=user_id, approval_id=approval_id, approve=approve
+        )
+        return approval_turn_text(approval_id, outcome)
+
     def _index_turn(self, user_id: str, session_id: str, user_text: str, reply: str) -> None:
         """Append this turn to the session-search index; never breaks the turn."""
         if self.session_index is None or not user_id:
@@ -475,6 +493,7 @@ class ConversationService:
         user_id = str(user_id)
         log_info(f"conversation: handling (session={session_id}, user={user_id})")
 
+        text = await self._resolve_approval(user_id, text)
         run_input = self._prepare_input(user_id, session_id, text, extra_context)
         # Predict the delivery mood before the reply (see MoodFn); it rides the
         # final reply so non-streaming clients (and later TTS) get it too.
@@ -533,6 +552,7 @@ class ConversationService:
         user_id = str(user_id)
         log_info(f"conversation: streaming (session={session_id}, user={user_id})")
 
+        text = await self._resolve_approval(user_id, text)
         run_input = self._prepare_input(user_id, session_id, text, extra_context)
         async for item in self._stream_run(
             run_input, user_id=user_id, session_id=session_id, media=media, user_text=text

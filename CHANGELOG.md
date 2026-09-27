@@ -8,6 +8,14 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Added
 
+- **Sandboxed shell commands** (`sandbox.backend: docker | local`). The lead's
+  `run_command` runs in a per-user workspace — by default a hardened
+  throwaway container (no network, read-only root, all caps dropped, resource
+  limits). Only `sandbox.allowed_users` may use it; a policy refuses
+  catastrophic commands and holds risky ones for the user's `/approve <id>`
+  (or `/deny <id>`), which every channel supports. Every call is audited to
+  `$MAGI_HOME/logs/exec.jsonl`; `magi doctor` checks the backend. See ADR 0007.
+
 - **Session search** (`session_search_enabled`). Finished turns are indexed in
   a local SQLite FTS5 file and the lead gets `search_sessions`, always scoped
   to the current user. `magi doctor` checks FTS5.

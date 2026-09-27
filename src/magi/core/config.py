@@ -75,6 +75,31 @@ class ToolsetsConfig(BaseModel):
     disabled: list[str] = Field(default_factory=list)
 
 
+class SandboxConfig(BaseModel):
+    """The `run_command` tool (magi/core/sandbox). Off unless a backend is set."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    # off | docker (throwaway hardened container per command) | local (NO
+    # isolation — a trusted single-operator machine only).
+    backend: Literal["off", "docker", "local"] = "off"
+    # always = every command waits for `/approve <id>`; dangerous = only risky
+    # ones do; deny_dangerous = risky ones are refused. Forbidden ones never run.
+    approval: Literal["always", "dangerous", "deny_dangerous"] = "dangerous"
+    # Scoped user ids allowed to run anything (e.g. "discord:123", "api:me").
+    allowed_users: list[str] = Field(default_factory=list)
+    timeout_seconds: float = 60.0
+    output_max_chars: int = 8_000
+    approval_ttl_seconds: float = 600.0
+    # Per-user workspaces live under this dir (None = $MAGI_HOME/workspace).
+    workspace_dir: str | None = None
+    docker_image: str = "python:3.14-slim"
+    docker_network: bool = False
+    docker_memory: str = "1g"
+    docker_pids: int = 256
+    docker_cpus: float = 1.0
+
+
 class ChannelsConfig(BaseModel):
     """Which channels `magi run` serves when none are named on the command line."""
 
@@ -484,6 +509,9 @@ class Config(BaseModel):
 
     # --- Channels `magi run` starts by default (config file: `channels.enabled`). ---
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+
+    # --- Sandboxed shell commands (`run_command`, approvals via /approve <id>). ---
+    sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
 
     # --- Skills (SKILL.md files) and toolsets (groups of lead tools). ---
     skills: SkillsConfig = Field(default_factory=SkillsConfig)

@@ -28,6 +28,12 @@ layer a persona reuses unchanged.
   `ConversationService` through the `TurnIndexer` protocol; reads are always
   filtered by the scoped `user_id`, and user text is quoted into the MATCH
   expression (never raw FTS5 syntax). Indexing failures are logged, never raised.
+- **Sandbox (`sandbox/`)**: `SandboxService` = policy → approval → backend →
+  audit. Backends satisfy the `ExecBackend` Protocol. Rules that must hold: only
+  `sandbox.allowed_users` run anything; `forbidden` never runs; an approval is
+  resolved only by the *same user's* `/approve <id>` message
+  (`ConversationService._resolve_approval`), never by a tool; no secret from
+  the process env reaches a command. See ADR 0007.
 - **Skills library (`skills_fs.py`)**: SKILL.md parsing, discovery, and
   atomic writes — pure IO; approved `skill` proposals (`evolution.py`) land
   through `write_skill`.

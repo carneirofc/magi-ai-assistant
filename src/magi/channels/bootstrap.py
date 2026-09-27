@@ -26,6 +26,7 @@ from magi.core.config import config
 from magi.core.conversation import ConversationService
 from magi.core.knowledge import build_knowledge_from_config
 from magi.core.memory import build_memory_from_config
+from magi.core.sandbox import build_sandbox_from_config
 from magi.core.session_index import open_session_index
 
 
@@ -88,7 +89,17 @@ def build_conversation_service(
         if config.session_search_enabled
         else None
     )
-    team = build_team(memory, db, member_builders, knowledge=knowledge, session_index=session_index)
+    # The run_command sandbox (None unless sandbox.backend is set): the team gets
+    # the tool, the service resolves /approve and /deny on every channel.
+    sandbox = build_sandbox_from_config()
+    team = build_team(
+        memory,
+        db,
+        member_builders,
+        knowledge=knowledge,
+        session_index=session_index,
+        sandbox=sandbox,
+    )
     return ConversationService(
         runner=team,
         memory=memory,
@@ -101,4 +112,5 @@ def build_conversation_service(
         knowledge_top_k=config.knowledge_context_top_k,
         mood_fn=mood_fn,
         session_index=session_index,
+        sandbox=sandbox,
     )

@@ -26,9 +26,20 @@ Claude via the proxy; Ollama kept as a dormant fallback.
 magi is the **reusable core of a personal AI assistant** — not one bot, but the
 engine several bots share.
 
-- **One shared brain, many channels.** A Discord bot, an HTTP API, an
-  OpenAI-compatible shim, an embeddable desktop SDK, and a native desktop shell
-  all drive the *same* assembled stack — only the transport differs.
+- **One shared brain, many channels — in one process.** Discord, Telegram, an
+  HTTP API, an OpenAI-compatible shim, an embeddable desktop SDK, and a native
+  desktop shell all drive the *same* assembled stack; `magi run api discord
+  telegram` serves them together.
+- **Simple to deploy.** One install script, a `magi setup` wizard, a
+  validated YAML config, `magi doctor`, and `magi gateway install` for a
+  systemd user service — no Docker required.
+- **Skills it can learn.** SKILL.md files (agentskills.io format) teach
+  procedures without code; the assistant can propose new skills from
+  experience for you to approve.
+- **Does real work, safely.** Sandboxed shell commands (hardened throwaway
+  containers, per-user allowlist, `/approve` for anything risky, audit log),
+  session search over past conversations, and delegation to isolated helper
+  agents — each opt-in.
 - **Deliberate memory.** The assistant's durable knowledge of a user lives in
   inspectable files written *on purpose* by a post-turn curator — never silently
   auto-extracted. Recent turns, evicted-but-unsummarized turns, freshly-learned
@@ -52,6 +63,7 @@ engine several bots share.
 ```mermaid
 flowchart LR
     D[Discord] --> CS[ConversationService]
+    T[Telegram] --> CS
     A[HTTP API + OpenAI shim] --> CS
     W[Web / desktop chat] --> CS
     CS --> MEM[(Deliberate memory<br/>+ identity)]

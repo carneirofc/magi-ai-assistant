@@ -104,6 +104,22 @@ with `ok(...)` / `fail(...)`.
 | `skill_view` (+ `skill_create`, `skill_patch`) | [skills.py](../src/magi/agent/tools/skills.py) | Open the SKILL.md library; save/improve skills per `skills.agent_write` |
 | `search_sessions` | [session_search.py](../src/magi/agent/tools/session_search.py) | FTS5 search over this user's past conversations (only if `session_search_enabled`) |
 | `delegate_task` | [delegate.py](../src/magi/agent/tools/delegate.py) | Hand a self-contained subtask to an isolated helper agent (only if `delegation_enabled`) |
+| `run_command` | [sandbox.py](../src/magi/agent/tools/sandbox.py) | Shell command in the user's sandboxed workspace (only if `sandbox.backend` is set) |
+
+**Commands** (`run_command`) run in a per-user workspace through
+[`core/sandbox`](../src/magi/core/sandbox/) — a hardened throwaway Docker
+container, or (trusted machines only) locally. Only `sandbox.allowed_users`
+may use it. Risky commands return an approval id; the user replies
+`/approve <id>` or `/deny <id>` on any channel, and the model continues from
+the result. Forbidden commands never run. Every call is audited to
+`$MAGI_HOME/logs/exec.jsonl`. Threat model: [ADR 0007](adr/0007-sandboxed-command-execution.md).
+
+```yaml
+sandbox:
+  backend: docker            # off | docker | local
+  approval: dangerous        # always | dangerous | deny_dangerous
+  allowed_users: ["discord:123456789", "telegram:42"]
+```
 
 **Session search** indexes every finished turn (user message + reply) in a
 local SQLite FTS5 file (`session_index_path`), scoped by the memory user —

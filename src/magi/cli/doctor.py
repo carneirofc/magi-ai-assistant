@@ -148,6 +148,41 @@ def check_sqlite_fts5(cfg: Config) -> list[CheckResult]:
     return [CheckResult("session search", "ok", f"FTS5 available; {state}")]
 
 
+def docker_reachable() -> str | None:
+    """None when the Docker daemon answers, else the error text."""
+    try:
+        import docker
+
+        docker.from_env().ping()
+    except Exception as exc:  # noqa: BLE001 — any failure means "not usable".
+        return f"{type(exc).__name__}: {exc}"
+    return None
+
+
+def check_sandbox(cfg: Config) -> list[CheckResult]:
+    sb = cfg.sandbox
+    if sb.backend == "off":
+        return []
+    out: list[CheckResult] = []
+    if sb.backend == "local":
+        out.append(
+            CheckResult("sandbox", "warn", "LOCAL backend: commands run unisolated as this user")
+        )
+    elif (error := docker_reachable()) is not None:
+        out.append(CheckResult("sandbox", "fail", f"docker backend, daemon unreachable: {error}"))
+    else:
+        out.append(
+            CheckResult("sandbox", "ok", f"docker ({sb.docker_image}), approval={sb.approval}")
+        )
+    if not sb.allowed_users:
+        out.append(
+            CheckResult(
+                "sandbox users", "warn", "sandbox.allowed_users is empty — nobody can run commands"
+            )
+        )
+    return out
+
+
 def check_skills(cfg: Config) -> list[CheckResult]:
     from magi.agent.toolsets import TOOLSETS
     from magi.core.skills_fs import SKILL_FILE, SkillFileError, load_skill, skill_dirs
@@ -186,6 +221,7 @@ CHECKS: list[Check] = [
     check_qdrant,
     check_sqlite_fts5,
     check_skills,
+    check_sandbox,
 ]
 
 _ICON: dict[Status, str] = {"ok": "✓", "warn": "!", "fail": "✗"}

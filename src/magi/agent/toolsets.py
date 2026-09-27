@@ -26,6 +26,7 @@ TOOLSETS: dict[str, str] = {
     "evolution": "propose prompt/tool changes + approved recipe tools",
     "session_search": "search past conversations (session_search_enabled)",
     "delegate": "hand a subtask to an isolated helper agent (delegation_enabled)",
+    "terminal": "run shell commands in the user's sandbox (sandbox.backend)",
     "skills": "open, create, and patch SKILL.md skills",
     "extensions": "persona-registered lead toolkits and Python skills' tools",
     "thinking": "toggle model thinking at runtime",

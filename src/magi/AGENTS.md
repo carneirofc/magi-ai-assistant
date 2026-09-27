@@ -58,8 +58,9 @@ and `uv run pytest -q` (from repo root, after `uv sync --dev --all-extras`).
 
 - `cli/` — the `magi` command (setup wizard, run, config, doctor); own child
   doc.
-- `core/` — model-free mechanism (conversation runner, config, memory, knowledge,
-  storage, db, media, embeddings).
+- `core/` — model-free mechanism (conversation runner, config + config file,
+  memory, knowledge, storage, db, media, embeddings, skills library, session
+  index, command sandbox).
 - `agent/` — model-bound brain (team, members, model builders, curator,
   summarizers, tools registry).
 - `channels/` — transport adapters over the `PlatformAdapter` gateway.
