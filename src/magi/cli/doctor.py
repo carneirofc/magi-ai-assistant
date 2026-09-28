@@ -214,6 +214,33 @@ def check_skills(cfg: Config) -> list[CheckResult]:
     return out
 
 
+def check_memory_learning(cfg: Config) -> list[CheckResult]:
+    """Whether the assistant can learn at all: nothing but the curator writes
+    durable memory, and persona learning may route through the queue."""
+    if not cfg.memory_curation:
+        return [
+            CheckResult(
+                "memory learning",
+                "warn",
+                "memory_curation is off — nothing records durable facts, episodes, or "
+                "persona rules; memory stays read-only",
+            )
+        ]
+    out = [
+        CheckResult("memory learning", "ok", f"curator on, persona_learning={cfg.persona_learning}")
+    ]
+    if cfg.persona_learning == "propose" and not cfg.evolution_enabled:
+        out.append(
+            CheckResult(
+                "persona learning",
+                "warn",
+                "persona_learning=propose needs evolution_enabled — learned persona "
+                "rules are dropped",
+            )
+        )
+    return out
+
+
 CHECKS: list[Check] = [
     check_channels,
     check_model,
@@ -221,6 +248,7 @@ CHECKS: list[Check] = [
     check_qdrant,
     check_sqlite_fts5,
     check_skills,
+    check_memory_learning,
     check_sandbox,
 ]
 

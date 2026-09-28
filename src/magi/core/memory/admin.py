@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from magi.core.items import ItemArchive
+from magi.core.memory.adapters import atomic_write_text
 from magi.core.memory.adapters import slug as _mem_slug
 from magi.core.memory.manager import MemoryManager
 from magi.core.memory.semantic import MemoryRetriever
@@ -356,8 +357,7 @@ class MemoryAdmin:
         self._check_file_version(target.path, expected_version)
         if target.is_json:
             self._validate_json_list(content)
-        target.path.parent.mkdir(parents=True, exist_ok=True)
-        target.path.write_text(content, encoding="utf-8")
+        atomic_write_text(target.path, content)
         self._sync_raw_target(target)
         return RawFileSnapshot(kind=kind, content=content, version=self.file_version(target.path))
 

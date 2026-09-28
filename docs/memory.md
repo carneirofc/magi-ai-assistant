@@ -64,10 +64,17 @@ the lead's window — a guardrail only, it never truncates.
 ## The curator — who writes durable memory
 
 Durable memory is owned by a **post-turn curator**, not by the lead writing facts
-inline. After each reply, the curator (a cheap member-model call, off the reply
-path) reads the finished turn against the current facts (each tagged with an id)
-and the persona, and revises the fact sheet **per fact** — so it can update or
-supersede, not just append.
+inline. After each reply, the curator (a cheap member-model call) reads the
+finished turn against the current facts (each tagged with an id) and the persona,
+and revises the fact sheet **per fact** — so it can update or supersede, not just
+append.
+
+The session fold and the curator run as a **background tail**: the reply is
+handed back first, then `ConversationService` schedules the tail as a task. Tails
+are serialized per user (one lock per `user_id`), so two quick messages never
+revise the same fact sheet concurrently, and shutdown drains them
+(`ConversationService.drain`). The next turn may see memory from before the
+previous tail landed — a deliberate trade for never delaying a reply.
 
 ```mermaid
 sequenceDiagram
@@ -82,7 +89,7 @@ sequenceDiagram
     Cur-->>Mem: { operations:[ADD/UPDATE/DELETE], episode?, persona? }
     Mem->>Files: apply per-fact ops
     Mem->>Files: record episode (if any)
-    Mem->>Files: append persona adjustment (if any)
+    Mem->>Files: persona rule per persona_learning (queued by default)
     Note over Cur,Files: malformed output → no-op; any error swallowed
 ```
 
@@ -96,10 +103,19 @@ sequenceDiagram
   seam so a persona can supply its own policy. The mechanism (apply ops, clamp,
   prune) is public; the policy is overlay-able.
 - Guardrails: per-fact size clamp (`long_term_fact_max_chars`) and a soft cap on
-  total facts (`long_term_facts_max`, oldest dropped with a warning).
+  total facts (`long_term_facts_max`; the least recently added-or-updated facts are
+  dropped with a warning).
+- **Persona rules are gated.** The persona is global, so a rule the curator draws
+  from one user's turn would change the bot for everyone. `persona_learning`
+  decides: `propose` (default) files it as a `persona` proposal in the evolution
+  queue for the operator (dropped when evolution is off), `direct` appends it at
+  once, `off` never learns one.
+- **Prompt proposals** name a target from the allowlist the curator is shown in
+  its input; none listed means proposals are off.
 
-When the curator is **off**, durable memory falls back to the older path: the lead
-writes facts and the long-term kind folds them into a condensed profile itself.
+When the curator is **off**, nothing writes durable memory: the lead has only
+read tools, and memory stays whatever the operator (admin) or code
+(`MemoryManager.remember`) puts there. `magi doctor` warns about this.
 
 ## Session folding
 
@@ -125,7 +141,8 @@ Caps keep a failing summarizer from compounding: the pending buffer is bounded
 
 ## What the lead can do directly
 
-The lead keeps only **read** tools (`recall_memory`, `recall_episodes`) for
+The lead keeps only **read** tools (`recall_memory`, `recall_episodes`, and —
+only when `search_sessions` is off — the plain-scan `recall_conversation`) for
 explicit deeper lookups — and rarely needs even those, since `build_context`
 already injects the current profile, episodes, and window every turn. Writes are
 the curator's job. See [agent-and-tools.md](agent-and-tools.md#memory-tools).
@@ -150,9 +167,8 @@ Files live under `memory_dir` (default `data/memory/`):
 data/memory/
   persona.md                         # global
   users/<user_id>/
-    long_term_facts.json             # curator-owned fact sheet (ids)
-    long_term.md                     # raw facts / fallback profile
-    long_term_summary.md             # condensed profile (no-curator fold)
+    long_term_facts.json             # the durable fact sheet (ids; curator + remember)
+    long_term.migrated.md            # retired raw log, kept after its one-time migration
     episodic.md                      # episode gists
     sessions/<session_id>.json       # live window
     sessions/<session_id>.pending.json   # evicted-turn buffer

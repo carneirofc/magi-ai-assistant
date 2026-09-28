@@ -216,10 +216,11 @@ the face.
 | Field | Default | Notes |
 |---|---|---|
 | `memory_curation` | `False` | Post-turn curator owns the durable profile |
-| `long_term_recent_raw` | `5` | Raw facts kept alongside the curated profile |
+| `long_term_recent_raw` | `5` | Deprecated, no effect (the raw log is migrated into the fact sheet) |
 | `long_term_fact_max_chars` | `1000` | Per-fact size clamp (`<= 0` disables) |
-| `long_term_facts_max` | `200` | Soft cap on durable facts (oldest dropped) |
+| `long_term_facts_max` | `200` | Soft cap on durable facts (least recently touched dropped) |
 | `persona_seed` | `""` | Pre-populate the persona adjustments file |
+| `persona_learning` | `propose` | Curator-learned persona rules: `propose` (evolution queue; needs `evolution_enabled`, else dropped) \| `direct` (append now) \| `off` |
 
 ### Semantic memory search (optional)
 

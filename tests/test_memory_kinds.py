@@ -34,3 +34,17 @@ def test_session_close_returns_dropped_and_wipes(tmp_path):
     assert dropped == 3
     assert carried is None  # no summarizer => no rolling summary to carry
     assert mem.live_turns.read() == []
+
+
+async def test_fold_keeps_turns_evicted_while_the_summarizer_ran(tmp_path):
+    mem = FileMemoryStore(tmp_path / "m").scoped("u1", "s1")
+    mem.pending.extend([{"role": "user", "content": "old"}])
+
+    async def summarize(payload: str) -> str:
+        # The next message lands mid-fold and evicts another turn.
+        mem.pending.extend([{"role": "user", "content": "arrived mid-fold"}])
+        return "summary"
+
+    session = Session(short_term_max=5, summarize_fn=summarize, summarize_every=1)
+    assert await session.maybe_fold(mem) == "summary"
+    assert [t["content"] for t in mem.pending.read()] == ["arrived mid-fold"]

@@ -25,6 +25,9 @@ from magi.channels.gateway import PlatformAdapter, Stoppable, run_gateway
 from magi.core.config import ChannelName, config
 from magi.core.conversation import ConversationService
 
+# How long shutdown waits for post-reply memory tails (curator calls) to land.
+_DRAIN_SECONDS = 30.0
+
 type AdapterBuilder = Callable[[ConversationService], PlatformAdapter]
 
 GATEWAY_CHANNELS: tuple[ChannelName, ...] = ("api", "discord", "telegram", "admin")
@@ -111,6 +114,7 @@ def build_adapters(
 async def serve_async(names: Sequence[ChannelName], db: BaseDb | None = None) -> None:
     chosen = resolve_channels(names)
     log_info(f"gateway: serving {', '.join(chosen)} in one process")
+    service = None
     if chosen == ["admin"]:
         adapters: list[PlatformAdapter] = [_admin_standalone()]
     else:
@@ -122,7 +126,15 @@ async def serve_async(names: Sequence[ChannelName], db: BaseDb | None = None) ->
             if isinstance(adapter, Stoppable):
                 adapter.request_stop()
 
-    await run_gateway(*(a.serve_async() for a in adapters), on_first_exit=stop_all)
+    try:
+        await run_gateway(*(a.serve_async() for a in adapters), on_first_exit=stop_all)
+    finally:
+        if service is not None:
+            # Let in-flight memory tails (fold + curation) land before exit.
+            try:
+                await asyncio.wait_for(service.drain(), timeout=_DRAIN_SECONDS)
+            except TimeoutError:
+                log_info("gateway: exiting with memory tails still running")
 
 
 def _admin_standalone() -> PlatformAdapter:

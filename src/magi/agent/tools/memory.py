@@ -35,8 +35,12 @@ class ConversationSearchData(BaseModel):
     results: str = Field(description="Matching lines from past conversations, with their source.")
 
 
-def build_memory_tools(memory: MemoryManager) -> list:
-    """Return the (read-only) memory tool set bound to `memory` (dependency-injected)."""
+def build_memory_tools(memory: MemoryManager, *, history_search: bool = True) -> list:
+    """Return the (read-only) memory tool set bound to `memory` (dependency-injected).
+
+    `history_search=False` leaves out `recall_conversation` — the composition
+    root does that when the FTS5 `search_sessions` tool covers past
+    conversations, so the lead never picks between two near-identical tools."""
 
     @tool(
         description="Recall the durable profile remembered about the current user.",
@@ -76,7 +80,8 @@ def build_memory_tools(memory: MemoryManager) -> list:
         instructions=(
             "Use when the user refers to an earlier conversation ('like I said the "
             "other day', 'that link you sent me', 'what did we decide about X'). "
-            "Pass the key phrase to look for; results cite where each line came "
+            "Pass ONE short exact phrase or word (matched literally, not a sentence); "
+            "results cite where each line came "
             "from. The current conversation is already in your context — this is "
             "for previous ones."
         ),
@@ -101,4 +106,5 @@ def build_memory_tools(memory: MemoryManager) -> list:
             ConversationSearchData(query=query, results=results),
         )
 
-    return [recall_memory, recall_episodes, recall_conversation]
+    tools = [recall_memory, recall_episodes]
+    return [*tools, recall_conversation] if history_search else tools

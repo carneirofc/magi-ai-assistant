@@ -170,3 +170,14 @@ def test_doctor_telegram_needs_token_and_warns_on_empty_allowlist(monkeypatch):
     by_name = {r.name: r for r in doctor_mod.check_channels(cfg)}
     assert by_name["telegram token"].status == "fail"
     assert by_name["telegram access"].status == "warn"
+
+
+def test_doctor_warns_when_nothing_can_learn():
+    off = doctor_mod.check_memory_learning(derive(config, memory_curation=False))
+    assert [(r.name, r.status) for r in off] == [("memory learning", "warn")]
+
+    gated = doctor_mod.check_memory_learning(
+        derive(config, memory_curation=True, persona_learning="propose", evolution_enabled=False)
+    )
+    assert [r.status for r in gated] == ["ok", "warn"]
+    assert "evolution_enabled" in gated[1].detail

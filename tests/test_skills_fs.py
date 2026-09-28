@@ -275,3 +275,108 @@ def test_every_team_toolset_is_documented():
     used = set(__import__("re").findall(r'toolset\(\s*"([a-z_]+)"', inspect.getsource(team)))
     assert used <= set(TOOLSETS)
     assert skills_mod.file_skills is not None
+
+
+# --- write-back location, stale bases, frontmatter, reserved names ---------------
+
+
+def test_patch_writes_into_the_skills_own_dir_not_the_write_root(tmp_path):
+    shipped, home = tmp_path / "shipped", tmp_path / "home"
+    home.mkdir()
+    _make(shipped, "release-notes", GOOD)
+    tools = {
+        t.name: t
+        for t in build_skill_tools(
+            lambda: discover([shipped, home]), write_root=home, mode="direct", store=None
+        )
+    }
+    out = _call(
+        tools["skill_patch"],
+        name="release-notes",
+        old_text="Group by type.",
+        new_text="Group by scope.",
+        rationale="scopes read better",
+    )
+    assert out.success
+    assert not (home / "release-notes").exists()  # no shadowed copy
+    assert "Group by scope." in load_skill(shipped / "release-notes").body
+
+
+def test_patch_keeps_unmodelled_frontmatter_verbatim(library):
+    text = GOOD.replace("allowed-tools:", "x-custom: keep me\nallowed-tools:")
+    _make(library, "release-notes", text)
+    _call(
+        _tools(library, "direct")["skill_patch"],
+        name="release-notes",
+        old_text="List merged PRs.",
+        new_text="List merged PRs since the last tag.",
+        rationale="scope to the release",
+    )
+    written = (library / "release-notes" / "SKILL.md").read_text(encoding="utf-8")
+    assert "x-custom: keep me" in written
+    assert "since the last tag" in written
+
+
+def test_create_refuses_a_reserved_name(library):
+    tools = {
+        t.name: t
+        for t in build_skill_tools(
+            lambda: discover([library]),
+            write_root=library,
+            mode="direct",
+            store=None,
+            reserved=lambda: {"builtin-skill"},
+        )
+    }
+    out = _call(
+        tools["skill_create"],
+        name="builtin-skill",
+        description="Would be shadowed by the Python skill.",
+        instructions="1. never reached anyway",
+        rationale="name collision test",
+    )
+    assert not out.success and "built-in" in out.message
+
+
+def test_approving_a_stale_patch_is_refused(library, tmp_path):
+    _make(library, "release-notes", GOOD)
+    store = EvolutionStore(tmp_path / "memory", skills_root=library)
+    tools = _tools(library, "propose", store)
+    out = _call(
+        tools["skill_patch"],
+        name="release-notes",
+        old_text="Group by type.",
+        new_text="Group by scope.",
+        rationale="scopes read better",
+    )
+    assert out.success
+    # The skill changes on disk before the operator decides.
+    (library / "release-notes" / "SKILL.md").write_text(
+        GOOD.replace("List merged PRs.", "List merged and reverted PRs."), encoding="utf-8"
+    )
+    with pytest.raises(ProposalError, match="changed since"):
+        store.decide(out.data.location, approve=True)
+    assert "reverted" in load_skill(library / "release-notes").body
+
+
+def test_duplicate_pending_skill_proposal_is_refused(library, tmp_path):
+    store = EvolutionStore(tmp_path / "memory", skills_root=library)
+    create = _tools(library, "propose", store)["skill_create"]
+    args = {
+        "name": "deploy-check",
+        "description": "Verify a deploy before announcing it.",
+        "instructions": "1. curl /healthz and read it",
+        "rationale": "a recurring task",
+    }
+    assert _call(create, **args).success
+    again = _call(create, **args)
+    assert not again.success and "already pending" in again.message
+    assert len(store.list(status="pending")) == 1
+
+
+def test_disabled_file_skills_are_hidden_from_the_tools(library, clean_registry):
+    from magi.agent.skills import enabled_file_skills
+
+    _make(library, "release-notes", GOOD)
+    configure(skills={"disabled": ["release-notes"]})
+    assert enabled_file_skills() == []

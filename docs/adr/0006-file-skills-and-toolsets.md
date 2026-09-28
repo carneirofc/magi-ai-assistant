@@ -34,3 +34,7 @@ memory facts, which are about the user, not about how to do things.
 - Prompt size grows by one line per file skill, not by its body.
 - Self-improvement stays human-gated by default: without `evolution_enabled`,
   `propose` degrades to read-only (doctor warns).
+- Writes go where the skill lives: a patch (direct or approved) lands in the
+  skill's own search dir, since a copy in `$MAGI_HOME/skills` would be shadowed
+  by a configured dir earlier on the path. Approving a patch whose skill changed
+  since it was proposed is refused (stale base).

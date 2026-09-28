@@ -19,6 +19,13 @@ layer a persona reuses unchanged.
 - **Failures never hand the channel silence** (`conversation.py`): a run that errors
   returns an honest error reply, an empty run returns a fallback, and curation
   failures are swallowed — they must never break a chat.
+- **Nothing model-bound delays a reply.** The session fold and curation run as a
+  background tail (`ConversationService._schedule_tail`), serialized by a
+  per-user lock and drained on shutdown (`drain`). A fold removes only the
+  pending turns it summarized (`drop_first`), since new turns can arrive mid-fold.
+- **Memory files are written atomically** (`adapters.atomic_write_text`: temp
+  file + `os.replace`). A torn JSON file reads as empty, so a plain
+  `write_text` could wipe a profile on the next write.
 
 # Work Guidance
 
@@ -36,13 +43,17 @@ layer a persona reuses unchanged.
   the process env reaches a command. See ADR 0007.
 - **Skills library (`skills_fs.py`)**: SKILL.md parsing, discovery, and
   atomic writes — pure IO; approved `skill` proposals (`evolution.py`) land
-  through `write_skill`.
+  through `write_skill`, beside the existing skill (`find_skill_dir`) and only
+  if it is unchanged since the proposal (stale base → `ProposalError`).
+- **Evolution queue (`evolution.py`)**: kinds `prompt`, `tool`, `skill`,
+  `persona`. One pending proposal per `(kind, target)` (persona: per rule
+  text); a duplicate is refused so a repeating proposer can't fill the queue.
 - **Config (`config.py`, `config_file.py`)**: add a setting as a typed field on
   `Config` (use `Literal`/nested `BaseModel` for closed sets and groups, `_secret`
   for env-only values). File loading stays in `config_file.py`, pure IO.
 
-- **Memory (`memory/`)** is deliberate: durable, inspectable files the model
-  reads/writes on purpose, never auto-extracted. It is per-kind (long-term,
+- **Memory (`memory/`)** is deliberate: durable, inspectable files, written by
+  the injected curator (or `remember` / the admin), never by the framework. It is per-kind (long-term,
   episode, session, persona) — one kind = one module with its own storage, render,
   and optional fold. The assembler owns section order and headers. See
   [../../../CONTEXT.md](../../../CONTEXT.md) for the authoritative vocabulary

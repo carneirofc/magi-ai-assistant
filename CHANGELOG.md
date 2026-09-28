@@ -93,6 +93,26 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Changed
 
+- **Persona learning is operator-gated** (`persona_learning`, default
+  `propose`). The persona is global, so a behaviour rule the curator draws from
+  one user's turn now goes to the evolution queue as a `persona` proposal
+  instead of changing the bot for everyone at once (`direct` restores the old
+  behaviour; `off` disables it). Without `evolution_enabled` such rules are
+  dropped — `magi doctor` warns. The curator also sees which prompts it may
+  propose changes to.
+- **Memory never delays a reply.** The session fold and the curator now run as
+  a background tail after the reply is returned, serialized per user and
+  drained on shutdown (`ConversationService.drain`).
+- **One source of durable facts.** `remember()` writes the curated fact sheet;
+  the legacy `long_term.md` log is migrated into it once (renamed
+  `long_term.migrated.md`) and the stale "Recent facts" block is gone.
+- The fact cap (`long_term_facts_max`) drops the least recently added-or-updated
+  facts instead of the earliest-added ones.
+- `recall_conversation` is offered only when `search_sessions` (FTS5) is off,
+  so the lead no longer chooses between two past-conversation tools.
+- `magi doctor` warns when `memory_curation` is off (nothing writes durable
+  memory).
+
 - **One compose file, opt-in profiles.** `docker-compose.app.yaml` is merged
   into `docker-compose.yaml`; every service now sits behind a profile
   (`qdrant`, `s3`, `litellm`, `monitoring`, `app`, `admin`), so a bare
@@ -149,6 +169,31 @@ All notable changes to **magi** are documented here. The format follows
   state and composer placeholder. All existing props and features (attachments,
   dictation, TTS, quoting, branches, context meter, session rail) are
   unchanged, and `CompanionSurface` still works for the side-stage arrangement.
+
+### Deprecated
+
+- `long_term_recent_raw` has no effect and will be removed; drop it from config
+  files.
+
+### Fixed
+
+- `skill_patch` (and approved skill patches) wrote to `$MAGI_HOME/skills` even
+  for a skill living in a configured `skills.dirs` entry, where the copy was
+  shadowed and the patch silently never applied. Patches now land in the
+  skill's own directory, keep unmodelled frontmatter keys, and an approval is
+  refused when the skill changed since it was proposed.
+- The curator filed evolution proposals under the raw `config.memory_dir`
+  instead of the resolved memory root (operator override, `~` expansion), so
+  they could miss the admin queue. One store is now shared by the curator, the
+  team, and the admin surface.
+- Memory files (facts, windows, summaries, persona, proposals) are written
+  atomically; a crash mid-write could leave a truncated file that the next write
+  replaced with an empty profile.
+- A session fold no longer deletes turns evicted while the summarizer ran.
+- The evolution queue refuses a duplicate of a pending proposal, so a repeating
+  proposer can no longer fill it.
+- Disabled skills were still reachable through `skill_view` / `skill_patch`, and
+  `skill_create` accepted a name owned by a Python skill.
 
 ## [0.4.0] - 2026-07-21
 

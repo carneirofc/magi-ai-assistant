@@ -9,15 +9,16 @@ carries each skill's one-line description).
 
 - "propose" — the new SKILL.md is queued in the evolution queue for the
   operator (needs `evolution_enabled`); nothing changes until approved.
-- "direct"  — written straight to `$MAGI_HOME/skills` (atomic, validated);
-  live on the next team build.
+- "direct"  — written straight to disk (atomic, validated): a new skill to
+  `$MAGI_HOME/skills`, a patch back into the directory the skill lives in.
+  `skill_view` sees it at once; the prompt's skills index on restart.
 - "off"     — the write tools are not attached.
 
 A skill is a procedure the assistant worked out and wants to reuse — the
 Hermes-style "learn from experience" loop, with the operator in charge.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -28,12 +29,14 @@ from pydantic import BaseModel, Field
 from magi.agent.tools.outputs import ToolOutput, fail, ok
 from magi.core.evolution import EvolutionStore, ProposalError
 from magi.core.skills_fs import (
+    SKILL_FILE,
     SKILL_NAME_RE,
     FileSkill,
     SkillFileError,
     SkillFrontmatter,
     parse_skill_md,
     render_skill_md,
+    split_frontmatter,
     write_skill,
 )
 
@@ -59,9 +62,12 @@ def build_skill_tools(
     write_root: Path,
     mode: WriteMode,
     store: EvolutionStore | None,
+    reserved: Callable[[], Iterable[str]] = tuple,
 ) -> list[Function]:
-    """The skill tools. `library` re-reads the skills on each call so a skill
-    written this session is viewable immediately."""
+    """The skill tools. `library` re-reads the (enabled) file skills on each
+    call so a skill written this session is viewable immediately; `reserved`
+    names skills owned elsewhere (Python skills), which a file skill of the
+    same name could never shadow."""
 
     def find(name: str) -> FileSkill | None:
         return next((s for s in library() if s.name == name), None)
@@ -98,15 +104,19 @@ def build_skill_tools(
             ),
         )
 
-    def save(text: str, rationale: str, current: str) -> ToolOutput[SkillWriteData]:
+    def save(text: str, rationale: str, current: str, root: Path) -> ToolOutput[SkillWriteData]:
         try:
             meta, _ = parse_skill_md(text, source="skill")
         except SkillFileError as exc:
             return fail(str(exc))
         if mode == "direct":
-            path = write_skill(write_root, text)
+            try:
+                path = write_skill(root, text)
+            except OSError as exc:
+                return fail(f"Could not write skill {meta.name}: {exc}")
             return ok(
-                f"Saved skill {meta.name}; it is in your library from the next conversation.",
+                f"Saved skill {meta.name}. skill_view can open it now; it joins the "
+                "Skills library listed in your instructions after a restart.",
                 SkillWriteData(name=meta.name, mode="direct", location=str(path)),
             )
         if store is None:
@@ -143,8 +153,10 @@ def build_skill_tools(
     ) -> ToolOutput[SkillWriteData]:
         if find(name) is not None:
             return fail(f"Skill {name!r} exists — use skill_patch to improve it.")
+        if name in set(reserved()):
+            return fail(f"The name {name!r} belongs to a built-in skill — pick another.")
         meta = SkillFrontmatter(name=name, description=description)
-        return save(render_skill_md(meta, instructions), rationale, current="")
+        return save(render_skill_md(meta, instructions), rationale, "", write_root)
 
     @tool(
         description="Improve an existing skill by replacing one exact passage.",
@@ -166,9 +178,16 @@ def build_skill_tools(
         count = skill.body.count(old_text)
         if count != 1:
             return fail(f"old_text must match exactly once (found {count}).")
-        current = (skill.root / "SKILL.md").read_text(encoding="utf-8")
-        body = skill.body.replace(old_text, new_text, 1)
-        return save(render_skill_md(skill.meta, body), rationale, current=current)
+        current = (skill.root / SKILL_FILE).read_text(encoding="utf-8")
+        # Edit the body in the file text itself, so the frontmatter (including keys
+        # this parser doesn't model) survives byte for byte.
+        parts = split_frontmatter(current)
+        if parts is None:
+            return fail(f"Skill {name!r} has no frontmatter block.")
+        head, rest = parts
+        patched = head + rest.replace(old_text, new_text, 1)
+        # Back into the skill's own search dir: a copy anywhere else is shadowed.
+        return save(patched, rationale, current, skill.root.parent)
 
     tools: list[Function] = [skill_view]
     if mode != "off":

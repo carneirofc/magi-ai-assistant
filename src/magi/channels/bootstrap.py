@@ -25,7 +25,11 @@ from magi.agent.team import build_team
 from magi.core.config import config
 from magi.core.conversation import ConversationService
 from magi.core.knowledge import build_knowledge_from_config
-from magi.core.memory import build_memory_from_config
+from magi.core.memory import (
+    build_memory_from_config,
+    operator_settings_store,
+    resolve_memory_settings,
+)
 from magi.core.sandbox import build_sandbox_from_config
 from magi.core.session_index import open_session_index
 
@@ -50,6 +54,20 @@ def build_conversation_service(
     else:
         log_info("memory: session summary DISABLED")
 
+    # The self-evolution queue (None when off), built ONCE over the resolved
+    # memory root (operator override + `~` expansion) and shared by the curator,
+    # the team's propose tools, and — through the same resolver — the admin
+    # queue, so every proposal lands where the operator reviews it.
+    evolution_store = None
+    if config.evolution_enabled:
+        from magi.agent.skills import evolution_proposable_targets
+        from magi.core.evolution import EvolutionStore
+
+        memory_root = resolve_memory_settings(operator_settings_store().read_memory()).memory_dir
+        evolution_store = EvolutionStore(
+            Path(memory_root), proposable=evolution_proposable_targets()
+        )
+
     # The curator owns durable memory when on (it supersedes the long-term
     # summarizer and the lead's write tools). Needs a model, so the agent layer
     # builds it; magi/core/memory receives it as an injected callable.
@@ -57,7 +75,7 @@ def build_conversation_service(
     if config.memory_curation:
         from magi.agent.curator import build_memory_curator
 
-        curate_fn = build_memory_curator()
+        curate_fn = build_memory_curator(evolution_store)
         log_info("memory: curation ENABLED (post-turn durable-memory pass)")
     else:
         log_info("memory: curation DISABLED")
@@ -99,6 +117,7 @@ def build_conversation_service(
         knowledge=knowledge,
         session_index=session_index,
         sandbox=sandbox,
+        evolution_store=evolution_store,
     )
     return ConversationService(
         runner=team,

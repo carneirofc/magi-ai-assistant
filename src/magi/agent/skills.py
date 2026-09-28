@@ -119,6 +119,18 @@ def file_skills() -> list[FileSkill]:
     return out
 
 
+def enabled_file_skills() -> list[FileSkill]:
+    """`file_skills()` minus `config.skills.disabled` — what the skill tools may
+    open or patch (a disabled skill is hidden from them too, not just the index)."""
+    disabled = set(config.skills.disabled)
+    return [f for f in file_skills() if f.name not in disabled]
+
+
+def registered_skill_names() -> set[str]:
+    """Names the Python registry owns; a file skill can never take one."""
+    return {s.name for s in SKILLS}
+
+
 def all_skills() -> list[Skill]:
     """Registered (Python) skills followed by the file skills."""
     return [*SKILLS, *(_from_file(f) for f in file_skills())]

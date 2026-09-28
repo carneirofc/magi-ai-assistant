@@ -328,3 +328,35 @@ def test_dispatch_files_when_evolution_is_on(tmp_path):
     )
     (queued,) = store.list(status="pending")
     assert queued.source == "curator"
+
+
+# --- persona learning routing + proposable targets -------------------------------
+def test_format_input_lists_proposable_targets():
+    inp = CurationInput("hi", "hello", "", "")
+    assert "- curation.md" in _format_input(inp, ["curation.md"])
+    assert "proposal must be null" in _format_input(inp)
+
+
+@pytest.mark.parametrize("mode", ["off", "propose"])
+def test_persona_rule_is_stripped_unless_direct(tmp_path, mode):
+    from magi.agent.curator import route_persona_adjustment
+
+    store = _evo_store(tmp_path)
+    result = CurationResult(persona_adjustment="Be brief.")
+    routed = route_persona_adjustment(store, result, mode)
+    assert routed.persona_adjustment is None
+    queued = store.list(status="pending")
+    if mode == "propose":
+        assert [(p.kind, p.proposed_text, p.source) for p in queued] == [
+            ("persona", "Be brief.", "curator")
+        ]
+    else:
+        assert queued == []
+
+
+def test_persona_rule_kept_in_direct_mode_and_dropped_without_a_queue(tmp_path):
+    from magi.agent.curator import route_persona_adjustment
+
+    result = CurationResult(persona_adjustment="Be brief.")
+    assert route_persona_adjustment(None, result, "direct") is result
+    assert route_persona_adjustment(None, result, "propose").persona_adjustment is None

@@ -845,7 +845,7 @@ def create_app(
                 TranscriptTurn(
                     role=str(t.get("role", "?")),
                     content=str(t.get("content", "")),
-                    ts=t.get("ts"),
+                    ts=ts if isinstance(ts := t.get("ts"), str) else None,
                 )
                 for t in mem.live_turns.read()
             ],

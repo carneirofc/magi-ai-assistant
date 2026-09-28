@@ -12,7 +12,9 @@ episode, session, persona. The thing #4 makes into one module.
 _Avoid_: type, category.
 
 **Long-term**:
-Durable facts the model chooses to keep about a user, accumulated over time.
+Durable facts kept about a user, accumulated over time — one id-addressable fact
+sheet (`long_term_facts.json`) revised by the curator. The retired raw log
+(`long_term.md`) is migrated into it once and renamed aside.
 
 **Episode**:
 One recorded past interaction — the gist of a whole conversation. **Episodes** is
@@ -27,7 +29,9 @@ _Avoid_: short-term as the kind name (it is only the section header).
 
 **Persona**:
 The global personality + evolved behavioral adjustments. The one **global** kind
-(not scoped to a user or session); every other kind is scoped.
+(not scoped to a user or session); every other kind is scoped. Because it is
+global, a rule learned from one user's turn is gated by `persona_learning`
+(operator-approved `persona` proposal by default).
 
 **Section**:
 What a kind renders into the assembled context block, under its header. One kind
@@ -35,10 +39,9 @@ What a kind renders into the assembled context block, under its header. One kind
 kind.
 
 **Fold**:
-Compressing overflow into compact form: session turns → a rolling summary,
-accumulated long-term facts → a condensed profile. Only session and long-term
-fold; episodes and persona do not. Long-term folding is the no-curator path —
-when the **curator** is on it owns the profile and this fold never fires.
+Compressing overflow into compact form: session turns → a rolling summary. Only
+session folds; long-term is revised per fact by the **curator** instead, and
+episodes and persona never fold.
 _Avoid_: summarize (the model call is one step of a fold), compact.
 
 **Curate**:
@@ -46,8 +49,9 @@ The post-turn pass that owns durable memory: it reads the finished turn against
 the current durable facts (each tagged with an id) + persona and revises the
 fact sheet PER FACT — ADD / UPDATE / DELETE / NOOP — so it can update/supersede,
 not just append, without re-emitting the whole profile each turn. Optionally
-records an episode or evolves the persona. Runs off the reply path on a cheap
-model; replaces the lead's old inline write tools and the long-term fold.
+records an episode or proposes a persona rule. Runs after the reply is handed
+back, as a background tail serialized per user, on a cheap model; replaces the
+lead's old inline write tools and the long-term fold.
 Model-free `magi/core/memory` calls it as an injected `CurateFn` (`magi/agent/curator.py`),
 the same seam the summarizers use.
 _Avoid_: remember (the retired append-only lead tool).

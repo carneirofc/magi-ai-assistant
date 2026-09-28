@@ -73,7 +73,6 @@ class MemoryManager:
         persona_adjustments_max: int = 0,
         summarize_session_fn: SummarizeFn | None = None,
         summarize_every: int = 10,
-        long_term_recent_raw: int = 5,
         retriever: MemoryRetriever | None = None,
         semantic_top_k: int = 5,
         short_term_turn_max_chars: int = 4_000,
@@ -103,7 +102,6 @@ class MemoryManager:
         self.long_term = LongTerm(
             retriever,
             semantic_top_k,
-            max(0, long_term_recent_raw),
             fact_max_chars=long_term_fact_max_chars,
             facts_max=long_term_facts_max,
         )
@@ -374,10 +372,11 @@ class MemoryManager:
 
     # --- deliberate writes (the model calls these via tools) ----------------
     def remember(self, fact: str) -> str:
-        # Appends a raw bullet to long_term.md (the legacy raw log), NOT the curated
-        # fact sheet — so this is deliberately not archived. The durable "items" are
-        # the curator-owned facts in long_term_facts.json, snapshotted in maybe_curate.
-        self.long_term.remember(self.mem, fact)
+        # The programmatic write (tests, a persona, the no-curator path): one ADD on
+        # the same fact sheet the curator revises, archived like a curated change.
+        mem = self.mem
+        self.long_term.remember(mem, fact)
+        self._snapshot_facts(mem)
         log_info(f"memory: long-term written for user {self.scope().user_id}: {fact!r}")
         return "Stored to long-term memory."
 
@@ -404,8 +403,6 @@ class MemoryManager:
 
     # --- reads --------------------------------------------------------------
     def recall_long_term(self) -> str:
-        # Render the curated profile (what the curator maintains), falling back to
-        # raw facts when no profile has been written yet.
         return self.long_term.render(self.mem, None) or "(no long-term memory yet)"
 
     def recall_episodes(self, limit: int = 5) -> str:

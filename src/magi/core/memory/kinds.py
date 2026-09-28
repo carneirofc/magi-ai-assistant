@@ -20,6 +20,7 @@ from agno.utils.log import log_info, log_warning
 from magi.core.memory.curation import FactOp
 from magi.core.memory.semantic import MemoryRetriever
 from magi.core.memory.store import ScopedMemory
+from magi.core.types import JsonObject
 
 # An async summarizer: takes text, returns a compact summary. Injected by the agent
 # layer so `core` stays model-free.
@@ -43,7 +44,7 @@ class Folds(Protocol):
 
 
 # --- shared helpers (each invariant lives here, once) -----------------------
-def render_turns(turns: list[dict]) -> str:
+def render_turns(turns: list[JsonObject]) -> str:
     """Render JSON turns to the text the model sees (impl detail, not presentation)."""
     return "\n".join(f"- **{t.get('role', '?')}**: {t.get('content', '')}" for t in turns)
 
@@ -123,12 +124,16 @@ async def guarded_fold(
 
 # --- the kinds --------------------------------------------------------------
 class LongTerm:
-    """Durable per-user facts: a curated, id-addressable fact sheet (owned by the
-    post-turn curator) plus any recent raw facts written via `remember`.
+    """Durable per-user facts: one curated, id-addressable fact sheet
+    (`long_term_facts.json`), revised by the post-turn curator and by `remember`.
 
-    The curator revises the fact sheet one fact at a time (ADD/UPDATE/DELETE),
-    which is why this kind exposes both a context render (no ids, for the model's
-    answer) and a curator render (id-tagged, so the next pass can target a fact)."""
+    The curator revises the sheet one fact at a time (ADD/UPDATE/DELETE), which is
+    why this kind exposes both a context render (no ids, for the model's answer)
+    and a curator render (id-tagged, so the next pass can target a fact).
+
+    The retired raw log (`long_term.md`) is migrated into the sheet the first time
+    a scope is touched, then renamed aside, so there is exactly one source of
+    durable facts."""
 
     section_header = "## What you remember about this user (global)"
     retriever_key = "long_term"
@@ -137,50 +142,51 @@ class LongTerm:
         self,
         retriever: MemoryRetriever | None,
         top_k: int,
-        recent_raw: int,
         fact_max_chars: int = 1_000,
         facts_max: int = 200,
     ) -> None:
         self.retriever = retriever
         self.top_k = top_k
-        self.recent_raw = recent_raw
         self.fact_max_chars = fact_max_chars
         self.facts_max = facts_max
 
+    def migrate_legacy(self, mem: ScopedMemory) -> int:
+        """Fold the legacy raw log into the fact sheet once; returns facts moved.
+
+        No-op when there is no legacy log. The log is renamed (not deleted) so the
+        operator keeps the original and a later wipe of the sheet can't re-import
+        it."""
+        legacy = mem.long_term
+        if not legacy.path.exists():
+            return 0
+        bodies = [b.strip() for b in legacy.bodies() if b.strip()]
+        known = set(mem.long_term_facts.texts())
+        moved = [b for b in dict.fromkeys(bodies) if b not in known]
+        if moved:
+            mem.long_term_facts.add_many(
+                [clamp(b, self.fact_max_chars, "long-term fact") for b in moved]
+            )
+            for text in moved:
+                index(self.retriever, mem.user_id, self.retriever_key, text)
+        legacy.retire()
+        log_info(f"memory: migrated {len(moved)} legacy fact(s) for user {mem.user_id}")
+        return len(moved)
+
     def render(self, mem: ScopedMemory, query: str | None) -> str:
-        facts = mem.long_term_facts.texts()
-        core = retrieved_or(
+        self.migrate_legacy(mem)
+        return retrieved_or(
             self.retriever,
             mem.user_id,
             query,
             self.retriever_key,
             self.top_k,
-            lambda: self._whole(mem, facts),
+            lambda: "\n".join(f"- {f}" for f in mem.long_term_facts.texts()),
         )
-        # Surface the most-recent raw facts by *recency* alongside the curated sheet,
-        # so freshly-remembered facts appear before the next curation pass folds them
-        # in — even on the semantic path, which ranks by relevance and would otherwise
-        # drop them. Skipped when there's no curated sheet yet: `_whole` then returns
-        # the raw log whole (semantic path ranks the raw facts directly), which already
-        # carries the recent tail, so a second block would just duplicate it.
-        if facts:
-            recent = mem.long_term.recent(self.recent_raw)
-            if recent:
-                core = f"{core}\n\nRecent facts:\n" + "\n".join(f"- {r}" for r in recent)
-        return core
-
-    def _whole(self, mem: ScopedMemory, facts: list[str]) -> str:
-        if not facts:
-            # Nothing curated yet — render the raw remember-log as clean bullets.
-            # `recent(0)` returns every body, and `bodies()` drops the markdown
-            # header and any legacy per-line timestamp, so no note scaffolding leaks
-            # into the context.
-            return "\n".join(f"- {b}" for b in mem.long_term.recent(0))
-        return "\n".join(f"- {f}" for f in facts)
 
     def render_for_curator(self, mem: ScopedMemory) -> str:
         """The durable facts the curator may revise, each tagged with its id so the
         next pass can UPDATE/DELETE it: `[id] text` lines. Empty when none yet."""
+        self.migrate_legacy(mem)
         return "\n".join(f"[{f['id']}] {f['text']}" for f in mem.long_term_facts.read())
 
     def apply_ops(self, mem: ScopedMemory, operations: Iterable[FactOp]) -> list[str]:
@@ -190,6 +196,7 @@ class LongTerm:
         skipped (the curator worked from a snapshot). Returns the kinds actually
         applied (for logging). The vector mirror is reconciled once at the end (see
         `_sync_mirror`) so deletes/edits don't leave ghost vectors."""
+        self.migrate_legacy(mem)
         applied: list[str] = []
         added: list[str] = []
         for op in operations:
@@ -209,7 +216,8 @@ class LongTerm:
         if dropped:
             log_warning(
                 f"memory: long-term facts over cap {self.facts_max}; dropped "
-                f"{dropped} oldest for user {mem.user_id} — is the curator pruning?"
+                f"{dropped} least recently touched for user {mem.user_id} — is the "
+                "curator pruning?"
             )
         self._sync_mirror(mem, applied, added, dropped)
         return applied
@@ -235,11 +243,8 @@ class LongTerm:
                 index(self.retriever, mem.user_id, self.retriever_key, text)
 
     def remember(self, mem: ScopedMemory, fact: str) -> None:
-        mem.long_term.append(fact)
-        index(self.retriever, mem.user_id, self.retriever_key, fact)
-
-    def recall(self, mem: ScopedMemory) -> str:
-        return mem.long_term.read()
+        """Add one fact to the sheet directly (the programmatic/no-curator write)."""
+        self.apply_ops(mem, [FactOp(op="add", text=fact)])
 
 
 class Episodes:
@@ -347,6 +352,7 @@ class Session:
         if self.summarize_fn is None:
             return None
         payload = None
+        pending: list[JsonObject] = []
         if force or mem.pending.count() >= self.summarize_every:
             pending = mem.pending.read()
             if pending:
@@ -355,11 +361,15 @@ class Session:
                     f"Prior summary:\n{prior or '(none)'}\n\nNew turns:\n{render_turns(pending)}"
                 )
 
+        folded = len(pending) if payload else 0
+
         def write_back(summary: str) -> None:
             # A misbehaving summarizer (e.g. a thinking-trace leak) must not park
             # a giant blob that gets replayed into every later run.
             mem.session_summary.write(clamp(summary, self.summary_max_chars, "session summary"))
-            mem.pending.delete()
+            # Drop only what was summarized: turns evicted while the model ran
+            # (the next message arrived mid-fold) wait for the next fold.
+            mem.pending.drop_first(folded)
 
         return await guarded_fold(
             self.summarize_fn, payload, write_back, f"session for user {mem.user_id}"

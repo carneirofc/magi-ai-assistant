@@ -97,7 +97,7 @@ with `ok(...)` / `fail(...)`.
 | `view_image_from_url` | [vision.py](../src/magi/agent/tools/vision.py) | Pull an image into context to actually look at it |
 | `send_media_from_url` | [media.py](../src/magi/agent/tools/media.py) | Deliver a URL's bytes to the user as an attachment |
 | `http_get`, `http_request` | [http.py](../src/magi/agent/tools/http.py) | Read a URL / perform an explicit user-described request (SSRF-guarded) |
-| `recall_memory`, `recall_episodes` | [memory.py](../src/magi/agent/tools/memory.py) | Read-only deeper memory recall |
+| `recall_memory`, `recall_episodes` (+ `recall_conversation` when `search_sessions` is off) | [memory.py](../src/magi/agent/tools/memory.py) | Read-only deeper memory recall |
 | `store_file`, `retrieve_file`, `list_files` | [storage.py](../src/magi/agent/tools/storage.py) | Durable byte archive (only if storage enabled) |
 | `search_knowledge` | [knowledge.py](../src/magi/agent/tools/knowledge.py) | Query the global RAG corpus (only if knowledge enabled) |
 | `set_thinking`, `get_thinking` | [thinking.py](../src/magi/agent/tools/thinking.py) | Flip the backend's thinking mode at runtime |
@@ -245,11 +245,16 @@ The assistant can also **write** skills after a task worth repeating —
 | Mode | Effect |
 |---|---|
 | `propose` (default) | queued in the evolution queue for operator approval; needs `evolution_enabled` |
-| `direct` | written to `$MAGI_HOME/skills` immediately (validated, atomic) |
+| `direct` | written immediately (validated, atomic): a new skill to `$MAGI_HOME/skills`, a patch back into the skill's own directory |
 | `off` | read-only: only `skill_view` |
 
-A registered (Python) skill wins a name collision; `skills.disabled` hides any
-skill. `magi skills list` shows what is active; `magi doctor` flags broken
+A patch always lands in the directory the skill lives in (a copy elsewhere on
+the search path would be shadowed); a proposed patch whose skill changed on
+disk before approval is refused as stale, and a second pending proposal for
+the same skill is refused. `skill_view` sees a new skill at once; the skills
+index in the prompt refreshes on restart. A registered (Python) skill wins a
+name collision (`skill_create` refuses its name); `skills.disabled` hides any
+skill from the index and the skill tools. `magi skills list` shows what is active; `magi doctor` flags broken
 files. See [ADR 0006](adr/0006-file-skills-and-toolsets.md).
 
 ### Toolsets

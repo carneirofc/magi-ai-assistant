@@ -17,9 +17,7 @@ reads, and atomic writes. A malformed skill is skipped with a warning; the bot
 always boots.
 """
 
-import os
 import re
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from magi.core.config import config
 from magi.core.config_file import magi_home
 from magi.core.log import log_warning
+from magi.core.memory.adapters import atomic_write_text, emit_write
 
 SKILL_FILE = "SKILL.md"
 # Lowercase slug; doubles as the directory name and the skill's prompt path.
@@ -88,6 +87,12 @@ class FileSkill:
         if not target.is_relative_to(self.root.resolve()) or not target.is_file():
             raise SkillFileError(f"no file {relative!r} in skill {self.name!r}")
         return target.read_text(encoding="utf-8", errors="replace")[:_MAX_VIEW_CHARS]
+
+
+def split_frontmatter(text: str) -> tuple[str, str] | None:
+    """`(frontmatter block incl. fences, rest)` verbatim, or None when absent."""
+    match = _FRONTMATTER_RE.match(text)
+    return (text[: match.end()], text[match.end() :]) if match else None
 
 
 def parse_skill_md(text: str, *, source: str) -> tuple[SkillFrontmatter, str]:
@@ -151,6 +156,16 @@ def discover(dirs: list[Path] | None = None) -> list[FileSkill]:
     return list(found.values())
 
 
+def find_skill_dir(name: str, dirs: list[Path] | None = None) -> Path | None:
+    """The directory holding skill `name` — the first on the search path, the
+    same one `discover` would pick — or None."""
+    for base in dirs if dirs is not None else skill_dirs():
+        candidate = base / name
+        if (candidate / SKILL_FILE).is_file():
+            return candidate
+    return None
+
+
 def render_skill_md(meta: SkillFrontmatter, body: str) -> str:
     front = meta.model_dump(by_alias=True, exclude_none=True)
     return (
@@ -161,15 +176,7 @@ def render_skill_md(meta: SkillFrontmatter, body: str) -> str:
 def write_skill(root: Path, text: str) -> Path:
     """Validate a full SKILL.md and write it atomically to `<root>/<name>/SKILL.md`."""
     meta, _body = parse_skill_md(text, source="new skill")
-    directory = root / meta.name
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / SKILL_FILE
-    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".SKILL.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text if text.endswith("\n") else text + "\n")
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
+    path = root / meta.name / SKILL_FILE
+    atomic_write_text(path, text if text.endswith("\n") else text + "\n")
+    emit_write(path)
     return path

@@ -14,6 +14,7 @@ must never break a chat.
 """
 
 import re
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from agno.agent import Agent
@@ -39,10 +40,14 @@ if TYPE_CHECKING:
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
-def _format_input(inp: CurationInput) -> str:
+def _format_input(inp: CurationInput, proposable: list[str] | None = None) -> str:
+    """The curator's user message. `proposable` lists the prompt paths a
+    `proposal` may target; none listed means proposals are off."""
+    targets = "\n".join(f"- {t}" for t in proposable or []) or "(none — proposal must be null)"
     return (
         f"## Current durable facts\n{inp.current_facts or '(empty)'}\n\n"
         f"## Persona\n{inp.persona or '(none)'}\n\n"
+        f"## Proposable prompts\n{targets}\n\n"
         f"## This turn\nUser: {inp.user_message}\nAssistant: {inp.assistant_reply}"
     )
 
@@ -153,8 +158,43 @@ def dispatch_curator_proposal(
     file_curator_proposal(store, proposal)
 
 
-def build_memory_curator() -> CurateFn:
-    """An async `CurateFn`: one finished turn -> the durable-memory changes to apply."""
+def route_persona_adjustment(
+    store: EvolutionStore | None, result: CurationResult, mode: str
+) -> CurationResult:
+    """Apply `persona_learning` to a parsed result; never raises.
+
+    The persona is global, so a rule learned from one user's turn would reach
+    every user. "direct" keeps it (the manager appends it); "propose" files it
+    as a `persona` proposal for the operator and strips it from the result;
+    "off" — or "propose" without an evolution queue — drops it."""
+    rule = result.persona_adjustment
+    if not rule or mode == "direct":
+        return result
+    stripped = replace(result, persona_adjustment=None)
+    if mode != "propose" or store is None:
+        log_info(f"MemoryCurator: dropped a persona rule (persona_learning={mode})")
+        return stripped
+    try:
+        queued = store.propose(
+            "persona",
+            "persona.md",
+            rule,
+            "The memory curator drew this behaviour rule from a conversation turn.",
+            source="curator",
+        )
+    except Exception as exc:  # noqa: BLE001 — full queue / duplicate / IO: log and move on.
+        log_warning(f"curator: persona rule not filed ({exc})")
+        return stripped
+    log_info(f"curator: filed persona proposal {queued.id}")
+    return stripped
+
+
+def build_memory_curator(evolution_store: EvolutionStore | None = None) -> CurateFn:
+    """An async `CurateFn`: one finished turn -> the durable-memory changes to apply.
+
+    `evolution_store` is the deployment's proposal queue (None = evolution off),
+    injected by the composition root so the curator files into the same queue
+    — same resolved memory root — the admin surface reads."""
     agent = Agent(
         name="MemoryCurator",
         model=build_member_model(),
@@ -168,22 +208,14 @@ def build_memory_curator() -> CurateFn:
     # proposal (source="curator") under the same rails as the lead's propose
     # tools — allowlist (incl. registered skills), capped queue, operator
     # decision. Off => proposals parse but are dropped with a log line.
-    evolution_store = None
-    if config.evolution_enabled:
-        from pathlib import Path
-
-        from magi.agent.skills import evolution_proposable_targets
-        from magi.core.evolution import EvolutionStore
-
-        evolution_store = EvolutionStore(
-            Path(config.memory_dir), proposable=evolution_proposable_targets()
-        )
+    proposable = evolution_store.proposable if evolution_store is not None else []
 
     async def curate(inp: CurationInput) -> CurationResult:
-        resp = await agent.arun(input=_format_input(inp))
+        resp = await agent.arun(input=_format_input(inp, proposable))
         text = get_text_from_message(resp.content) if resp.content else ""
         result = _parse(text)
         dispatch_curator_proposal(evolution_store, result.proposal)
+        result = route_persona_adjustment(evolution_store, result, config.persona_learning)
         if result.is_empty:
             log_info("MemoryCurator: no durable change this turn")
         return result

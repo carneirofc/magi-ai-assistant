@@ -301,6 +301,13 @@ class ConversationService:
         # auto-injection) when the searcher is None or top_k <= 0.
         self.knowledge = knowledge
         self.knowledge_top_k = knowledge_top_k
+        # The post-reply memory tail (session fold + curation) runs as a
+        # background task so model calls never delay a reply. One lock per user
+        # serializes those tails — the fact sheet is per-user — and the task set
+        # keeps them referenced until done. Both are shared by `with_guidance`
+        # views (shallow copy), so every channel queues behind the same lock.
+        self._tail_locks: dict[str, asyncio.Lock] = {}
+        self._tails: set[asyncio.Task[None]] = set()
 
     def with_guidance(self, channel_guidance: str) -> ConversationService:
         """A view of this service with another channel's output rules.
@@ -464,11 +471,8 @@ class ConversationService:
         if reply:
             self._index_turn(user_id, session_id, user_text if curate else "", reply)
             self.memory.record_assistant_turn(reply)
-            # Fold rolled-off turns (no-op unless enabled), then let the post-turn
-            # curator revise durable memory from this turn (no-op unless enabled).
-            await self.memory.maybe_summarize_session()
-            if curate:
-                await self.memory.maybe_curate(user_text, reply)
+            # Fold + curate after the reply is handed back, never before it.
+            self._schedule_tail(user_id, user_text, reply, curate=curate)
         elif not reasoning and not any(media.values()):
             # Completed with neither answer, reasoning, nor media: the lead went
             # silent (commonly after a tool error). Return an honest fallback
@@ -695,6 +699,36 @@ class ConversationService:
             user_id=user_id,
             session_id=session_id,
         )
+
+    # --- post-reply memory tail ---------------------------------------------
+    def _schedule_tail(self, user_id: str, user_text: str, reply: str, *, curate: bool) -> None:
+        """Run the memory tail in the background. The task copies this run's
+        context, so it keeps the message's memory scope whatever runs next."""
+        task = asyncio.get_running_loop().create_task(
+            self._memory_tail(user_id, user_text, reply, curate=curate)
+        )
+        self._tails.add(task)
+        task.add_done_callback(self._tails.discard)
+
+    async def _memory_tail(self, user_id: str, user_text: str, reply: str, *, curate: bool) -> None:
+        """Fold rolled-off turns (no-op unless enabled), then let the curator
+        revise durable memory from this turn (no-op unless enabled) — one tail at
+        a time per user. Both steps already swallow their failures; the guard
+        here only keeps a bug from surfacing as an unretrieved task exception."""
+        lock = self._tail_locks.setdefault(user_id, asyncio.Lock())
+        async with lock:
+            try:
+                await self.memory.maybe_summarize_session()
+                if curate:
+                    await self.memory.maybe_curate(user_text, reply)
+            except Exception as exc:  # noqa: BLE001 — the tail must never surface.
+                log_warning(f"conversation: memory tail failed: {type(exc).__name__}: {exc}")
+
+    async def drain(self) -> None:
+        """Wait for every scheduled memory tail (shutdown, tests, `!ctx`-style
+        reads that must see the curated result)."""
+        while self._tails:
+            await asyncio.gather(*tuple(self._tails))
 
     # --- control commands (channel formats the reply text) ------------------
     def flush(self, user_id: str | int, session_id: str) -> int:

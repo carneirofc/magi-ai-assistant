@@ -183,3 +183,33 @@ def test_json_facts_unreadable_file_degrades_to_empty(tmp_path):
     path.write_text("{not json", encoding="utf-8")
 
     assert JsonFacts(path).read() == []
+
+
+def test_fact_trim_keeps_the_most_recently_touched(tmp_path):
+    facts = JsonFacts(tmp_path / "f.json")
+    facts._write(
+        [
+            {"id": "a", "text": "name", "ts": "2026-01-03T00:00:00"},  # old but refreshed
+            {"id": "b", "text": "stale", "ts": "2026-01-01T00:00:00"},
+            {"id": "c", "text": "newer", "ts": "2026-01-02T00:00:00"},
+        ]
+    )
+    assert facts.trim(2) == 1
+    assert facts.texts() == ["name", "newer"]  # order kept, least recent dropped
+
+
+def test_atomic_writes_leave_no_temp_files(tmp_path):
+    facts = JsonFacts(tmp_path / "f.json")
+    facts.add("one")
+    facts.add_many(["two", "three"])
+    assert facts.texts() == ["one", "two", "three"]
+    assert [p.name for p in tmp_path.iterdir()] == ["f.json"]
+
+
+def test_window_drop_first(tmp_path):
+    win = JsonWindow(tmp_path / "w.json")
+    win.extend([{"role": "user", "content": str(i)} for i in range(3)])
+    win.drop_first(2)
+    assert [t["content"] for t in win.read()] == ["2"]
+    win.drop_first(5)
+    assert not win.path.exists()

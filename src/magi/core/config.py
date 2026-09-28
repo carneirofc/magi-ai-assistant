@@ -198,6 +198,11 @@ class Config(BaseModel):
     # persona write the section is deduped and capped to the newest this many bullets
     # (<= 0 caps nothing but still dedupes). The prose base is never touched.
     persona_adjustments_max: int = 40
+    # What happens to a persona rule the curator learns. The persona is GLOBAL,
+    # so a rule drawn from one user's turn changes the bot for every user:
+    # "propose" (default) queues it for the operator (needs evolution_enabled;
+    # dropped otherwise), "direct" appends it at once, "off" never learns one.
+    persona_learning: Literal["off", "propose", "direct"] = "propose"
 
     # --- Bot identity (see magi/core/identity). A global, operator-set profile —
     # display name, description, and profile picture — the bot presents as itself.
@@ -356,11 +361,10 @@ class Config(BaseModel):
     session_pending_max: int = 30
     session_summary_max_chars: int = 4_000
 
-    # --- Long-term rendering. The durable fact sheet (long_term_facts.json) is owned
-    # by the curator below; alongside it, build_context injects the most recent raw
-    # facts written via `remember` so freshly-learned facts surface before the next
-    # curation pass folds them in. ---
-    long_term_recent_raw: int = 5  # raw facts kept alongside the curated profile
+    # Deprecated, no effect: the raw long_term.md log is migrated into the fact
+    # sheet, so there are no "recent raw facts" to render. Accepted so existing
+    # config files still load; remove it from yours.
+    long_term_recent_raw: int = 5
 
     # --- Memory curator (see magi/core/memory/curation + magi/agent/curator). A cheap
     # post-turn pass that owns durable memory: instead of the lead appending

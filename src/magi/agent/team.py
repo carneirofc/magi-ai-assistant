@@ -25,7 +25,12 @@ from magi.agent.hooks import tool_call_hook
 from magi.agent.introspect import mark_origin
 from magi.agent.members import MEMBER_BUILDERS
 from magi.agent.model import build_lead_model, build_member_model
-from magi.agent.skills import compose_skill_prompts, file_skills, skill_lead_tools
+from magi.agent.skills import (
+    compose_skill_prompts,
+    enabled_file_skills,
+    registered_skill_names,
+    skill_lead_tools,
+)
 from magi.agent.tools import enabled_tools, registered_lead_tools
 from magi.agent.tools.delegate import build_delegate_tools
 from magi.agent.tools.evolution import build_evolution_tools
@@ -48,6 +53,7 @@ from magi.agent.tools.websearch import build_websearch_tools
 from magi.agent.toolsets import toolset, unknown_disabled
 from magi.core.config import config
 from magi.core.db import get_db
+from magi.core.evolution import EvolutionStore
 from magi.core.items import build_item_archive_from_config
 from magi.core.knowledge import KnowledgeStore, build_knowledge_from_config
 from magi.core.memory import MemoryManager
@@ -129,6 +135,7 @@ def build_team(
     knowledge: KnowledgeStore | None = None,
     session_index: SessionIndex | None = None,
     sandbox: SandboxService | None = None,
+    evolution_store: EvolutionStore | None = None,
 ) -> Team:
     """Assemble the chatbot team: a multimodal lead routing to specialist members.
 
@@ -136,7 +143,9 @@ def build_team(
     `member_builders` defaults to the full registry; a channel that can't host a
     specialist (e.g. the Discord member outside Discord) passes a trimmed list.
     `session_index` (None = off) backs the search_sessions tool; `sandbox`
-    (None = off) backs run_command.
+    (None = off) backs run_command. `evolution_store` is the shared proposal
+    queue from the composition root; None builds one over `memory`'s root when
+    evolution is on (direct/test calls).
     `knowledge` is the RAG store backing the search tool; the composition root
     injects the same instance it also hands to `ConversationService` for context
     auto-injection, so one store powers both. When None (e.g. a direct/test call)
@@ -199,16 +208,17 @@ def build_team(
     # runtime dir. Both empty when the feature is off.
     evolution_tools: list = []
     recipe_tools: list = []
-    evolution_store = None
-    if config.evolution_enabled:
+    if not config.evolution_enabled:
+        evolution_store = None
+    elif evolution_store is None:
         from magi.agent.skills import evolution_proposable_targets
-        from magi.core.evolution import EvolutionStore
 
         # Config targets + registered skills' prompts (core stays agent-free,
         # so the allowlist extension composes here).
         evolution_store = EvolutionStore(
             memory.store.root, proposable=evolution_proposable_targets()
         )
+    if evolution_store is not None:
         evolution_tools = build_evolution_tools(evolution_store)
         recipe_tools = mark_origin(build_recipe_tools(memory.store.root), "recipe")
         log_info(
@@ -222,10 +232,14 @@ def build_team(
     write_mode = config.skills.agent_write
     if write_mode == "propose" and evolution_store is None:
         write_mode = "off"
-    library = file_skills()
+    library = enabled_file_skills()
     skill_tools = (
         build_skill_tools(
-            file_skills, write_root=skill_write_root(), mode=write_mode, store=evolution_store
+            enabled_file_skills,
+            write_root=skill_write_root(),
+            mode=write_mode,
+            store=evolution_store,
+            reserved=registered_skill_names,
         )
         if library or write_mode != "off"
         else []
@@ -317,7 +331,8 @@ def build_team(
             # Read a URL (http_get) and perform an explicit user-described request
             # (http_request) without round-tripping through a member.
             *toolset("http", HTTP_TOOLS),
-            *toolset("memory", build_memory_tools(memory)),
+            # recall_conversation only when search_sessions (FTS5) is absent.
+            *toolset("memory", build_memory_tools(memory, history_search=not session_tools)),
             # Durable byte archive: keep a file/image for later, recall by
             # reference (empty unless storage is enabled).
             *toolset("storage", storage_tools),
