@@ -177,6 +177,17 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Fixed
 
+- The `run_command` policy judged only the first word of each command, so
+  `env sudo …`, `nice`/`timeout`/`xargs` prefixes, `bash -c '…'`, `eval`,
+  `find -exec`, and `$(…)` bodies hid forbidden commands (they ran as
+  *safe*). Wrappers are now unwrapped and nested commands judged
+  recursively; `rm -rf` of `/` or home is forbidden in any quoted/`~/*`/
+  `$HOME` spelling; `$VAR` expansions and paths embedded in an argument
+  (`python -c "open('/etc/…')"`, `--file=/etc/…`) need approval.
+- A later config file (or `configure()` call) replaced a whole nested group:
+  an overlay setting only `sandbox.allowed_users` silently reset
+  `sandbox.backend` to `off`. Group mappings now merge per key; passing a
+  group model instance still replaces the group.
 - `skill_patch` (and approved skill patches) wrote to `$MAGI_HOME/skills` even
   for a skill living in a configured `skills.dirs` entry, where the copy was
   shadowed and the patch silently never applied. Patches now land in the

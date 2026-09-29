@@ -40,7 +40,10 @@ layer a persona reuses unchanged.
   `sandbox.allowed_users` run anything; `forbidden` never runs; an approval is
   resolved only by the *same user's* `/approve <id>` message
   (`ConversationService._resolve_approval`), never by a tool; no secret from
-  the process env reaches a command. See ADR 0007.
+  the process env reaches a command. `policy.classify` unwraps wrappers
+  (`env`, `nice`, `xargs`, …) and judges `sh -c` / `eval` / `find -exec` /
+  substitution bodies recursively — a new way to run a nested command must
+  be unwrapped there too. See ADR 0007.
 - **Skills library (`skills_fs.py`)**: SKILL.md parsing, discovery, and
   atomic writes — pure IO; approved `skill` proposals (`evolution.py`) land
   through `write_skill`, beside the existing skill (`find_skill_dir`) and only

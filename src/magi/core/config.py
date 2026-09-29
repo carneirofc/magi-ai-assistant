@@ -23,7 +23,7 @@ from typing import Literal
 
 from agno.utils.log import log_info
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from magi.core.prompts import load_prompt
 from magi.core.types import JsonObject
@@ -677,11 +677,29 @@ def _apply(values: Config, names: Iterable[str]) -> None:
         object.__setattr__(config, name, getattr(values, name))
 
 
+_MAPPING = TypeAdapter(dict[str, object])
+
+
+def _merge(base: BaseModel, overrides: dict[str, object]) -> dict[str, object]:
+    """`base` dumped with `overrides` applied per key: a mapping given for a
+    nested group (`sandbox: {allowed_users: [...]}`) updates only the keys it
+    names; any other value (including a group model instance) replaces."""
+    merged: dict[str, object] = base.model_dump()
+    for key, value in overrides.items():
+        current = getattr(base, key, None)
+        if isinstance(current, BaseModel) and isinstance(value, dict):
+            merged[key] = _merge(current, _MAPPING.validate_python(value))
+        else:
+            merged[key] = value
+    return merged
+
+
 def derive(base: Config, **overrides: object) -> Config:
     """A validated copy of `base` with `overrides` applied (the singleton is
-    untouched). Raises `pydantic.ValidationError` on an unknown field or a
-    wrong-typed value."""
-    return Config.model_validate({**base.model_dump(), **overrides})
+    untouched). Nested groups merge per key, so a later config file only
+    changes the group keys it sets. Raises `pydantic.ValidationError` on an
+    unknown field or a wrong-typed value."""
+    return Config.model_validate(_merge(base, overrides))
 
 
 def configure(**overrides: object) -> Config:

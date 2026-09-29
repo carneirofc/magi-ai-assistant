@@ -39,7 +39,8 @@ channels:
 - **Data root**: relative paths (`memory_dir`, `db_file`, …) resolve against the
   config file's directory, or `MAGI_HOME` when there is no file.
 - **Precedence** (lowest → highest): defaults < config file(s) (later `-c`
-  wins) < `configure()` in code < CLI flags.
+  wins) < `configure()` in code < CLI flags. Nested groups (`sandbox:`,
+  `skills:`, …) merge per key, so an overlay changes only the keys it sets.
 - The repo's own deployment is [`magi.yaml`](../magi.yaml); containers layer
   [`docker/magi.docker.yaml`](../docker/magi.docker.yaml) on top (`--docker`).
 

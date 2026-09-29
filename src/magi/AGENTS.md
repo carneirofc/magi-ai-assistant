@@ -18,7 +18,8 @@ persona overlay installs this as a dependency and extends it from the outside.
 - **Typed config: file or code.** `Config` (`core/config.py`) is a frozen
   pydantic model. A deployment sets it from a YAML file (`./magi.yaml` or
   `$MAGI_HOME/config.yaml`, `core/config_file.py`) and/or `configure(...)` at
-  the entrypoint (code wins). Both paths validate names and types. Only
+  the entrypoint (code wins). Both paths validate names and types; nested
+  groups merge per key (`derive`). Only
   *secrets* come from `.env` (`$MAGI_HOME/.env`, `./.env`). Loading is always
   explicit — never at import. See ADR 0004.
 - **Graceful degradation.** Optional backends (storage, knowledge, semantic search,

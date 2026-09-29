@@ -62,6 +62,18 @@ def test_code_configure_wins_over_file(tmp_path, home):
     assert config.api_port == 9202
 
 
+def test_later_file_overrides_only_the_group_keys_it_sets(tmp_path):
+    base = tmp_path / "magi.yaml"
+    base.write_text("sandbox:\n  backend: local\n  timeout_seconds: 5\n", encoding="utf-8")
+    overlay = tmp_path / "overlay.yaml"
+    overlay.write_text("sandbox:\n  allowed_users: [api:me]\n", encoding="utf-8")
+    for path in (base, overlay):
+        configure(**load_config_file(path))
+    assert config.sandbox.backend == "local"
+    assert config.sandbox.timeout_seconds == 5
+    assert config.sandbox.allowed_users == ["api:me"]
+
+
 def test_bad_value_names_the_key(tmp_path):
     path = tmp_path / "magi.yaml"
     path.write_text("api_port: lots\n", encoding="utf-8")

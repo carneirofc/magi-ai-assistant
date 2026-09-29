@@ -4,7 +4,15 @@ import pytest
 from pydantic import ValidationError
 
 from magi.core import config as config_mod
-from magi.core.config import Config, config, configure, derive, reset_config, secret_fields
+from magi.core.config import (
+    Config,
+    SandboxConfig,
+    config,
+    configure,
+    derive,
+    reset_config,
+    secret_fields,
+)
 
 
 def test_configure_validates_types():
@@ -56,6 +64,26 @@ def test_derive_leaves_singleton_untouched():
     other = derive(config, api_port=9127)
     assert other.api_port == 9127
     assert config.api_port != 9127 or other is not config
+
+
+def test_nested_group_merges_per_key():
+    configure(sandbox={"backend": "local", "timeout_seconds": 5})
+    configure(sandbox={"allowed_users": ["api:me"]})
+    assert config.sandbox.backend == "local"
+    assert config.sandbox.timeout_seconds == 5
+    assert config.sandbox.allowed_users == ["api:me"]
+
+
+def test_nested_group_model_replaces_whole_group():
+    configure(sandbox={"backend": "local"})
+    configure(sandbox=SandboxConfig(allowed_users=["api:me"]))
+    assert config.sandbox.backend == "off"
+
+
+def test_nested_group_rejects_unknown_key():
+    with pytest.raises(ValidationError):
+        configure(sandbox={"backend": "local", "bakend": "docker"})
+    assert config.sandbox.backend == "off"
 
 
 def test_reset_restores_defaults():
