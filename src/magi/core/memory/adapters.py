@@ -20,7 +20,9 @@ parsed on read so files written before this format round-trip unchanged.
 """
 
 import json
+import os
 import re
+import tempfile
 import uuid
 from collections.abc import Callable
 from datetime import datetime
@@ -28,7 +30,7 @@ from pathlib import Path
 
 from agno.utils.log import log_warning
 
-from magi.core.types import parse_json_array
+from magi.core.types import JsonObject, parse_json_array
 
 
 def slug(value: object) -> str:
@@ -71,6 +73,23 @@ def emit_write(path: Path) -> None:
         observer(path)
     except Exception as exc:  # noqa: BLE001 — a write observer must never break a memory write.
         log_warning(f"memory: write observer failed for {path.name}: {type(exc).__name__}: {exc}")
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Write `text` to `path` via a same-directory temp file + `os.replace`.
+
+    A crash mid-write leaves the previous file intact instead of a truncated one —
+    which the JSON readers would treat as empty, so the next write would silently
+    replace a whole profile or window."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 # --- Obsidian frontmatter ---------------------------------------------------
@@ -130,7 +149,7 @@ class BulletLog:
         if not self.path.exists():
             self.path.parent.mkdir(parents=True, exist_ok=True)
             head = _frontmatter(self.note_type, self.tags) + f"# {self.header}\n\n"
-            self.path.write_text(head, encoding="utf-8")
+            atomic_write_text(self.path, head)
 
     def append(self, content: str) -> None:
         """Append one bullet (untimestamped — the frontmatter `created` stamps the file)."""
@@ -166,7 +185,7 @@ class BulletLog:
         existing = self.path.read_text(encoding="utf-8") if self.path.exists() else ""
         match = _FRONTMATTER_RE.match(existing)
         front = match.group(0) if match else _frontmatter(self.note_type, self.tags)
-        self.path.write_text(front + body.strip() + "\n", encoding="utf-8")
+        atomic_write_text(self.path, front + body.strip() + "\n")
         emit_write(self.path)
 
     def bodies(self) -> list[str]:
@@ -209,12 +228,21 @@ class BulletLog:
         if self.path.exists():
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(_frontmatter(self.note_type, self.tags) + scaffold, encoding="utf-8")
+        atomic_write_text(self.path, _frontmatter(self.note_type, self.tags) + scaffold)
         emit_write(self.path)
 
     def delete(self) -> None:
         self.path.unlink(missing_ok=True)
         emit_write(self.path)
+
+    def retire(self) -> Path:
+        """Rename the note aside to `<stem>.migrated<suffix>` (kept for the
+        operator, invisible to readers of this path). Returns the new path."""
+        target = self.path.with_name(f"{self.path.stem}.migrated{self.path.suffix}")
+        os.replace(self.path, target)
+        emit_write(self.path)
+        emit_write(target)
+        return target
 
 
 class Blob:
@@ -240,7 +268,7 @@ class Blob:
     def write(self, body: str) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         head = _frontmatter(self.note_type, self.tags)
-        self.path.write_text(f"{head}# {self.header}\n\n{body.strip()}\n", encoding="utf-8")
+        atomic_write_text(self.path, f"{head}# {self.header}\n\n{body.strip()}\n")
         emit_write(self.path)
 
     def delete(self) -> None:
@@ -254,7 +282,7 @@ class JsonWindow:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
 
-    def read(self) -> list[dict]:
+    def read(self) -> list[JsonObject]:
         if not self.path.exists():
             return []
         try:
@@ -274,12 +302,12 @@ class JsonWindow:
     def count(self) -> int:
         return len(self.read())
 
-    def _write(self, turns: list[dict]) -> None:
+    def _write(self, turns: list[JsonObject]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(turns, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_text(self.path, json.dumps(turns, ensure_ascii=False, indent=2))
         emit_write(self.path)
 
-    def append(self, role: str, content: str, max_entries: int) -> list[dict]:
+    def append(self, role: str, content: str, max_entries: int) -> list[JsonObject]:
         """Append a turn, trim to the last `max_entries`, return the evicted turns."""
         turns = self.read()
         turns.append({"role": role, "content": content, "ts": _now()})
@@ -291,7 +319,7 @@ class JsonWindow:
         self._write(kept)
         return evicted
 
-    def extend(self, turns: list[dict], max_entries: int = 0) -> int:
+    def extend(self, turns: list[JsonObject], max_entries: int = 0) -> int:
         """Append turn dicts; when `max_entries` > 0 keep only the newest that many.
         Returns the buffer's new size."""
         buffered = self.read()
@@ -300,6 +328,14 @@ class JsonWindow:
             buffered = buffered[-max_entries:]
         self._write(buffered)
         return len(buffered)
+
+    def drop_first(self, count: int) -> None:
+        """Remove the oldest `count` entries (the file goes when none remain)."""
+        rest = self.read()[count:]
+        if rest:
+            self._write(rest)
+        else:
+            self.delete()
 
     def delete(self) -> None:
         self.path.unlink(missing_ok=True)
@@ -319,7 +355,7 @@ class JsonFacts:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
 
-    def read(self) -> list[dict]:
+    def read(self) -> list[JsonObject]:
         if not self.path.exists():
             return []
         try:
@@ -350,9 +386,9 @@ class JsonFacts:
         """The fact bodies, in order (no ids) — for rendering into context."""
         return [str(f.get("text", "")) for f in self.read() if f.get("text")]
 
-    def _write(self, facts: list[dict]) -> None:
+    def _write(self, facts: list[JsonObject]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(facts, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_text(self.path, json.dumps(facts, ensure_ascii=False, indent=2))
         emit_write(self.path)
 
     def add(self, text: str) -> str:
@@ -362,6 +398,17 @@ class JsonFacts:
         facts.append({"id": fact_id, "text": text, "ts": _now()})
         self._write(facts)
         return fact_id
+
+    def add_many(self, texts: list[str]) -> list[str]:
+        """Append several facts in one write; return their ids."""
+        facts = self.read()
+        ids: list[str] = []
+        for text in texts:
+            fact_id = uuid.uuid4().hex[:8]
+            facts.append({"id": fact_id, "text": text, "ts": _now()})
+            ids.append(fact_id)
+        self._write(facts)
+        return ids
 
     def update(self, fact_id: str, text: str) -> bool:
         """Replace the text of `fact_id` in place. Returns whether it existed."""
@@ -384,14 +431,21 @@ class JsonFacts:
         return True
 
     def trim(self, max_entries: int) -> int:
-        """Keep only the newest `max_entries` facts (<= 0 disables). Returns dropped."""
+        """Keep only the `max_entries` most recently touched facts (<= 0 disables).
+
+        Recency is the `ts` an add OR update stamps, not list position — a core fact
+        added early and refreshed since (a name, a stack choice) must outlive stale
+        ones added after it. Survivors keep their order. Returns how many dropped."""
         if max_entries <= 0:
             return 0
         facts = self.read()
         if len(facts) <= max_entries:
             return 0
         dropped = len(facts) - max_entries
-        self._write(facts[-max_entries:])
+        # Stable sort, so equal stamps fall back to insertion order (older first).
+        ranked = sorted(range(len(facts)), key=lambda i: str(facts[i].get("ts") or ""))
+        drop = set(ranked[:dropped])
+        self._write([f for i, f in enumerate(facts) if i not in drop])
         return dropped
 
     def delete(self) -> None:

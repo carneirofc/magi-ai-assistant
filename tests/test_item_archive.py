@@ -8,16 +8,16 @@ reindex, memory snapshot) is verified with a recording fake archive so it needs 
 backend at all.
 """
 
-import dataclasses
 from pathlib import Path
 
 import magi.core.items.archive as arch
+from magi.core.config import derive
 from magi.core.items import GLOBAL_SCOPE, ItemArchive, build_item_archive_from_config
 from magi.core.storage import LocalStore, StorageError
 
 
 def _cfg(**overrides):
-    return dataclasses.replace(arch.config, **overrides)
+    return derive(arch.config, **overrides)
 
 
 # --- blob side (real LocalStore) --------------------------------------------

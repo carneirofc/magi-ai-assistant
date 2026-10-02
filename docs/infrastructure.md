@@ -1,16 +1,18 @@
 # Infrastructure
 
-magi runs against a handful of supporting services. The chat backend (a
-`llama-server`) you run yourself; the rest are bundled in
-[`docker-compose.yaml`](../docker-compose.yaml). Everything is optional except a
-model backend — the app boots and degrades gracefully when a service is down.
+magi itself runs bare-metal (`magi gateway install`, see
+[getting-started.md](getting-started.md)). The chat backend (a `llama-server`)
+you run yourself; the optional supporting services are bundled in
+[`docker-compose.yaml`](../docker-compose.yaml), each behind a **profile** so
+you start only what you use. Everything is optional except a model backend —
+the app boots and degrades gracefully when a service is down.
 
 ## Service map
 
 ```mermaid
 flowchart TB
     subgraph host["Your machine"]
-        APP[magi<br/>main.py]
+        APP[magi<br/>magi run]
         LS[llama-server<br/>:8888 /v1 — chat backend]
     end
 
@@ -61,11 +63,24 @@ To route through Claude or another remote model instead, set
 
 ## Bringing up the supporting services
 
+`docker compose up` alone starts nothing — pick profiles:
+
+| Profile | Services | For |
+|---|---|---|
+| `qdrant` | qdrant | Semantic memory, knowledge, item archive |
+| `s3` | rustfs, rustfs-init | S3 byte archive (bucket auto-created) |
+| `litellm` | litellm, postgres, minio, minio-init | Proxy to remote models (+ its state and logs) |
+| `monitoring` | prometheus | Metrics |
+| `app` | magi | magi itself in a container |
+| `admin` | admin-api, web | Separate admin API + web BFF (ADR 0002) |
+
 ```bash
-docker compose up -d                 # everything
-docker compose up -d rustfs rustfs-init    # just the byte archive
-docker compose up -d litellm postgres      # just the proxy
+docker compose --profile qdrant up -d
+docker compose --profile s3 --profile litellm up -d
 ```
+
+Long-running services carry healthchecks, so `depends_on` waits for real
+readiness.
 
 Configuration consumed by the compose stack (proxy keys, Databricks creds, S3
 creds) lives in `.env` — see [`.env.example`](../.env.example).
@@ -73,24 +88,20 @@ creds) lives in `.env` — see [`.env.example`](../.env.example).
 ## Running the app in a container
 
 By default magi runs on the host (the service map above). To containerize it
-instead, build the image locally from the [`Dockerfile`](../Dockerfile) (uv,
-Python 3.14) and bring it up with [`docker-compose.app.yaml`](../docker-compose.app.yaml),
-which layers the app onto the supporting services:
+instead, use the `app` profile, which builds the image from the
+[`Dockerfile`](../Dockerfile) (uv, Python 3.14):
 
 ```bash
-docker compose -f docker-compose.app.yaml up --build api          # API on :8000
-docker compose -f docker-compose.yaml -f docker-compose.app.yaml up --build   # + infra
-docker compose -f docker-compose.app.yaml --profile discord up --build discord
+docker compose --profile app up -d --build                     # channels.enabled from magi.yaml
+docker compose --profile app --profile qdrant up -d --build    # + vector store
+EXTRAS="--extra telegram" docker compose --profile app up -d --build
 ```
 
-The container reaches the host's `llama-server` and any host-published service
-via `host.docker.internal` (compose wires `host-gateway`), mirroring how the
-host-run app uses `localhost`. Config stays code-first: the container modes
-(`python main.py api --docker` / `python main.py discord --docker`) reuse each deployment's
-`apply_deployment_config()` and overlay only the container deltas — bind
-`0.0.0.0`, point the backend URL at the host. `./data` is volume-mounted so the
-sqlite db, memory files, and local byte archive survive rebuilds. Optional extras
-bake in at build time via the `EXTRAS` build arg (e.g. `EXTRAS="--extra s3"`).
+The container runs `magi run -c magi.yaml -c docker/magi.docker.yaml`: the same
+config file plus a container overlay (bind `0.0.0.0`, reach the host's
+`llama-server` via `host.docker.internal`). All channels in `channels.enabled`
+share one process. `./data` is volume-mounted (db, memory files, byte archive,
+and `MAGI_HOME`), and secrets come from `.env`.
 
 ## Object storage (byte archive)
 
@@ -104,7 +115,7 @@ backends via `storage_backend`:
   so the default `s3_endpoint_url="http://localhost:9000"` works out of the box.
 
 ```bash
-docker compose up -d rustfs rustfs-init
+docker compose --profile s3 up -d
 # S3 API → http://localhost:9000   console → http://localhost:9001
 # default creds: rustfsadmin / rustfsadmin (override via S3_* in .env)
 uv sync --extra s3                  # boto3 (lazy-imported; absent → tools off)

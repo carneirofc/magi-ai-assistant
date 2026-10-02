@@ -26,9 +26,20 @@ Claude via the proxy; Ollama kept as a dormant fallback.
 magi is the **reusable core of a personal AI assistant** — not one bot, but the
 engine several bots share.
 
-- **One shared brain, many channels.** A Discord bot, an HTTP API, an
-  OpenAI-compatible shim, an embeddable desktop SDK, and a native desktop shell
-  all drive the *same* assembled stack — only the transport differs.
+- **One shared brain, many channels — in one process.** Discord, Telegram, an
+  HTTP API, an OpenAI-compatible shim, an embeddable desktop SDK, and a native
+  desktop shell all drive the *same* assembled stack; `magi run api discord
+  telegram` serves them together.
+- **Simple to deploy.** One install script, a `magi setup` wizard, a
+  validated YAML config, `magi doctor`, and `magi gateway install` for a
+  systemd user service — no Docker required.
+- **Skills it can learn.** SKILL.md files (agentskills.io format) teach
+  procedures without code; the assistant can propose new skills from
+  experience for you to approve.
+- **Does real work, safely.** Sandboxed shell commands (hardened throwaway
+  containers, per-user allowlist, `/approve` for anything risky, audit log),
+  session search over past conversations, and delegation to isolated helper
+  agents — each opt-in.
 - **Deliberate memory.** The assistant's durable knowledge of a user lives in
   inspectable files written *on purpose* by a post-turn curator — never silently
   auto-extracted. Recent turns, evicted-but-unsummarized turns, freshly-learned
@@ -52,6 +63,7 @@ engine several bots share.
 ```mermaid
 flowchart LR
     D[Discord] --> CS[ConversationService]
+    T[Telegram] --> CS
     A[HTTP API + OpenAI shim] --> CS
     W[Web / desktop chat] --> CS
     CS --> MEM[(Deliberate memory<br/>+ identity)]
@@ -166,18 +178,19 @@ Domain vocabulary is defined in [CONTEXT.md](https://github.com/carneirofc/magi-
 ## Run
 
 ```bash
-python main.py api      # standalone HTTP service (+ OpenAI shim) for external clients
-python main.py discord  # Discord bot (needs DISCORD_BOT_TOKEN)
-python main.py desktop  # frameless native shell over the web frontend (uv sync --extra desktop)
-python main.py admin    # operator admin API (memory + knowledge)
+curl -LsSf https://raw.githubusercontent.com/carneirofc/magi-ai-assistant/master/scripts/install.sh | bash
+magi setup              # pick a model backend + channels; writes ~/.magi/config.yaml + .env
+magi doctor             # verify config, backend reachability, and extras
+magi run                # serve the configured channels, all in one process
+magi run api telegram   # or name them: api | discord | telegram | admin (| desktop, alone)
+magi gateway install    # run as a systemd user service (restarts on failure)
 ```
 
 Every chat channel serves the same brain (`magi/channels/bootstrap.py`); only the
-transport differs. Config is code-first: each channel's settings live in its
-`configure_*` function in [`main.py`](https://github.com/carneirofc/magi-ai-assistant/blob/master/main.py), and defaults in
-`magi/core/config.py`. Only *secrets* come from `.env` (`DISCORD_BOT_TOKEN`,
-`API_AUTH_TOKEN`, `QDRANT_API_KEY`, …). Add `--docker` to any chat channel to
-overlay the container-only deltas. Full walkthroughs — first chat, Open WebUI,
+transport differs. Settings are a validated YAML file (`./magi.yaml` or
+`~/.magi/config.yaml`, keys = `magi/core/config.py` fields); only *secrets* come
+from `.env`. From a checkout, `python main.py <channel> [--docker]` still works
+and reads the repo's [`magi.yaml`](https://github.com/carneirofc/magi-ai-assistant/blob/master/magi.yaml). Full walkthroughs — first chat, Open WebUI,
 Docker, storage backends — are in [docs/](https://github.com/carneirofc/magi-ai-assistant/blob/master/docs/getting-started.md).
 
 ## Clients

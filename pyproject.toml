@@ -58,9 +58,14 @@ dependencies = [
     "ollama>=0.6.2",
     "openai>=2.40.0",
     "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.2",
     "sqlalchemy>=2.0.50",
     "uvicorn[standard]>=0.48.0",
 ]
+
+# `magi setup | run | config | doctor | skills` — see src/magi/cli/.
+[project.scripts]
+magi = "magi.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/carneirofc/magi-ai-assistant"
@@ -119,6 +124,9 @@ websearch = [
 docs = [
     "pypdf>=5.0.0",
 ]
+telegram = [
+    "python-telegram-bot>=22.0",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -150,10 +158,12 @@ include = [
 
 [dependency-groups]
 dev = [
+    "basedpyright>=1.40.1",
     "pre-commit>=4.2.0",
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "ruff>=0.9.0",
+    "types-pyyaml>=6.0.12.20260906",
 ]
 
 [tool.pytest.ini_options]
@@ -182,3 +192,16 @@ ignore = ["E501"]
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI's dependency markers are meant to be call defaults.
 extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Query", "fastapi.Form"]
+
+# Static typing gate (CI + pre-commit). `standard` everywhere; the model-free
+# core is held to `strict`. Existing findings are frozen in
+# .basedpyright/baseline.json — new code must be clean, and the baseline only
+# ever shrinks (basedpyright rewrites it as errors are fixed). The baseline is
+# recorded against `uv sync --dev --all-extras` — the same env CI uses.
+[tool.basedpyright]
+pythonVersion = "3.14"
+include = ["src", "tests", "clients", "main.py"]
+exclude = ["web", "examples", "scripts", "**/__pycache__", ".venv"]
+typeCheckingMode = "standard"
+strict = ["src/magi/core"]
+reportMissingTypeStubs = false

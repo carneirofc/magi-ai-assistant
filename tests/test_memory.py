@@ -261,8 +261,9 @@ def test_huge_turn_is_clamped(tmp_path):
     mgr.record_user_turn("x" * 10_000)
 
     [turn] = mgr.mem.live_turns.read()
-    assert len(turn["content"]) < 200  # 100 + truncation marker
-    assert "truncated" in turn["content"]
+    content = str(turn["content"])
+    assert len(content) < 200  # 100 + truncation marker
+    assert "truncated" in content
 
 
 async def test_pending_buffer_capped_when_summarizer_keeps_failing(tmp_path):
@@ -337,24 +338,38 @@ def test_build_context_includes_pending_evicted_turns(tmp_path):
         assert f"msg {i}" in ctx  # pending AND live turns are both visible
 
 
-def test_long_term_profile_and_recent_raw_injected(tmp_path):
-    """build_context renders the curated fact sheet (long_term_facts, owned by the
-    curator) plus only the most-recent raw facts written via remember()."""
-    mgr = MemoryManager(
-        store=FileMemoryStore(tmp_path / "mem"),
-        short_term_max=5,
-        long_term_recent_raw=2,
-    )
+def test_remember_writes_the_curated_fact_sheet(tmp_path):
+    """remember() adds to the one fact sheet the curator revises — there is no
+    separate raw log whose stale tail rides along in context."""
+    mgr = MemoryManager(store=FileMemoryStore(tmp_path / "mem"), short_term_max=5)
     mgr.set_scope(user_id="u1", session_id="s1")
-    for i in range(3):
-        mgr.remember(f"fact {i}")
-    # The curator owns this file; simulate a curation pass adding a durable fact.
+    mgr.remember("fact 0")
     mgr.mem.long_term_facts.add("condensed profile")
 
+    assert mgr.mem.long_term_facts.texts() == ["fact 0", "condensed profile"]
+    assert not mgr.mem.long_term.path.exists()
     ctx = mgr.build_context()
-    assert "condensed profile" in ctx
-    assert "fact 2" in ctx  # within recent-raw tail (last 2)
-    assert "fact 0" not in ctx  # older raw fact trimmed (lives only in the sheet now)
+    assert "fact 0" in ctx and "condensed profile" in ctx
+    assert "Recent facts" not in ctx
+
+
+def test_legacy_raw_log_migrates_once_into_the_sheet(tmp_path):
+    mgr = MemoryManager(store=FileMemoryStore(tmp_path / "mem"), short_term_max=5)
+    mgr.set_scope(user_id="u1", session_id="s1")
+    mem = mgr.mem
+    mem.long_term.append("legacy fact")
+    mem.long_term.append("legacy fact")  # duplicates collapse
+    mem.long_term_facts.add("curated fact")
+
+    ctx = mgr.build_context()
+    assert mem.long_term_facts.texts() == ["curated fact", "legacy fact"]
+    assert "legacy fact" in ctx
+    assert not mem.long_term.path.exists()
+    assert mem.long_term.path.with_name("long_term.migrated.md").exists()
+    # A later wipe of the sheet does not resurrect the migrated log.
+    mem.long_term_facts.delete()
+    mgr.build_context()
+    assert mem.long_term_facts.texts() == []
 
 
 # --- semantic retrieval (fake retriever) ------------------------------------
@@ -397,33 +412,11 @@ def test_retriever_empty_falls_back_to_whole_file(tmp_path):
     assert "the whole-file fact" in ctx
 
 
-def test_recent_raw_facts_appended_on_the_semantic_path(tmp_path):
-    """Semantic retrieval supplies the curated portion by relevance, but the most
-    recent raw facts are still appended by recency alongside the curated sheet — so a
-    freshly-remembered fact surfaces even when it isn't among the top-k hits."""
-    retriever = _FakeRetriever({"long_term": ["a relevant curated fact"]})
-    mgr = MemoryManager(
-        FileMemoryStore(tmp_path / "mem"),
-        short_term_max=5,
-        retriever=retriever,
-        long_term_recent_raw=2,
-    )
-    mgr.set_scope(user_id="u1", session_id="s1")
-    mgr.mem.long_term_facts.add("condensed profile")  # a curated sheet must exist
-    for i in range(3):
-        mgr.remember(f"raw {i}")
-
-    ctx = mgr.build_context(query="anything")
-    assert "a relevant curated fact" in ctx  # semantic hit still leads
-    assert "raw 2" in ctx and "raw 1" in ctx  # recent-raw tail appended by recency
-    assert "raw 0" not in ctx  # older than the recent tail (lives only in the sheet)
-
-
 # --- mirror reconciliation on curator ops (no ghost vectors) ----------------
 def _long_term(retriever):
     from magi.core.memory.kinds import LongTerm
 
-    return LongTerm(retriever, 5, 5)
+    return LongTerm(retriever, 5)
 
 
 def test_apply_ops_add_only_indexes_without_reset(tmp_path):

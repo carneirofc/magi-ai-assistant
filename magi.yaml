@@ -1,0 +1,54 @@
+# This checkout's own deployment config — `magi run` / `python main.py` from
+# the repo root pick it up (./magi.yaml wins over $MAGI_HOME/config.yaml).
+# Keys are `Config` field names (src/magi/core/config.py); everything not
+# listed keeps its default. Secrets never go here — they live in .env
+# ($MAGI_HOME/.env or ./.env). Relative paths resolve against this directory.
+# Validate edits with `magi doctor`; change one value with `magi config set`.
+
+# llama.cpp llama-server on :8888 serves chat for lead + members.
+model_provider: llamacpp
+llamacpp_base_url: http://127.0.0.1:8888/v1
+lead_model_id: qwen3.5-9b # cosmetic on the direct path (one model per server)
+member_model_id: qwen3.5-9b
+# Budget for context assembly — keep equal to llama-server --ctx-size.
+lead_num_ctx: 128000
+member_num_ctx: 128000
+# Sampling: send nothing, the server's launch flags carry the model's
+# recommended settings (temp 0.6, top_p 0.95, top_k 20, min_p 0).
+model_temperature: null
+# Thinking off: this finetune leaks tool calls inside unclosed think blocks,
+# breaking delegation. The lead's set_thinking tool can flip this at runtime.
+model_extra_body:
+  chat_template_kwargs:
+    enable_thinking: false
+
+# Long-running sessions: fold turns that roll out of the live window into a
+# rolling session summary so context stays bounded.
+session_summary: true
+# Durable memory is owned by the post-turn curator (rewrites the long-term
+# profile each turn instead of the lead appending facts inline).
+memory_curation: true
+# Knowledge layer (global read-only RAG corpus). Off until Qdrant + an
+# embedding backend are up and docs are ingested (scripts/ingest_knowledge.py).
+# This sets how many chunks auto-inject per message once it is on.
+knowledge_context_top_k: 3
+# knowledge_enabled: true
+# Durable object storage (the model's private file archive). For S3/RustFS:
+# install the s3 extra, set S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY, then:
+# storage_enabled: true
+# storage_backend: s3
+# s3_endpoint_url: http://localhost:9000
+
+# HTTP API binding. Bind 0.0.0.0 only behind a trusted proxy with
+# API_AUTH_TOKEN set. CORS "*" is safe: auth is a Bearer token, not a cookie.
+api_host: 127.0.0.1
+api_port: 8000
+api_cors_origins: ["*"]
+# Serve the admin surface (memory + knowledge) on the same app as the API.
+# Set ADMIN_AUTH_TOKEN if this ever leaves localhost.
+admin_enabled: true
+admin_host: 127.0.0.1
+admin_port: 8100
+
+channels:
+  enabled: [api]

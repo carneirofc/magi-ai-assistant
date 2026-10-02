@@ -180,3 +180,38 @@ def test_proposal_endpoints_list_registered_skills_as_proposable(tmp_path):
     finally:
         SKILLS[:] = snapshot
         configure(evolution_enabled=old[0], evolution_proposable=old[1])
+
+
+# --- persona proposals -----------------------------------------------------------
+
+
+def test_persona_proposal_appends_to_the_persona_on_approval(tmp_path):
+    from magi.core.memory.store import FileMemoryStore
+
+    store = _store(tmp_path)
+    proposal = store.propose(
+        "persona", "ignored", "Keep answers\nshort on mobile.", "learned", source="curator"
+    )
+    assert proposal.target == "persona.md"
+    assert proposal.proposed_text == "Keep answers short on mobile."  # one bullet
+    persona = FileMemoryStore(tmp_path / "memory").persona
+    assert "short on mobile" not in persona.read()  # nothing until approved
+
+    store.decide(proposal.id, approve=True)
+    assert "- Keep answers short on mobile." in persona.read()
+
+
+def test_identical_pending_persona_rule_is_refused_but_others_queue(tmp_path):
+    store = _store(tmp_path)
+    store.propose("persona", "persona.md", "Be brief.", "learned", source="curator")
+    with pytest.raises(ProposalError, match="already pending"):
+        store.propose("persona", "persona.md", "be brief.", "learned", source="curator")
+    store.propose("persona", "persona.md", "Cite sources.", "learned", source="curator")
+    assert len(store.list(status="pending")) == 2
+
+
+def test_second_pending_prompt_proposal_for_a_target_is_refused(tmp_path):
+    store = _store(tmp_path)
+    store.propose("prompt", "greet.md", "Hello there, new greeting.", "why", source="lead")
+    with pytest.raises(ProposalError, match="already pending"):
+        store.propose("prompt", "greet.md", "Another greeting text.", "why", source="lead")

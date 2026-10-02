@@ -9,6 +9,8 @@ plain inputs in and render the plain `ConversationReply` out.
 injected — nothing is constructed here.
 """
 
+import asyncio
+import copy
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
@@ -26,6 +28,8 @@ from magi.core.media import (
     open_media_outbox,
 )
 from magi.core.memory import MemoryManager
+from magi.core.sandbox.service import SandboxService, approval_turn_text, parse_approval
+from magi.core.session_index import TurnIndexer
 
 if TYPE_CHECKING:
     from magi.core.knowledge import KnowledgeSearcher
@@ -271,8 +275,16 @@ class ConversationService:
         knowledge: KnowledgeSearcher | None = None,
         knowledge_top_k: int = 0,
         mood_fn: MoodFn | None = None,
+        session_index: TurnIndexer | None = None,
+        sandbox: SandboxService | None = None,
     ) -> None:
         self.runner = runner
+        # The run_command sandbox (core/sandbox). Held here so `/approve <id>` and
+        # `/deny <id>` work identically on every channel. None = off.
+        self.sandbox = sandbox
+        # Full-text index of finished turns (core/session_index.py) backing the
+        # session-search tool. None = off.
+        self.session_index = session_index
         self.memory = memory
         # The pre-reply mood pass (see `MoodFn`). None = feature off: no mood
         # events, `reply.mood` stays None.
@@ -289,6 +301,24 @@ class ConversationService:
         # auto-injection) when the searcher is None or top_k <= 0.
         self.knowledge = knowledge
         self.knowledge_top_k = knowledge_top_k
+        # The post-reply memory tail (session fold + curation) runs as a
+        # background task so model calls never delay a reply. One lock per user
+        # serializes those tails — the fact sheet is per-user — and the task set
+        # keeps them referenced until done. Both are shared by `with_guidance`
+        # views (shallow copy), so every channel queues behind the same lock.
+        self._tail_locks: dict[str, asyncio.Lock] = {}
+        self._tails: set[asyncio.Task[None]] = set()
+
+    def with_guidance(self, channel_guidance: str) -> ConversationService:
+        """A view of this service with another channel's output rules.
+
+        Shares everything else — runner, memory manager, knowledge, mood pass —
+        so several channels in one process (the gateway, ADR 0005) drive ONE
+        brain. Safe because scope is per-message ambient state, never stored on
+        the service."""
+        view = copy.copy(self)
+        view.channel_guidance = channel_guidance
+        return view
 
     def _usage_from(self, run_output: RunOutputLike | None) -> ConversationUsage | None:
         """Lift agno's `RunMetrics` off a run output into channel-neutral usage.
@@ -392,6 +422,33 @@ class ConversationService:
             log_warning(f"conversation: mood pass failed: {type(exc).__name__}: {exc}")
             return next(iter(config.mood_vocabulary), None)
 
+    async def _resolve_approval(self, user_id: str, text: str) -> str:
+        """A `/approve <id>` or `/deny <id>` message becomes the command's outcome
+        (run off the event loop), which the model then continues from; any other
+        text passes through unchanged."""
+        if self.sandbox is None or (parsed := parse_approval(text)) is None:
+            return text
+        approve, approval_id = parsed
+        outcome = await asyncio.to_thread(
+            self.sandbox.decide, user_id=user_id, approval_id=approval_id, approve=approve
+        )
+        return approval_turn_text(approval_id, outcome)
+
+    def _index_turn(self, user_id: str, session_id: str, user_text: str, reply: str) -> None:
+        """Append this turn to the session-search index; never breaks the turn."""
+        if self.session_index is None or not user_id:
+            return
+        try:
+            if user_text:
+                self.session_index.add(
+                    user_id=user_id, session_id=session_id, role="user", text=user_text
+                )
+            self.session_index.add(
+                user_id=user_id, session_id=session_id, role="assistant", text=reply
+            )
+        except Exception as exc:  # noqa: BLE001 — search is a convenience, not the turn.
+            log_warning(f"session index: turn not indexed ({type(exc).__name__}: {exc})")
+
     async def _finish_turn(
         self,
         reply: str,
@@ -401,6 +458,8 @@ class ConversationService:
         usage: ConversationUsage | None = None,
         mood: str | None = None,
         curate: bool = True,
+        user_id: str = "",
+        session_id: str = "",
     ) -> ConversationReply:
         """Record the reply + fold/curate memory; the one tail both run modes share.
 
@@ -410,12 +469,10 @@ class ConversationService:
         """
         media = media or {}
         if reply:
+            self._index_turn(user_id, session_id, user_text if curate else "", reply)
             self.memory.record_assistant_turn(reply)
-            # Fold rolled-off turns (no-op unless enabled), then let the post-turn
-            # curator revise durable memory from this turn (no-op unless enabled).
-            await self.memory.maybe_summarize_session()
-            if curate:
-                await self.memory.maybe_curate(user_text, reply)
+            # Fold + curate after the reply is handed back, never before it.
+            self._schedule_tail(user_id, user_text, reply, curate=curate)
         elif not reasoning and not any(media.values()):
             # Completed with neither answer, reasoning, nor media: the lead went
             # silent (commonly after a tool error). Return an honest fallback
@@ -440,6 +497,7 @@ class ConversationService:
         user_id = str(user_id)
         log_info(f"conversation: handling (session={session_id}, user={user_id})")
 
+        text = await self._resolve_approval(user_id, text)
         run_input = self._prepare_input(user_id, session_id, text, extra_context)
         # Predict the delivery mood before the reply (see MoodFn); it rides the
         # final reply so non-streaming clients (and later TTS) get it too.
@@ -469,6 +527,8 @@ class ConversationService:
             user_text=text,
             usage=self._usage_from(response),
             mood=mood,
+            user_id=user_id,
+            session_id=session_id,
         )
 
     async def handle_stream(
@@ -496,6 +556,7 @@ class ConversationService:
         user_id = str(user_id)
         log_info(f"conversation: streaming (session={session_id}, user={user_id})")
 
+        text = await self._resolve_approval(user_id, text)
         run_input = self._prepare_input(user_id, session_id, text, extra_context)
         async for item in self._stream_run(
             run_input, user_id=user_id, session_id=session_id, media=media, user_text=text
@@ -635,7 +696,39 @@ class ConversationService:
             usage=self._usage_from(final) if final is not None else None,
             mood=mood,
             curate=curate,
+            user_id=user_id,
+            session_id=session_id,
         )
+
+    # --- post-reply memory tail ---------------------------------------------
+    def _schedule_tail(self, user_id: str, user_text: str, reply: str, *, curate: bool) -> None:
+        """Run the memory tail in the background. The task copies this run's
+        context, so it keeps the message's memory scope whatever runs next."""
+        task = asyncio.get_running_loop().create_task(
+            self._memory_tail(user_id, user_text, reply, curate=curate)
+        )
+        self._tails.add(task)
+        task.add_done_callback(self._tails.discard)
+
+    async def _memory_tail(self, user_id: str, user_text: str, reply: str, *, curate: bool) -> None:
+        """Fold rolled-off turns (no-op unless enabled), then let the curator
+        revise durable memory from this turn (no-op unless enabled) — one tail at
+        a time per user. Both steps already swallow their failures; the guard
+        here only keeps a bug from surfacing as an unretrieved task exception."""
+        lock = self._tail_locks.setdefault(user_id, asyncio.Lock())
+        async with lock:
+            try:
+                await self.memory.maybe_summarize_session()
+                if curate:
+                    await self.memory.maybe_curate(user_text, reply)
+            except Exception as exc:  # noqa: BLE001 — the tail must never surface.
+                log_warning(f"conversation: memory tail failed: {type(exc).__name__}: {exc}")
+
+    async def drain(self) -> None:
+        """Wait for every scheduled memory tail (shutdown, tests, `!ctx`-style
+        reads that must see the curated result)."""
+        while self._tails:
+            await asyncio.gather(*tuple(self._tails))
 
     # --- control commands (channel formats the reply text) ------------------
     def flush(self, user_id: str | int, session_id: str) -> int:

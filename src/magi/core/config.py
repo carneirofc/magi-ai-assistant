@@ -10,22 +10,36 @@ prints the effective values at runtime.
 Only *secrets* come from the environment / `.env` (tokens and API keys never
 belong in code): DISCORD_BOT_TOKEN, LITELLM_MASTER_KEY, LLAMACPP_API_KEY,
 OPENAI_API_KEY, QDRANT_API_KEY, API_AUTH_TOKEN.
+
+`Config` is a frozen pydantic model: every value set through `configure(...)` is
+validated (names AND types), so a typo or a wrong-typed value fails at startup
+instead of deep inside a run.
 """
 
 import os
-from dataclasses import dataclass, field, fields
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Literal
 
 from agno.utils.log import log_info
 from dotenv import load_dotenv
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from magi.core.prompts import load_prompt
+from magi.core.types import JsonObject
 
-load_dotenv()  # secrets only — see module docstring
+load_dotenv()  # ./.env, for back-compat; `load_secrets(home)` adds $MAGI_HOME/.env
+
+# Marks a field as a secret read from this environment variable (masked in logs).
+_SECRET_ENV = "secret_env"
 
 
 def _secret(name: str) -> str | None:
-    """A dataclass default that reads a secret from the environment at startup."""
-    return field(default_factory=lambda: os.getenv(name) or None)
+    """A field default that reads a secret from the environment at startup."""
+    return Field(
+        default_factory=lambda: os.getenv(name) or None,
+        json_schema_extra={_SECRET_ENV: name},
+    )
 
 
 def _mask(secret: str | None) -> str:
@@ -35,10 +49,76 @@ def _mask(secret: str | None) -> str:
     return f"<set, {len(secret)} chars, ...{secret[-4:]}>"
 
 
-@dataclass(frozen=True)
-class Config:
+type ModelProvider = Literal["litellm", "llamacpp", "openai", "ollama"]
+type ChannelName = Literal["api", "discord", "telegram", "admin", "desktop"]
+
+
+class SkillsConfig(BaseModel):
+    """File-based skills (SKILL.md directories; see magi/core/skills_fs.py)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    # Extra directories searched before $MAGI_HOME/skills (first wins on a name).
+    dirs: list[str] = Field(default_factory=list)
+    # Skill names never offered to the model (file or Python skills).
+    disabled: list[str] = Field(default_factory=list)
+    # May the assistant write skills? "propose" queues them for operator
+    # approval (needs evolution_enabled), "direct" writes $MAGI_HOME/skills.
+    agent_write: Literal["off", "propose", "direct"] = "propose"
+
+
+class ToolsetsConfig(BaseModel):
+    """Named groups of lead tools (see magi/agent/toolsets.py)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    disabled: list[str] = Field(default_factory=list)
+
+
+class SandboxConfig(BaseModel):
+    """The `run_command` tool (magi/core/sandbox). Off unless a backend is set."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    # off | docker (throwaway hardened container per command) | local (NO
+    # isolation — a trusted single-operator machine only).
+    backend: Literal["off", "docker", "local"] = "off"
+    # always = every command waits for `/approve <id>`; dangerous = only risky
+    # ones do; deny_dangerous = risky ones are refused. Forbidden ones never run.
+    approval: Literal["always", "dangerous", "deny_dangerous"] = "dangerous"
+    # Scoped user ids allowed to run anything (e.g. "discord:123", "api:me").
+    allowed_users: list[str] = Field(default_factory=list)
+    timeout_seconds: float = 60.0
+    output_max_chars: int = 8_000
+    approval_ttl_seconds: float = 600.0
+    # Per-user workspaces live under this dir (None = $MAGI_HOME/workspace).
+    workspace_dir: str | None = None
+    docker_image: str = "python:3.14-slim"
+    docker_network: bool = False
+    docker_memory: str = "1g"
+    docker_pids: int = 256
+    docker_cpus: float = 1.0
+
+
+class ChannelsConfig(BaseModel):
+    """Which channels `magi run` serves when none are named on the command line."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    enabled: list[ChannelName] = Field(default_factory=lambda: ["api"])
+
+
+class Config(BaseModel):
     """All app settings. Override per deployment via `configure(...)` — never
     mutate directly (frozen catches accidental writes)."""
+
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        validate_default=True,
+        # Fields like `model_provider` are ours, not pydantic's `model_*` API.
+        protected_namespaces=(),
+    )
 
     # --- LiteLLM proxy: gateway to remote backends (Databricks Claude, …) ---
     litellm_base_url: str = "http://localhost:4000"
@@ -66,7 +146,7 @@ class Config:
     # --- Models. Which builder serves the roles: `litellm` (proxy gateway),
     # `llamacpp` (direct to llamacpp_base_url), `openai` (a remote OpenAI-compatible
     # server at openai_base_url), or `ollama` (dormant). ---
-    model_provider: str = "litellm"
+    model_provider: ModelProvider = "litellm"
     # Lead / router brain. For the proxy the id is a litellm model_name
     # (litellm.config.yaml); for direct llama-server it is cosmetic.
     lead_model_id: str = "qwen3.5-9b-llamacpp"
@@ -85,11 +165,11 @@ class Config:
     # Extra request-body params for every chat call. llama-server accepts its
     # native sampling params (top_k, min_p, ...) and chat_template_kwargs on
     # /v1/chat/completions; rides extra_body on the litellm path too.
-    model_extra_body: dict = field(default_factory=dict)
+    model_extra_body: JsonObject = Field(default_factory=dict)
 
     # --- Agent behavior. Edit prompts/system.md to change the default brain;
     # override `system_prompt` in configure() for per-deploy customization. ---
-    system_prompt: str = field(default_factory=lambda: load_prompt("system.md"))
+    system_prompt: str = Field(default_factory=lambda: load_prompt("system.md"))
 
     # --- Persistence (sessions + long-term user memories) ---
     db_file: str = "data/chatbot.db"
@@ -118,6 +198,11 @@ class Config:
     # persona write the section is deduped and capped to the newest this many bullets
     # (<= 0 caps nothing but still dedupes). The prose base is never touched.
     persona_adjustments_max: int = 40
+    # What happens to a persona rule the curator learns. The persona is GLOBAL,
+    # so a rule drawn from one user's turn changes the bot for every user:
+    # "propose" (default) queues it for the operator (needs evolution_enabled;
+    # dropped otherwise), "direct" appends it at once, "off" never learns one.
+    persona_learning: Literal["off", "propose", "direct"] = "propose"
 
     # --- Bot identity (see magi/core/identity). A global, operator-set profile —
     # display name, description, and profile picture — the bot presents as itself.
@@ -139,7 +224,7 @@ class Config:
     # fallback when the pass fails or returns something unusable. Bump
     # mood_vocab_version when the vocabulary changes so clients can re-sync. ---
     mood_enabled: bool = False
-    mood_vocabulary: dict[str, str] = field(
+    mood_vocabulary: dict[str, str] = Field(
         default_factory=lambda: {
             "neutral": "composed, matter-of-fact delivery — the resting default",
             "warm": "friendly, encouraging, genuinely pleased to help",
@@ -164,7 +249,7 @@ class Config:
     tts_model: str = "tts-1"
     tts_voice: str = "af_heart"
     tts_format: str = "mp3"
-    tts_mood_styles: dict[str, dict] = field(default_factory=dict)
+    tts_mood_styles: dict[str, JsonObject] = Field(default_factory=dict)
     stt_enabled: bool = False
     stt_base_url: str = "http://127.0.0.1:8890/v1"
     stt_api_key: str | None = _secret("STT_API_KEY")
@@ -189,7 +274,7 @@ class Config:
     # skipped with a warning, never a boot failure. Operator-added servers from
     # the admin settings file merge over this list by name (restart to apply).
     # Needs the optional `mcp` extra. ---
-    mcp_servers: list[dict] = field(default_factory=list)
+    mcp_servers: list[JsonObject] = Field(default_factory=list)
 
     # --- Web search tool (ddgs-backed; optional `websearch` extra). Gives the
     # lead `web_search` — result titles/urls/snippets it then reads via the
@@ -201,6 +286,22 @@ class Config:
     # turn and at GET /v1/reminders. No push infra — surfacing is on-open. ---
     reminders_enabled: bool = False
 
+    # --- Session search (magi/core/session_index + agent/tools/session_search).
+    # Every finished turn is appended to a local SQLite FTS5 index so the lead
+    # can search what was actually said in past conversations (scoped to the
+    # current user). Needs an SQLite with FTS5 (`magi doctor` checks). ---
+    session_search_enabled: bool = False
+    session_index_path: str = "data/session_index.db"
+
+    # --- Delegation (agent/tools/delegate). A `delegate_task` tool that hands a
+    # self-contained subtask to a fresh, isolated agent (member model, the
+    # member default tools — no memory, no further delegation) and returns its
+    # answer, keeping the lead's context small. Bounded by a timeout and its
+    # own tool-call cap. ---
+    delegation_enabled: bool = False
+    delegate_timeout_seconds: float = 120.0
+    delegate_tool_call_limit: int = 8
+
     # --- Self-evolution with a human in the loop (see magi/core/evolution).
     # The assistant may PROPOSE changes to allowlisted prompts and new
     # declarative HTTP tools; nothing applies until the operator approves it in
@@ -210,7 +311,7 @@ class Config:
     # identity prompts do not belong in the allowlist — tone bends, identity
     # doesn't. ---
     evolution_enabled: bool = False
-    evolution_proposable: list[str] = field(default_factory=lambda: ["curation.md", "greet.md"])
+    evolution_proposable: list[str] = Field(default_factory=lambda: ["curation.md", "greet.md"])
     evolution_queue_max: int = 20
 
     # --- Team behavior / robustness ---
@@ -238,7 +339,7 @@ class Config:
     # warn-only behavior (nothing truncates). Persona is never clamped — it IS
     # the assistant. Trim generously: these are a seatbelt against one runaway
     # section eating the window, not a tuning knob. ---
-    context_section_budgets: dict[str, int] = field(default_factory=dict)
+    context_section_budgets: dict[str, int] = Field(default_factory=dict)
 
     # --- Pressure-triggered session fold. The turn-count fold (summarize_every)
     # can lag a session full of LONG turns; with this > 0 the per-turn fold also
@@ -260,11 +361,10 @@ class Config:
     session_pending_max: int = 30
     session_summary_max_chars: int = 4_000
 
-    # --- Long-term rendering. The durable fact sheet (long_term_facts.json) is owned
-    # by the curator below; alongside it, build_context injects the most recent raw
-    # facts written via `remember` so freshly-learned facts surface before the next
-    # curation pass folds them in. ---
-    long_term_recent_raw: int = 5  # raw facts kept alongside the curated profile
+    # Deprecated, no effect: the raw long_term.md log is migrated into the fact
+    # sheet, so there are no "recent raw facts" to render. Accepted so existing
+    # config files still load; remove it from yours.
+    long_term_recent_raw: int = 5
 
     # --- Memory curator (see magi/core/memory/curation + magi/agent/curator). A cheap
     # post-turn pass that owns durable memory: instead of the lead appending
@@ -318,7 +418,7 @@ class Config:
     # deployment run chat on a local llama-server while sourcing embeddings from a
     # remote model — llama-server serves only one model per instance, so semantic
     # memory + knowledge otherwise need a second local instance.
-    embeddings_provider: str = "litellm"  # "litellm" | "openai"
+    embeddings_provider: Literal["litellm", "openai"] = "litellm"
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str | None = _secret("QDRANT_API_KEY")
     semantic_top_k: int = 5
@@ -368,7 +468,7 @@ class Config:
     # Credentials are secrets (.env); the rest lives here in code. The legacy
     # `s3_enabled=True` still works (configure() maps it to storage_enabled). ---
     storage_enabled: bool = False
-    storage_backend: str = "local"  # "local" | "s3"
+    storage_backend: Literal["local", "s3"] = "local"
     storage_local_dir: str = "data/artifacts"
     s3_endpoint_url: str | None = "http://localhost:9000"
     s3_region: str = "us-east-1"
@@ -411,8 +511,25 @@ class Config:
     seanime_use_mcp: bool = False
     seanime_mcp_url: str = "http://127.0.0.1:43211/api/v1/mcp"
 
+    # --- Channels `magi run` starts by default (config file: `channels.enabled`). ---
+    channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+
+    # --- Sandboxed shell commands (`run_command`, approvals via /approve <id>). ---
+    sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
+
+    # --- Skills (SKILL.md files) and toolsets (groups of lead tools). ---
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    toolsets: ToolsetsConfig = Field(default_factory=ToolsetsConfig)
+
     # --- Discord bot ---
     DISCORD_BOT_TOKEN: str | None = _secret("DISCORD_BOT_TOKEN")
+
+    # --- Telegram bot (magi/channels/telegram; optional `telegram` extra). Long
+    # polling, so no public URL is needed. Deny by default: only the numeric
+    # Telegram user ids listed here may talk to the bot — an empty list means
+    # nobody (the bot logs each refused id so you can add yours). ---
+    telegram_bot_token: str | None = _secret("TELEGRAM_BOT_TOKEN")
+    telegram_allowed_users: list[int] = Field(default_factory=list)
 
     # --- HTTP API service (magi/channels/api). The standalone integration point for
     # external clients (desktop app, web UI, ...). Bound to localhost by
@@ -425,7 +542,7 @@ class Config:
     # ["https://app.example.com"], or ["*"] to allow any). Empty = no CORS
     # headers (same-origin / non-browser clients only). Auth is a Bearer token,
     # not a cookie, so credentials are not allowed and "*" is safe.
-    api_cors_origins: list[str] = field(default_factory=list)
+    api_cors_origins: list[str] = Field(default_factory=list)
 
     # --- Admin service (magi/channels/admin). An operator-only tool to view and
     # manage memory + organize the knowledge corpus. ADR 0002's default is a
@@ -504,55 +621,95 @@ class Config:
     # How long to wait (seconds) for the Node child to start serving before giving up.
     desktop_server_ready_timeout: float = 30.0
 
+    def settings_lines(self) -> list[str]:
+        """`name = value` for every setting, secrets masked and long prose
+        reduced to its length — what the startup banner and `magi config show`
+        print."""
+        masked = set(secret_fields())
+        prose = {"system_prompt", "persona_seed"}
+        lines: list[str] = []
+        for name in type(self).model_fields:
+            value = getattr(self, name)
+            if name in masked:
+                shown = _mask(value if isinstance(value, str) else None)
+            elif name in prose and isinstance(value, str):
+                shown = f"<{len(value)} chars>"
+            else:
+                shown = value
+            lines.append(f"{name} = {shown}")
+        return lines
+
     def log_settings(self) -> None:
         """Dump the effective config to the console (secrets masked).
 
         Single startup banner so you can confirm *which* settings are live —
         backend urls, model ids, context windows, paths — in one place.
         """
-        # Secrets that must never hit the log verbatim.
-        masked = {
-            "litellm_api_key",
-            "llamacpp_api_key",
-            "openai_api_key",
-            "DISCORD_BOT_TOKEN",
-            "qdrant_api_key",
-            "api_auth_token",
-            "admin_auth_token",
-            "seanime_token",
-            "s3_access_key_id",
-            "s3_secret_access_key",
-            "admin_password",
-            "session_secret",
-            "tts_api_key",
-            "stt_api_key",
-        }
-        # Long prose: log the length, not the body.
-        prose = {"system_prompt", "persona_seed"}
-
         log_info("=== effective config ===")
-        for f in fields(self):
-            value = getattr(self, f.name)
-            if f.name in masked:
-                shown = _mask(value)
-            elif f.name in prose:
-                shown = f"<{len(value)} chars>"
-            else:
-                shown = value
-            log_info(f"  {f.name} = {shown}")
+        for line in self.settings_lines():
+            log_info(f"  {line}")
         log_info("========================")
 
 
+def secret_fields() -> dict[str, str]:
+    """Secret field name -> the environment variable it is read from."""
+    out: dict[str, str] = {}
+    for name, info in Config.model_fields.items():
+        extra = info.json_schema_extra
+        if extra is None or callable(extra):
+            continue
+        env = extra.get(_SECRET_ENV)
+        if isinstance(env, str):
+            out[name] = env
+    return out
+
+
 config = Config()
+
+
+def _apply(values: Config, names: Iterable[str]) -> None:
+    """Copy `names` from a validated `values` onto the shared singleton.
+
+    The singleton is mutated in place (not rebound) so every module already
+    holding `from magi.core.config import config` sees the change; frozen still
+    blocks any other write path."""
+    for name in names:
+        object.__setattr__(config, name, getattr(values, name))
+
+
+_MAPPING = TypeAdapter(dict[str, object])
+
+
+def _merge(base: BaseModel, overrides: dict[str, object]) -> dict[str, object]:
+    """`base` dumped with `overrides` applied per key: a mapping given for a
+    nested group (`sandbox: {allowed_users: [...]}`) updates only the keys it
+    names; any other value (including a group model instance) replaces."""
+    merged: dict[str, object] = base.model_dump()
+    for key, value in overrides.items():
+        current = getattr(base, key, None)
+        if isinstance(current, BaseModel) and isinstance(value, dict):
+            merged[key] = _merge(current, _MAPPING.validate_python(value))
+        else:
+            merged[key] = value
+    return merged
+
+
+def derive(base: Config, **overrides: object) -> Config:
+    """A validated copy of `base` with `overrides` applied (the singleton is
+    untouched). Nested groups merge per key, so a later config file only
+    changes the group keys it sets. Raises `pydantic.ValidationError` on an
+    unknown field or a wrong-typed value."""
+    return Config.model_validate(_merge(base, overrides))
 
 
 def configure(**overrides: object) -> Config:
     """Set deployment configuration in code — call once, at the entrypoint,
     before building any channel/team (values are read at build/run time).
 
-    Mutates the shared singleton in place so every `from magi.core.config import
-    config` already holding the object sees the new values. The dataclass
-    stays frozen so only this deliberate path can write.
+    Every override is validated against `Config` (unknown names and wrong
+    types raise `pydantic.ValidationError`). Mutates the shared singleton in
+    place so every `from magi.core.config import config` already holding the
+    object sees the new values.
     """
     # Back-compat: object storage used to be S3-only and gated by `s3_enabled`.
     # It's now backend-agnostic (`storage_enabled` + `storage_backend`); honor the
@@ -565,9 +722,24 @@ def configure(**overrides: object) -> Config:
         if legacy:
             overrides.setdefault("storage_backend", "s3")
 
-    valid = {f.name for f in fields(config)}
-    for name, value in overrides.items():
-        if name not in valid:
-            raise ValueError(f"unknown config field {name!r}; valid: {sorted(valid)}")
-        object.__setattr__(config, name, value)
+    _apply(derive(config, **overrides), list(overrides))
     return config
+
+
+def reset_config() -> Config:
+    """Restore every field to its default (secrets re-read from the environment).
+    For tests and long-lived tools that reconfigure; entrypoints never need it."""
+    _apply(Config(), list(Config.model_fields))
+    return config
+
+
+def load_secrets(home: Path | None = None) -> None:
+    """Load secrets from `<home>/.env` (then `./.env`) into the environment and
+    fill any secret field that is still unset. Existing environment variables
+    always win over file values."""
+    if home is not None:
+        load_dotenv(home / ".env", override=False)
+    load_dotenv(override=False)
+    for name, env in secret_fields().items():
+        if getattr(config, name) is None and (value := os.getenv(env)):
+            object.__setattr__(config, name, value)

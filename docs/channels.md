@@ -3,8 +3,9 @@
 A **channel** is a transport over the shared brain. Every channel builds the same
 [`ConversationService`](../src/magi/core/conversation.py) via
 [`build_conversation_service`](../src/magi/channels/bootstrap.py) and adds only its
-own wire format. Two ship today: Discord and the HTTP API (which also exposes an
-OpenAI-compatible shim).
+own wire format. Three ship today: Discord, Telegram, and the HTTP API (which
+also exposes an OpenAI-compatible shim). Any mix of them runs in **one process
+around one brain** (`magi run api discord telegram admin`).
 
 ```mermaid
 flowchart LR
@@ -12,6 +13,7 @@ flowchart LR
         CS[ConversationService<br/>+ memory + team]
     end
     DISC[Discord client] --> CS
+    TG[Telegram bot] --> CS
     NATIVE[Native HTTP /v1] --> CS
     SHIM[OpenAI shim /v1/chat/completions] --> CS
 ```
@@ -34,15 +36,37 @@ formalizes the seam every adapter plugs into (see
   `user_id` through this (`f"{platform}:{external_id}"`, e.g. `discord:123`,
   `api:u1`) before calling `ConversationService`, so two platforms whose
   native ids happen to collide never silently share one user's memory.
-- **`run_gateway(*coros)`** — runs several long-lived service coroutines (an
-  adapter's `serve_async()`, an admin uvicorn server) concurrently in one
-  process; the first to finish or raise takes the rest down with it. Backs
-  `serve_with_admin` (`config.admin_enabled`).
+- **`run_gateway(*coros, on_first_exit=…)`** — runs several long-lived service
+  coroutines concurrently in one process; the first to finish or raise takes
+  the rest down with it. Adapters that implement `request_stop()`
+  (`Stoppable`: the uvicorn-backed API and admin) are asked to stop gracefully
+  first, then anything still running after the grace period is cancelled.
+
+### One process, many channels
+
+[`channels/registry.py`](../src/magi/channels/registry.py) (see
+[ADR 0005](adr/0005-one-process-gateway.md)) builds the conversation stack
+**once** and gives each adapter a view of it with its own output guidance
+(`ConversationService.with_guidance`) — same team, memory, knowledge, and mood
+pass. Scope stays per message (a `ContextVar`), so channels never see each
+other's users.
+
+```bash
+magi run api discord telegram admin     # or list them in channels.enabled
+```
+
+- `admin` alone runs model-free; alongside chat channels it shares their memory
+  orchestrator, so its summarize/curate triggers run the real passes.
+- `desktop` owns the Qt loop and always runs on its own.
+- The Discord specialist joins the shared roster only when Discord is served.
+- `api` and `admin` must bind different ports (checked at startup).
+- `admin_enabled: true` still mounts the admin surface onto the API app when
+  `api` is served (one port), or adds the admin server when it is not.
 
 ## Discord bot
 
 ```bash
-python main.py          # needs DISCORD_BOT_TOKEN in .env
+magi run discord        # needs DISCORD_BOT_TOKEN in $MAGI_HOME/.env
 ```
 
 [`build_discord_client`](../src/magi/channels/discord.py) wires the shared brain
@@ -50,6 +74,27 @@ with Discord-only output guidance ([`prompts/channels/discord.md`](../src/magi/p
 and a `discord.Client`. Inbound audio is only forwarded to runs when the lead can
 actually hear it (vision-only backends reject `input_audio` parts). The Discord
 specialist member (`build_discord_agent`) acts inside the current live conversation.
+
+## Telegram bot
+
+```bash
+uv sync --extra telegram      # or: uv tool install 'magi-ai-assistant[telegram]'
+magi run telegram             # needs TELEGRAM_BOT_TOKEN (from @BotFather)
+```
+
+[`channels/telegram.py`](../src/magi/channels/telegram.py) long-polls Telegram
+(no public URL needed), with Telegram output guidance
+([`prompts/channels/telegram.md`](../src/magi/prompts/channels/telegram.md)).
+
+- **Deny by default**: only numeric user ids in `telegram_allowed_users` are
+  served; anyone else is told their id. `/whoami` always answers, so a new user
+  can find their id and the operator can run
+  `magi config set telegram_allowed_users "[123456]"`.
+- Memory scope: `telegram:<user id>`; session: `tg-<chat id>`.
+- Photos and documents ride into the run as agno media; replies are split at
+  4096 chars, and reply images/files are sent after the text.
+- Commands: `/new` (also `/reset`, `/flush`) clears the chat's short-term
+  history, `/help`, `/whoami`.
 
 ## HTTP API
 

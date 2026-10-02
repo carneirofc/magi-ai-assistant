@@ -8,6 +8,64 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Added
 
+- **Sandboxed shell commands** (`sandbox.backend: docker | local`). The lead's
+  `run_command` runs in a per-user workspace — by default a hardened
+  throwaway container (no network, read-only root, all caps dropped, resource
+  limits). Only `sandbox.allowed_users` may use it; a policy refuses
+  catastrophic commands and holds risky ones for the user's `/approve <id>`
+  (or `/deny <id>`), which every channel supports. Every call is audited to
+  `$MAGI_HOME/logs/exec.jsonl`; `magi doctor` checks the backend. See ADR 0007.
+
+- **Session search** (`session_search_enabled`). Finished turns are indexed in
+  a local SQLite FTS5 file and the lead gets `search_sessions`, always scoped
+  to the current user. `magi doctor` checks FTS5.
+- **Delegation** (`delegation_enabled`). `delegate_task` runs a self-contained
+  subtask on an isolated helper agent (member model and default tools, no
+  memory, no recursion) with its own timeout and tool-call cap.
+
+- **File skills (SKILL.md).** Skills in the agentskills.io format under
+  `$MAGI_HOME/skills` (plus `skills.dirs`) join the Python skill registry.
+  Progressive disclosure: the lead sees `name: description`, `skill_view`
+  loads the body and bundled files. The assistant can save and improve skills
+  (`skill_create`, `skill_patch`) per `skills.agent_write` — `propose` routes
+  through the evolution queue (new `skill` proposal kind), `direct` writes
+  immediately. `magi skills list` and new doctor checks. See ADR 0006.
+- **Toolsets.** The lead's tools are grouped (`http`, `media`, `websearch`,
+  `skills`, …) and `toolsets.disabled` switches groups off.
+- `magi.core.log` — typed `log_info` / `log_warning` for strict-mode code.
+
+- **Bare-metal deploy.** `scripts/install.sh` installs magi with
+  `uv tool install` (extras via `MAGI_EXTRAS`) and runs `magi setup`.
+  `magi gateway install|uninstall|status|logs` manages a systemd user service
+  that runs `magi run` and restarts on failure.
+
+- **One process, many channels.** `magi run api discord telegram admin` (or
+  `channels.enabled`) builds the brain once and serves every channel from it
+  (`channels/registry.py`, ADR 0005). Adapters get the shared service through
+  `ConversationService.with_guidance`; the API and admin servers stop
+  gracefully (`gateway.Stoppable`, `run_gateway(on_first_exit=…)`). `api` and
+  `admin` port collisions fail at startup.
+- **Telegram channel** (`telegram` extra, python-telegram-bot). Long polling,
+  deny-by-default allowlist (`telegram_allowed_users`, `/whoami` to find an
+  id), photos/documents as media, 4096-char chunking, `/new` to reset. New
+  secret `TELEGRAM_BOT_TOKEN`; `magi setup` and `magi doctor` know about it.
+
+- **`magi` CLI and typed config file.** A validated YAML config
+  (`./magi.yaml`, else `$MAGI_HOME/config.yaml`; `MAGI_HOME` defaults to
+  `~/.magi`) replaces editing Python to deploy. New commands: `magi setup`
+  (wizard; secrets go to `$MAGI_HOME/.env` with mode 0600), `magi run
+  [channel]`, `magi doctor` (backend reachability, missing extras, tokens,
+  FTS5), and `magi config path|show|get|set`. Relative data paths resolve
+  against the config file's directory. New `channels.enabled` setting. See
+  ADR 0004.
+
+- **Static type checking (basedpyright).** `uv run basedpyright` now gates CI
+  and pre-commit: `standard` mode everywhere, `strict` for the model-free
+  `src/magi/core`. Pre-existing findings are frozen in
+  `.basedpyright/baseline.json`; new code must be clean and a PR check
+  rejects a baseline that grows. CI now syncs `--all-extras` so the lazily
+  imported optional backends are typed.
+
 - **Runtime validation of untrusted JSON (web).** Admin-api responses are now
   parsed with zod schemas generated from the OpenAPI spec
   (`src/lib/api-schemas.ts`, via `openapi-zod-client` in `npm run gen:api`;
@@ -35,6 +93,56 @@ All notable changes to **magi** are documented here. The format follows
 
 ### Changed
 
+- **Persona learning is operator-gated** (`persona_learning`, default
+  `propose`). The persona is global, so a behaviour rule the curator draws from
+  one user's turn now goes to the evolution queue as a `persona` proposal
+  instead of changing the bot for everyone at once (`direct` restores the old
+  behaviour; `off` disables it). Without `evolution_enabled` such rules are
+  dropped — `magi doctor` warns. The curator also sees which prompts it may
+  propose changes to.
+- **Memory never delays a reply.** The session fold and the curator now run as
+  a background tail after the reply is returned, serialized per user and
+  drained on shutdown (`ConversationService.drain`).
+- **One source of durable facts.** `remember()` writes the curated fact sheet;
+  the legacy `long_term.md` log is migrated into it once (renamed
+  `long_term.migrated.md`) and the stale "Recent facts" block is gone.
+- The fact cap (`long_term_facts_max`) drops the least recently added-or-updated
+  facts instead of the earliest-added ones.
+- `recall_conversation` is offered only when `search_sessions` (FTS5) is off,
+  so the lead no longer chooses between two past-conversation tools.
+- `magi doctor` warns when `memory_curation` is off (nothing writes durable
+  memory).
+
+- **One compose file, opt-in profiles.** `docker-compose.app.yaml` is merged
+  into `docker-compose.yaml`; every service now sits behind a profile
+  (`qdrant`, `s3`, `litellm`, `monitoring`, `app`, `admin`), so a bare
+  `docker compose up` starts nothing. Qdrant, LiteLLM, and the admin API gained
+  healthchecks. The container runs `magi run` with `docker/magi.docker.yaml`
+  (one process for every enabled channel; the separate `discord` service is
+  gone — list `discord` in `channels.enabled`). `MAGI_HOME` lives under
+  `data/` in the image.
+
+- **`main.py` is a thin wrapper.** The repo's deployment settings moved to
+  `magi.yaml` and the `--docker` deltas to `docker/magi.docker.yaml`;
+  `python main.py <channel> [--docker]` behaves as before. `pyyaml` is now a
+  direct dependency.
+
+- **Typed, validated config.** `Config` is now a frozen pydantic model:
+  `configure(...)` checks value types as well as names (a failed call changes
+  nothing), `model_provider`, `embeddings_provider`, and `storage_backend` are
+  `Literal`s, and free-form blobs are `JsonObject`. New helpers: `derive()`
+  (validated copy), `reset_config()`, `load_secrets(home)`, and
+  `secret_fields()` (the masked-in-logs list is now derived from it). Tests
+  restore the singleton automatically after each test.
+
+- **Typed upstream parsing.** The Ollama tools validate `/api/tags`,
+  `/api/show`, and `/api/ps` with pydantic wire models instead of `.get()`
+  chains. MCP server specs are validated into an `McpServerSpec` model (a
+  wrong-typed field now skips that server with a warning); the operator
+  settings and admin MCP endpoints are typed `JsonObject`. The Discord reply
+  target is typed as `Thread | DMChannel | TextChannel`, and the client's two
+  `# type: ignore` comments are gone.
+
 - **Stricter ruff rules, enforced format.** ruff now selects `E, F, I, UP, B,
   ANN`: annotations are required and `typing.Any` is banned (`ANN401`). The
   tree is reformatted with `ruff format`, and CI plus pre-commit gate
@@ -61,6 +169,42 @@ All notable changes to **magi** are documented here. The format follows
   state and composer placeholder. All existing props and features (attachments,
   dictation, TTS, quoting, branches, context meter, session rail) are
   unchanged, and `CompanionSurface` still works for the side-stage arrangement.
+
+### Deprecated
+
+- `long_term_recent_raw` has no effect and will be removed; drop it from config
+  files.
+
+### Fixed
+
+- The `run_command` policy judged only the first word of each command, so
+  `env sudo …`, `nice`/`timeout`/`xargs` prefixes, `bash -c '…'`, `eval`,
+  `find -exec`, and `$(…)` bodies hid forbidden commands (they ran as
+  *safe*). Wrappers are now unwrapped and nested commands judged
+  recursively; `rm -rf` of `/` or home is forbidden in any quoted/`~/*`/
+  `$HOME` spelling; `$VAR` expansions and paths embedded in an argument
+  (`python -c "open('/etc/…')"`, `--file=/etc/…`) need approval.
+- A later config file (or `configure()` call) replaced a whole nested group:
+  an overlay setting only `sandbox.allowed_users` silently reset
+  `sandbox.backend` to `off`. Group mappings now merge per key; passing a
+  group model instance still replaces the group.
+- `skill_patch` (and approved skill patches) wrote to `$MAGI_HOME/skills` even
+  for a skill living in a configured `skills.dirs` entry, where the copy was
+  shadowed and the patch silently never applied. Patches now land in the
+  skill's own directory, keep unmodelled frontmatter keys, and an approval is
+  refused when the skill changed since it was proposed.
+- The curator filed evolution proposals under the raw `config.memory_dir`
+  instead of the resolved memory root (operator override, `~` expansion), so
+  they could miss the admin queue. One store is now shared by the curator, the
+  team, and the admin surface.
+- Memory files (facts, windows, summaries, persona, proposals) are written
+  atomically; a crash mid-write could leave a truncated file that the next write
+  replaced with an empty profile.
+- A session fold no longer deletes turns evicted while the summarizer ran.
+- The evolution queue refuses a duplicate of a pending proposal, so a repeating
+  proposer can no longer fill it.
+- Disabled skills were still reachable through `skill_view` / `skill_patch`, and
+  `skill_create` accepted a name owned by a Python skill.
 
 ## [0.4.0] - 2026-07-21
 

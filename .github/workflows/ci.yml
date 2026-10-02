@@ -21,14 +21,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install uv + Python
         uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.14"
 
-      - name: Sync (with dev group)
-        run: uv sync --dev
+      # All extras: the optional backends are lazy-imported, so typing them
+      # needs them installed — and the type baseline is recorded against this
+      # exact environment (see [tool.basedpyright] in pyproject.toml).
+      - name: Sync (with dev group + all extras)
+        run: uv sync --dev --all-extras
 
       - name: Ruff lint
         run: uv run ruff check .
@@ -36,8 +41,26 @@ jobs:
       - name: Ruff format
         run: uv run ruff format --check .
 
+      # New type errors fail; pre-existing ones are frozen in the baseline,
+      # which basedpyright shrinks automatically as errors are fixed. A dirty
+      # baseline afterwards means a fix landed without its shrunk baseline.
+      - name: Typecheck (basedpyright)
+        run: |
+          uv run basedpyright
+          git diff --exit-code -- .basedpyright/baseline.json
+
       - name: Tests
         run: uv run pytest -q
+
+      # The ratchet: the committed baseline may only shrink relative to master.
+      - name: Type baseline never grows
+        if: github.event_name == 'pull_request'
+        run: |
+          count() { python3 -c 'import json,sys; print(sum(len(v) for v in json.load(sys.stdin)["files"].values()))'; }
+          base=$(git show "origin/${{ github.base_ref }}:.basedpyright/baseline.json" 2>/dev/null | count || echo 999999)
+          head=$(count < .basedpyright/baseline.json)
+          echo "baseline: base=$base head=$head"
+          test "$head" -le "$base"
 
       - name: Dependency vulnerability audit (advisory)
         continue-on-error: true

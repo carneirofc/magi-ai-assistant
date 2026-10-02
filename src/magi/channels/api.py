@@ -845,7 +845,7 @@ def create_app(
                 TranscriptTurn(
                     role=str(t.get("role", "?")),
                     content=str(t.get("content", "")),
-                    ts=t.get("ts"),
+                    ts=ts if isinstance(ts := t.get("ts"), str) else None,
                 )
                 for t in mem.live_turns.read()
             ],
@@ -1117,21 +1117,30 @@ def _collect_mcp_toolkits(runner: object) -> list[MCPConnection]:
     return toolkits
 
 
-def build_api_app(db: BaseDb | None = None) -> FastAPI:
-    """Composition root: the real stack from config, served over HTTP."""
+def build_api_conversation(db: BaseDb | None = None) -> ConversationService:
+    """The chat stack this channel serves when it runs on its own."""
     from magi.agent.members import MEMBER_BUILDERS, build_discord_agent
     from magi.channels.bootstrap import build_conversation_service
-    from magi.core.config import config
     from magi.core.prompts import load_prompt
 
-    log_info(f"building api app (db={'injected' if db else 'default'})")
-    conversation = build_conversation_service(
+    log_info(f"building api conversation (db={'injected' if db else 'default'})")
+    return build_conversation_service(
         channel_guidance=load_prompt("channels/api.md"),
         db=db,
         # The Discord specialist needs a live Discord conversation context; over
         # the API there is none, so it's left off the roster.
         member_builders=[b for b in MEMBER_BUILDERS if b is not build_discord_agent],
     )
+
+
+def build_api_app_for(conversation: ConversationService) -> FastAPI:
+    """The HTTP app over an already-built conversation (the gateway's shared
+    brain, or this channel's own). Applies the API's output guidance, and
+    mounts the admin surface when `config.admin_enabled`."""
+    from magi.core.config import config
+    from magi.core.prompts import load_prompt
+
+    conversation = conversation.with_guidance(load_prompt("channels/api.md"))
     if config.api_auth_token is None:
         log_info("api: auth DISABLED (API_AUTH_TOKEN not set) — keep the bind local")
     if config.api_cors_origins:
@@ -1166,12 +1175,15 @@ def build_api_app(db: BaseDb | None = None) -> FastAPI:
     )
 
 
+def build_api_app(db: BaseDb | None = None) -> FastAPI:
+    """Composition root: the real stack from config, served over HTTP."""
+    return build_api_app_for(build_api_conversation(db))
+
+
 class ApiAdapter:
-    """This channel as a `gateway.PlatformAdapter` (ADR 0003) — lets the HTTP
-    API be run through `gateway.run_gateway` alongside another adapter in one
-    process, the same role `DiscordClient` already plays. Additive: `main.py api`
-    keeps calling `uvicorn.run(build_api_app(), ...)` directly; nothing requires
-    switching to this.
+    """This channel as a `gateway.PlatformAdapter` (ADR 0003) — how the HTTP
+    API runs through `gateway.run_gateway` alongside other adapters in one
+    process (`channels/registry.py`, ADR 0005).
     """
 
     platform: str = _PLATFORM
@@ -1180,6 +1192,10 @@ class ApiAdapter:
         import uvicorn
 
         self._server = uvicorn.Server(uvicorn.Config(app, host=host, port=port))
+
+    def request_stop(self) -> None:
+        """Let uvicorn finish in-flight requests and its lifespan (gateway.Stoppable)."""
+        self._server.should_exit = True
 
     async def serve_async(self) -> None:
         await self._server.serve()

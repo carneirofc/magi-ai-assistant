@@ -197,7 +197,6 @@ def test_snapshot_reads_origin_stamps():
 
 def test_team_build_stamps_recipe_registered_and_skill_origins(tmp_path):
     import json as _json
-    from dataclasses import fields
 
     from agno.tools import tool
 
@@ -232,7 +231,7 @@ def test_team_build_stamps_recipe_registered_and_skill_origins(tmp_path):
 
     skills_snapshot = list(SKILLS)
     toolkit_snapshot = list(LEAD_TOOLKIT_BUILDERS)
-    config_snapshot = {f.name: getattr(config, f.name) for f in fields(config)}
+    config_snapshot = config.model_dump()
     register_skill(Skill(name="demo", prompt="demo skill", tools=(skill_tool,)))
     register_lead_toolkit(lambda memory: [persona_tool])
     try:

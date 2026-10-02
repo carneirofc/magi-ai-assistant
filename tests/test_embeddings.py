@@ -7,13 +7,12 @@ routing decision (`_route`): which model prefix + base URL + key the configured
 endpoint so a deployment can serve chat locally and embeddings remotely.
 """
 
-import dataclasses
-
 import magi.core.embeddings as emb
+from magi.core.config import derive
 
 
 def _with(**overrides):
-    return dataclasses.replace(emb.config, **overrides)
+    return derive(emb.config, **overrides)
 
 
 def test_route_litellm_is_default(monkeypatch):

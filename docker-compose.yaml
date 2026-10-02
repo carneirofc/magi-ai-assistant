@@ -1,7 +1,23 @@
+# Everything here is opt-in by profile — `docker compose up` alone starts
+# nothing. The default deployment is bare-metal (`magi gateway install`,
+# docs/getting-started.md); use these for the optional backends, or to run
+# magi itself in a container.
+#
+#   docker compose --profile qdrant up -d        # semantic memory + knowledge
+#   docker compose --profile s3 up -d            # RustFS byte archive (+ bucket)
+#   docker compose --profile litellm up -d       # proxy to remote models (+ postgres, minio)
+#   docker compose --profile monitoring up -d    # prometheus
+#   docker compose --profile app up -d --build   # magi in a container (channels.enabled from magi.yaml)
+#   docker compose --profile admin up -d --build # separate admin API + web BFF (ADR 0002)
+#
+# Profiles combine: `--profile app --profile qdrant`. Bake optional extras into
+# the image with EXTRAS, e.g. EXTRAS="--extra telegram --extra semantic".
+
 services:
   litellm:
     image: ghcr.io/berriai/litellm:v1.87.0
     container_name: chatbot-litellm
+    profiles: ["litellm"]
     restart: unless-stopped
     depends_on:
       postgres:
@@ -41,10 +57,17 @@ services:
     command:
      - "--config=/app/config.yaml"
      - "--port=4000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   postgres:
     image: postgres:17-alpine
     container_name: chatbot-litellm-postgres
+    profiles: ["litellm"]
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-litellm}
@@ -65,6 +88,7 @@ services:
   qdrant:
     image: qdrant/qdrant:latest
     container_name: chatbot-qdrant
+    profiles: ["qdrant"]
     restart: unless-stopped
     ports:
       - "6333:6333"
@@ -74,6 +98,13 @@ services:
     environment:
       QDRANT__SERVICE__HTTP_PORT: 6333
       QDRANT__SERVICE__GRPC_PORT: 6334
+    healthcheck:
+      # The image ships bash but no curl: probe the HTTP port directly.
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   # RustFS — S3-compatible object storage. Backs the chatbot's durable file/image
   # archive (core/storage + agent/tools/storage, gated by config.s3_enabled). Holds
@@ -83,6 +114,7 @@ services:
   rustfs:
     image: rustfs/rustfs:latest
     container_name: chatbot-rustfs
+    profiles: ["s3"]
     restart: unless-stopped
     ports:
       - "9000:9000"  # S3 API
@@ -107,6 +139,7 @@ services:
   rustfs-init:
     image: minio/mc:latest
     container_name: chatbot-rustfs-init
+    profiles: ["s3"]
     depends_on:
       rustfs:
         condition: service_healthy
@@ -127,6 +160,7 @@ services:
   minio:
     image: minio/minio:latest
     container_name: chatbot-minio
+    profiles: ["litellm"]
     restart: unless-stopped
     ports:
       - "9100:9000"
@@ -147,6 +181,7 @@ services:
   minio-init:
     image: minio/mc:latest
     container_name: chatbot-minio-init
+    profiles: ["litellm"]
     depends_on:
       minio:
         condition: service_healthy
@@ -164,6 +199,7 @@ services:
   prometheus:
     image: prom/prometheus
     container_name: chatbot-prometheus
+    profiles: ["monitoring"]
     restart: unless-stopped
     volumes:
       - prometheus_data:/prometheus
@@ -175,9 +211,98 @@ services:
       - "--storage.tsdb.path=/prometheus"
       - "--storage.tsdb.retention.time=15d"
 
+
+  # magi itself — every channel in channels.enabled (magi.yaml) in one process,
+  # with the container overlay (bind 0.0.0.0, reach host services). Serve more
+  # channels by listing them in magi.yaml or appending names to `command`.
+  magi:
+    build:
+      context: .
+      args:
+        EXTRAS: ${EXTRAS:-}
+    image: magi-app:local
+    container_name: magi
+    profiles: ["app"]
+    restart: unless-stopped
+    command: ["magi", "run", "-c", "magi.yaml", "-c", "docker/magi.docker.yaml"]
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env                      # secrets only (API_AUTH_TOKEN, DISCORD_BOT_TOKEN, …)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # so the container can reach host services
+    volumes:
+      - ./data:/app/data          # db, memory files, byte archive, MAGI_HOME
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Operator admin API as its own service (ADR 0002's separate posture). NOT
+  # published — reachable only on the compose network, fronted by `web`. For a
+  # single-operator setup, skip this profile: magi.yaml's admin_enabled mounts
+  # /admin/v1/* on the app itself.
+  admin-api:
+    build:
+      context: .
+      args:
+        EXTRAS: ${EXTRAS:-}
+    image: magi-app:local
+    container_name: magi-admin-api
+    profiles: ["admin"]
+    restart: unless-stopped
+    command: ["magi", "run", "-c", "magi.yaml", "-c", "docker/magi.docker.yaml", "admin"]
+    expose:
+      - "8100"                    # compose-network only; no host `ports:` mapping
+    env_file:
+      - .env                      # ADMIN_AUTH_TOKEN, QDRANT_API_KEY, …
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/app/data          # same memory tree as the chat app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/healthz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Next.js admin UI + BFF (web/). The ONLY externally reachable admin surface:
+  # holds ADMIN_AUTH_TOKEN server-side, gates the operator with a password →
+  # httpOnly cookie, and proxies to admin-api over the compose network.
+  web:
+    build:
+      context: ./web
+      secrets:
+        # The BFF depends on @carneirofc/ui (GitHub Packages): export
+        # NODE_AUTH_TOKEN (read:packages) before `up --build`. Passed as a build
+        # secret so it never lands in an image layer. See web/README.md.
+        - node_auth_token
+    image: magi-admin-web:local
+    container_name: magi-admin-web
+    profiles: ["admin"]
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      ADMIN_API_URL: "http://admin-api:8100"   # the admin-api, by service name
+    env_file:
+      - .env                      # ADMIN_AUTH_TOKEN (== admin-api's), ADMIN_PASSWORD, SESSION_SECRET
+    depends_on:
+      admin-api:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   qdrant_storage:
   minio_data:
   rustfs_data:
   prometheus_data:
+
+# Build secret for the `web` image: the read:packages token used to install
+# @carneirofc/ui. Sourced from the NODE_AUTH_TOKEN env var at build time.
+secrets:
+  node_auth_token:
+    environment: NODE_AUTH_TOKEN

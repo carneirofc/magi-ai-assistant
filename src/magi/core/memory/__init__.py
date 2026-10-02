@@ -108,7 +108,6 @@ def build_memory(
     persona_adjustments_max: int = 0,
     summarize_session_fn: SummarizeFn | None = None,
     summarize_every: int = 10,
-    long_term_recent_raw: int = 5,
     retriever: MemoryRetriever | None = None,
     semantic_top_k: int = 5,
     short_term_turn_max_chars: int = 4_000,
@@ -127,7 +126,6 @@ def build_memory(
         persona_adjustments_max=persona_adjustments_max,
         summarize_session_fn=summarize_session_fn,
         summarize_every=summarize_every,
-        long_term_recent_raw=long_term_recent_raw,
         retriever=retriever,
         semantic_top_k=semantic_top_k,
         short_term_turn_max_chars=short_term_turn_max_chars,
@@ -172,7 +170,6 @@ def build_memory_from_config(
         persona_adjustments_max=config.persona_adjustments_max,
         summarize_session_fn=summarize_session_fn,
         summarize_every=config.summarize_every,
-        long_term_recent_raw=config.long_term_recent_raw,
         retriever=build_semantic_index(),  # None unless SEMANTIC_MEMORY is on
         semantic_top_k=config.semantic_top_k,
         short_term_turn_max_chars=config.short_term_turn_max_chars,

@@ -22,13 +22,14 @@ server, never a boot failure (connect errors surface later through the API's
 lifespan hook + introspection, which already handle MCP toolkits generically).
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from agno.utils.log import log_info, log_warning
+from pydantic import BaseModel, ConfigDict, Field
 
 from magi.core.config import config
 from magi.core.prompts import load_prompt
-from magi.core.types import JsonValue
+from magi.core.types import JsonObject
 
 if TYPE_CHECKING:
     from agno.agent import Agent
@@ -36,17 +37,44 @@ if TYPE_CHECKING:
     from agno.tools.mcp import MCPTools
     from agno.tools.mcp.params import SSEClientParams, StreamableHTTPClientParams
 
-# Fields a spec may carry; anything else is ignored (forward compatibility).
 _DEFAULT_TIMEOUT_S = 30
 
 
-def effective_mcp_specs() -> list[dict]:
+class McpServerSpec(BaseModel):
+    """One MCP server declaration, validated from the merged spec dict.
+
+    Unknown keys are ignored (forward compatibility); a wrong-typed field is a
+    `ValidationError`, which `_guarded` turns into a skipped server."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = Field(min_length=1)
+    transport: Literal["streamable-http", "sse", "stdio"] = "streamable-http"
+    url: str | None = None
+    command: str | None = None
+    headers: dict[str, str] | None = None
+    env: dict[str, str] | None = None
+    timeout_seconds: int = _DEFAULT_TIMEOUT_S
+    enabled: bool = True
+    attach: Literal["member", "lead"] = "member"
+    role: str | None = None
+    description: str | None = None
+    tool_allowlist: list[str] = Field(default_factory=list)
+    show_result_tools: list[str] = Field(default_factory=list)
+
+
+def _spec_name(entry: JsonObject) -> str:
+    name = entry.get("name")
+    return name.strip() if isinstance(name, str) else ""
+
+
+def effective_mcp_specs() -> list[JsonObject]:
     """The enabled server specs: `config.mcp_servers` merged (by name) with the
     operator settings file's `mcp` section — operator entries win field-wise,
     so an operator can tweak or disable a code-declared server."""
-    specs: dict[str, dict] = {}
+    specs: dict[str, JsonObject] = {}
     for entry in config.mcp_servers:
-        name = str(entry.get("name") or "").strip()
+        name = _spec_name(entry)
         if name:
             specs[name] = dict(entry)
     try:
@@ -58,15 +86,16 @@ def effective_mcp_specs() -> list[dict]:
         log_warning(f"mcp: could not read operator settings: {type(exc).__name__}: {exc}")
         operator_entries = []
     for entry in operator_entries:
-        name = str(entry.get("name") or "").strip()
+        name = _spec_name(entry)
         if name:
             specs[name] = {**specs.get(name, {}), **entry}
-    return [s for s in specs.values() if s.get("enabled", True)]
+    return [s for s in specs.values() if s.get("enabled", True) is not False]
 
 
-def build_mcp_toolkit(spec: dict) -> MCPTools:
-    """One agno MCP toolkit from a spec dict. Raises on a malformed spec or a
+def build_mcp_toolkit(raw: JsonObject | McpServerSpec) -> MCPTools:
+    """One agno MCP toolkit from a spec. Raises on a malformed spec or a
     missing `mcp` extra — callers catch and skip (see `_guarded`)."""
+    spec = raw if isinstance(raw, McpServerSpec) else McpServerSpec.model_validate(raw)
     try:
         from agno.tools.mcp import MCPTools
         from agno.tools.mcp.params import SSEClientParams, StreamableHTTPClientParams
@@ -75,66 +104,73 @@ def build_mcp_toolkit(spec: dict) -> MCPTools:
             "config.mcp_servers needs the optional 'mcp' dependency (`uv sync --extra mcp`)."
         ) from exc
 
-    name = str(spec.get("name") or "").strip()
-    transport = str(spec.get("transport") or "streamable-http")
-    timeout = int(spec.get("timeout_seconds") or _DEFAULT_TIMEOUT_S)
-    headers: dict[str, str] | None = spec.get("headers") or None
-    allow = [str(t) for t in spec.get("tool_allowlist") or []] or None
-    show = [str(t) for t in spec.get("show_result_tools") or []]
-
-    common: dict[str, JsonValue] = {
-        "timeout_seconds": timeout,
-        "include_tools": allow,
-        "show_result_tools": show,
-        "tool_name_prefix": None,
-    }
-    if transport == "stdio":
-        command = str(spec.get("command") or "").strip()
+    name = spec.name.strip()
+    allow = spec.tool_allowlist or None
+    if spec.transport == "stdio":
+        command = (spec.command or "").strip()
         if not command:
             raise ValueError(f"mcp server {name!r}: stdio transport needs a 'command'")
-        return MCPTools(command=command, env=spec.get("env") or None, transport="stdio", **common)
+        return MCPTools(
+            command=command,
+            env=spec.env or None,
+            transport="stdio",
+            timeout_seconds=spec.timeout_seconds,
+            include_tools=allow,
+            show_result_tools=spec.show_result_tools,
+            tool_name_prefix=None,
+        )
 
-    url = str(spec.get("url") or "").strip()
+    url = (spec.url or "").strip()
     if not url:
-        raise ValueError(f"mcp server {name!r}: transport {transport!r} needs a 'url'")
-    if transport == "sse":
+        raise ValueError(f"mcp server {name!r}: transport {spec.transport!r} needs a 'url'")
+    if spec.transport == "sse":
         params: SSEClientParams | StreamableHTTPClientParams = SSEClientParams(
-            url=url, headers=headers
+            url=url, headers=spec.headers
         )
     else:
-        params = StreamableHTTPClientParams(url=url, headers=headers)
-    return MCPTools(server_params=params, transport=transport, **common)
+        params = StreamableHTTPClientParams(url=url, headers=spec.headers)
+    return MCPTools(
+        server_params=params,
+        transport=spec.transport,
+        timeout_seconds=spec.timeout_seconds,
+        include_tools=allow,
+        show_result_tools=spec.show_result_tools,
+        tool_name_prefix=None,
+    )
 
 
-def _guarded(spec: dict) -> MCPTools | None:
-    name = spec.get("name", "?")
+def _guarded(raw: JsonObject) -> tuple[McpServerSpec, MCPTools] | None:
+    """Validate and build one server, or None (with a warning) when either fails."""
+    name = _spec_name(raw) or "?"
     try:
-        return build_mcp_toolkit(spec)
+        spec = McpServerSpec.model_validate(raw)
+        return spec, build_mcp_toolkit(spec)
     except Exception as exc:  # noqa: BLE001 — one bad server must not brick the boot.
         log_warning(f"mcp: skipping server {name!r}: {type(exc).__name__}: {exc}")
         return None
 
 
-def _default_member_role(name: str, spec: dict) -> str:
+def _default_member_role(spec: McpServerSpec) -> str:
     """A serviceable generated role when the spec supplies none: the base MCP
     member contract (prompts/team/mcp_member.md) with the server named."""
     template = load_prompt("team/mcp_member.md")
-    return template.replace("{name}", name).replace(
-        "{description}", str(spec.get("description") or "").strip()
+    return template.replace("{name}", spec.name.strip()).replace(
+        "{description}", (spec.description or "").strip()
     )
 
 
-def build_mcp_lead_toolkits() -> list:
+def build_mcp_lead_toolkits() -> list[MCPTools]:
     """Toolkits for every enabled `attach: "lead"` server — attached to the
     team itself, so the lead calls them directly (no delegation hop)."""
-    toolkits = []
-    for spec in effective_mcp_specs():
-        if spec.get("attach", "member") != "lead":
+    toolkits: list[MCPTools] = []
+    for raw in effective_mcp_specs():
+        if raw.get("attach", "member") != "lead":
             continue
-        toolkit = _guarded(spec)
-        if toolkit is not None:
+        built = _guarded(raw)
+        if built is not None:
+            spec, toolkit = built
             toolkits.append(toolkit)
-            log_info(f"mcp: lead toolkit '{spec.get('name')}' wired")
+            log_info(f"mcp: lead toolkit '{spec.name}' wired")
     return toolkits
 
 
@@ -146,14 +182,15 @@ def build_mcp_members(model: Model) -> list[Agent]:
     from agno.agent import Agent
 
     members: list[Agent] = []
-    for spec in effective_mcp_specs():
-        if spec.get("attach", "member") != "member":
+    for raw in effective_mcp_specs():
+        if raw.get("attach", "member") != "member":
             continue
-        toolkit = _guarded(spec)
-        if toolkit is None:
+        built = _guarded(raw)
+        if built is None:
             continue
-        name = str(spec.get("name")).strip()
-        role = str(spec.get("role") or "").strip() or _default_member_role(name, spec)
+        spec, toolkit = built
+        name = spec.name.strip()
+        role = (spec.role or "").strip() or _default_member_role(spec)
         members.append(Agent(name=f"{name}-agent", role=role, model=model, tools=[toolkit]))
         log_info(f"mcp: member '{name}-agent' wired")
     return members

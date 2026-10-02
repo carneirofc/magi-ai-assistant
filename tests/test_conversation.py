@@ -642,3 +642,54 @@ async def test_greeting_error_still_ends_with_a_reply():
     items = await _collect_greeting(service)
 
     assert items[-1] == ConversationReply(text=_ERROR_REPLY, is_error=True)
+
+
+# --- post-reply memory tail -----------------------------------------------------
+
+
+class _SlowCuratingMemory(_FakeMemory):
+    """Curation blocks until released, and records overlap between tails."""
+
+    def __init__(self):
+        super().__init__()
+        import asyncio
+
+        self.release = asyncio.Event()
+        self.active = 0
+        self.max_active = 0
+        self.curations = []
+
+    async def maybe_curate(self, user_message, assistant_reply):
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        await self.release.wait()
+        self.curations.append(user_message)
+        self.active -= 1
+
+
+async def test_reply_returns_before_curation_and_drain_waits_for_it():
+    mem = _SlowCuratingMemory()
+    response = SimpleNamespace(status="COMPLETED", content="ok", reasoning_content=None)
+    service = ConversationService(runner=_FakeRunner(response), memory=mem)  # pyright: ignore[reportArgumentType]
+
+    reply = await service.handle(user_id=1, session_id="s", text="hi")
+
+    assert reply.text == "ok"
+    assert mem.curations == []  # the curator hasn't finished — the reply didn't wait
+    mem.release.set()
+    await service.drain()
+    assert mem.curations == ["hi"]
+
+
+async def test_memory_tails_run_one_at_a_time_per_user():
+    mem = _SlowCuratingMemory()
+    response = SimpleNamespace(status="COMPLETED", content="ok", reasoning_content=None)
+    service = ConversationService(runner=_FakeRunner(response), memory=mem)  # pyright: ignore[reportArgumentType]
+
+    await service.handle(user_id=1, session_id="s", text="first")
+    await service.handle(user_id=1, session_id="s", text="second")
+    mem.release.set()
+    await service.drain()
+
+    assert mem.curations == ["first", "second"]
+    assert mem.max_active == 1

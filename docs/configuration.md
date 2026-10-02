@@ -1,44 +1,79 @@
 # Configuration
 
-magi is **code-first**. All settings are plain Python on the frozen `Config`
-dataclass in [`magi/core/config.py`](../src/magi/core/config.py); each entrypoint
-overrides what its deployment needs via `configure(...)` *before* building
-anything. To learn what a value is, read the entrypoint and that file — there is no
-env-var archaeology.
+All settings are fields on the frozen, validated `Config` pydantic model in
+[`magi/core/config.py`](../src/magi/core/config.py). A deployment sets them in
+a **YAML config file**, in **code** via `configure(...)`, or both — every path
+validates names *and* types, so a typo fails at startup naming the key. See
+[ADR 0004](adr/0004-typed-config-file-and-cli.md).
 
-Only **secrets** come from the environment / `.env`. The effective values (secrets
-masked) are printed at startup by `config.log_settings()` — one banner so you can
-confirm what's live.
+Only **secrets** come from the environment / `.env`. The effective values
+(secrets masked) are printed at startup and by `magi config show`.
 
 ```mermaid
 flowchart LR
-    ENV[.env<br/>secrets only] --> CFG[Config dataclass<br/>defaults]
-    ENT[entrypoint<br/>configure overrides] --> CFG
-    CFG --> BANNER[log_settings<br/>startup banner]
+    DEF[Config defaults] --> CFG[effective config]
+    FILE[magi.yaml /<br/>$MAGI_HOME/config.yaml] --> CFG
+    CODE[configure in code] --> CFG
+    ENV[.env<br/>secrets only] --> CFG
     CFG --> APP[whole app reads the singleton]
 ```
 
-## How it works
+## The config file
 
-```python
-# in main.py
-from magi.core.config import configure
+Keys are `Config` field names; groups are nested (`channels:`). Anything not
+listed keeps its default.
 
-def apply_deployment_config() -> None:
-    configure(
-        model_provider="llamacpp",
-        llamacpp_base_url="http://127.0.0.1:8888/v1",
-        session_summary=True,
-        memory_curation=True,
-        # …
-    )
+```yaml
+# ~/.magi/config.yaml  (or ./magi.yaml for a project-local deployment)
+model_provider: llamacpp
+llamacpp_base_url: http://127.0.0.1:8888/v1
+lead_num_ctx: 128000
+session_summary: true
+memory_curation: true
+channels:
+  enabled: [api]
 ```
 
-- `configure(**overrides)` mutates the shared singleton in place (the dataclass is
-  frozen so only this deliberate path can write). An unknown field raises with the
-  valid list — typos fail loud.
-- Call it **once, at the entrypoint, before** building any channel/team. Values are
-  read at build/run time.
+- **Lookup**: `./magi.yaml`, else `$MAGI_HOME/config.yaml`. `MAGI_HOME`
+  defaults to `~/.magi` and also holds `.env`, skills, and logs.
+- **Data root**: relative paths (`memory_dir`, `db_file`, …) resolve against the
+  config file's directory, or `MAGI_HOME` when there is no file.
+- **Precedence** (lowest → highest): defaults < config file(s) (later `-c`
+  wins) < `configure()` in code < CLI flags. Nested groups (`sandbox:`,
+  `skills:`, …) merge per key, so an overlay changes only the keys it sets.
+- The repo's own deployment is [`magi.yaml`](../magi.yaml); containers layer
+  [`docker/magi.docker.yaml`](../docker/magi.docker.yaml) on top (`--docker`).
+
+## The `magi` CLI
+
+```bash
+magi setup                          # wizard → ~/.magi/config.yaml + ~/.magi/.env (0600)
+magi doctor                         # config valid? backend reachable? extras installed?
+magi config path                    # MAGI_HOME and the file in use
+magi config show                    # every effective setting, secrets masked
+magi config get channels.enabled
+magi config set api_port 8001       # validated, atomic; YAML values: true, [a, b]
+magi run                            # serve channels.enabled
+magi run discord                    # or name the channel
+magi run -c magi.yaml -c docker/magi.docker.yaml api   # explicit files, later wins
+```
+
+## In code
+
+```python
+from magi.core.config import configure
+
+configure(model_provider="llamacpp", session_summary=True)
+```
+
+- `configure(**overrides)` validates every override against `Config` — an
+  unknown field or a wrong-typed value raises `pydantic.ValidationError`, and a
+  failed call changes nothing. It then mutates the shared singleton in place
+  (the model is frozen so only this deliberate path can write).
+- `derive(config, **overrides)` returns a validated copy without touching the
+  singleton; `reset_config()` restores the defaults (tests use both).
+- `load_config(path)` / `load_secrets(home)` are what the CLI uses; call them
+  from a custom entrypoint to get the same file + `.env` behavior.
 
 ## Secrets (`.env` only)
 
@@ -47,6 +82,7 @@ These never belong in code. See [`.env.example`](../.env.example).
 | Variable | Used for |
 |---|---|
 | `DISCORD_BOT_TOKEN` | Discord bot auth |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot auth (`telegram` extra) |
 | `LITELLM_MASTER_KEY` | LiteLLM proxy auth |
 | `LLAMACPP_API_KEY` | Only if `llama-server` runs with `--api-key` |
 | `OPENAI_API_KEY` | Remote OpenAI-compatible serving (`model_provider="openai"` / `embeddings_provider="openai"`) |
@@ -58,8 +94,49 @@ These never belong in code. See [`.env.example`](../.env.example).
 
 ## Settings reference
 
-Defaults shown are the engine defaults; the bundled entrypoints override several
-(notably `model_provider="llamacpp"`, `session_summary=True`, `memory_curation=True`).
+Defaults shown are the engine defaults; the repo's `magi.yaml` overrides several
+(notably `model_provider: llamacpp`, `session_summary: true`, `memory_curation: true`).
+
+### Channels
+
+| Field | Default | Notes |
+|---|---|---|
+| `channels.enabled` | `[api]` | What `magi run` serves when no channel is named: `api`, `discord`, `telegram`, `admin` (together, in one process), or `desktop` (alone) |
+| `telegram_allowed_users` | `[]` | Numeric Telegram user ids allowed to chat; empty = nobody |
+
+### Session search and delegation
+
+| Field | Default | Notes |
+|---|---|---|
+| `session_search_enabled` | `False` | Index every turn in SQLite FTS5 and give the lead `search_sessions` |
+| `session_index_path` | `data/session_index.db` | The index file (relative to the data root) |
+| `delegation_enabled` | `False` | Give the lead `delegate_task` (isolated helper agent) |
+| `delegate_timeout_seconds` | `120.0` | Hard cap per delegated task |
+| `delegate_tool_call_limit` | `8` | Tool calls the helper may make |
+
+### Sandbox (`run_command`)
+
+| Field | Default | Notes |
+|---|---|---|
+| `sandbox.backend` | `off` | `docker` (hardened throwaway container) \| `local` (no isolation) \| `off` |
+| `sandbox.approval` | `dangerous` | `always` (every command) \| `dangerous` (risky ones) \| `deny_dangerous` (risky ones refused) |
+| `sandbox.allowed_users` | `[]` | Scoped ids that may run commands (`discord:123`, `telegram:42`, `api:me`); empty = nobody |
+| `sandbox.timeout_seconds` | `60` | Per command |
+| `sandbox.output_max_chars` | `8000` | Output cap (head + tail kept) |
+| `sandbox.approval_ttl_seconds` | `600` | How long an approval id stays valid |
+| `sandbox.workspace_dir` | `None` | Per-user workspaces root (`None` = `$MAGI_HOME/workspace`) |
+| `sandbox.docker_image` | `python:3.14-slim` | Needs `bash` |
+| `sandbox.docker_network` | `False` | Give containers network access |
+| `sandbox.docker_memory` / `docker_pids` / `docker_cpus` | `1g` / `256` / `1.0` | Container limits |
+
+### Skills and toolsets
+
+| Field | Default | Notes |
+|---|---|---|
+| `skills.dirs` | `[]` | Extra SKILL.md directories, searched before `$MAGI_HOME/skills` |
+| `skills.disabled` | `[]` | Skill names never offered (file or Python) |
+| `skills.agent_write` | `propose` | `off` \| `propose` (evolution queue; needs `evolution_enabled`) \| `direct` (writes `$MAGI_HOME/skills`) |
+| `toolsets.disabled` | `[]` | Lead tool groups to drop, e.g. `[http, websearch]` — see `magi skills list` |
 
 ### Model backends
 
@@ -140,10 +217,11 @@ the face.
 | Field | Default | Notes |
 |---|---|---|
 | `memory_curation` | `False` | Post-turn curator owns the durable profile |
-| `long_term_recent_raw` | `5` | Raw facts kept alongside the curated profile |
+| `long_term_recent_raw` | `5` | Deprecated, no effect (the raw log is migrated into the fact sheet) |
 | `long_term_fact_max_chars` | `1000` | Per-fact size clamp (`<= 0` disables) |
-| `long_term_facts_max` | `200` | Soft cap on durable facts (oldest dropped) |
+| `long_term_facts_max` | `200` | Soft cap on durable facts (least recently touched dropped) |
 | `persona_seed` | `""` | Pre-populate the persona adjustments file |
+| `persona_learning` | `propose` | Curator-learned persona rules: `propose` (evolution queue; needs `evolution_enabled`, else dropped) \| `direct` (append now) \| `off` |
 
 ### Semantic memory search (optional)
 

@@ -132,7 +132,7 @@ wires the same secret from `NODE_AUTH_TOKEN`):
 
 ```bash
 export NODE_AUTH_TOKEN=ghp_xxx
-docker compose -f docker-compose.app.yaml --profile admin up --build
+docker compose --profile admin up --build
 # web → http://localhost:3000 ; admin-api stays internal to the compose network
 ```
 

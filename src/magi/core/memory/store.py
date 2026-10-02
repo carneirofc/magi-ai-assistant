@@ -8,8 +8,8 @@ so the raw conversation (role + content per turn) round-trips losslessly. Layout
       identity.json                      # global bot identity (name/description/avatar; magi/core/identity)
       identity/avatar.<ext>              # the bot's profile-picture bytes
       users/<user>/
-        long_term.md                     # durable facts learned about the user
-        long_term_facts.json             # curated profile: id-addressable facts (curator)
+        long_term_facts.json             # durable facts: id-addressable (curator + remember)
+        long_term.migrated.md            # the retired raw log, kept after its one-time migration
         episodic.md                      # summaries of past interactions (episodes)
         sessions/<session>.json          # short-term: recent turns (capped), JSON
         sessions/<session>.summary.md    # rolling summary of this session so far

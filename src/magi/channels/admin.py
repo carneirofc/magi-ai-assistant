@@ -57,6 +57,7 @@ from magi.core.memory import (
 from magi.core.memory.semantic import MemoryRetriever
 from magi.core.memory.store import FileMemoryStore
 from magi.core.settings import MemoryOverrides, OperatorSettingsStore
+from magi.core.types import JsonObject
 
 if TYPE_CHECKING:
     from magi.core.evolution import EvolutionStore
@@ -398,8 +399,8 @@ class McpSettingsOut(BaseModel):
     (context, edited in main.py) and the operator's own entries (editable here;
     merged over the code list by name at team assembly). Restart to apply."""
 
-    code_servers: list[dict] = Field(default_factory=list)
-    operator_servers: list[dict] = Field(default_factory=list)
+    code_servers: list[JsonObject] = Field(default_factory=list)
+    operator_servers: list[JsonObject] = Field(default_factory=list)
     version: str = ""
     restart_required: bool = False
 
@@ -407,7 +408,7 @@ class McpSettingsOut(BaseModel):
 class UpdateMcpSettings(BaseModel):
     """Replace the operator's MCP server list (empty = clear)."""
 
-    servers: list[dict] = Field(default_factory=list)
+    servers: list[JsonObject] = Field(default_factory=list)
     expected_version: str | None = Field(default=None)
 
 
@@ -1282,4 +1283,36 @@ def build_admin_app(memory_manager: MemoryManager | None = None) -> FastAPI:
         archive=archive,
         memory_manager=manager,
         settings_store=operator_settings_store(),
+    )
+
+
+class AdminAdapter:
+    """The admin surface as a `gateway.PlatformAdapter`: its own uvicorn server on
+    `admin_host:admin_port`, run beside the chat channels in one process
+    (`channels/registry.py`). It has no users of its own — `platform` only
+    satisfies the protocol."""
+
+    platform: str = "admin"
+
+    def __init__(self, app: FastAPI, host: str, port: int) -> None:
+        import uvicorn
+
+        self._server = uvicorn.Server(uvicorn.Config(app, host=host, port=port))
+
+    def request_stop(self) -> None:
+        """Let uvicorn finish in-flight requests and its lifespan (gateway.Stoppable)."""
+        self._server.should_exit = True
+
+    async def serve_async(self) -> None:
+        await self._server.serve()
+
+
+def build_admin_adapter(memory_manager: MemoryManager | None = None) -> AdminAdapter:
+    """`build_admin_app` wrapped as an adapter bound to the configured admin port."""
+    from magi.core.config import config
+
+    return AdminAdapter(
+        build_admin_app(memory_manager=memory_manager),
+        host=config.admin_host,
+        port=config.admin_port,
     )

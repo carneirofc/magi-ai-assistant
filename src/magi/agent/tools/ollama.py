@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from magi.agent.tools.outputs import ToolOutput, fail, ok
 from magi.core.config import config
-from magi.core.types import JSON_OBJECT, JsonObject
+from magi.core.types import JsonObject, JsonValue
 
 _TIMEOUT = 10.0
 
@@ -55,22 +55,64 @@ class RunningOllamaModelsData(BaseModel):
     models: list[RunningOllamaModelRow]
 
 
-def _get(path: str, timeout: float = _TIMEOUT) -> JsonObject:
+# --- Ollama wire shapes: the slice of each /api response the tools read. ---
+# Untrusted upstream JSON is validated here, never navigated with .get() chains.
+
+
+class _WireDetails(BaseModel):
+    family: str | None = None
+    parameter_size: str | None = None
+    quantization_level: str | None = None
+
+
+class _WireTagsModel(BaseModel):
+    name: str | None = None
+    size: int | None = None
+    details: _WireDetails | None = None
+
+
+class _WireTags(BaseModel):
+    models: list[_WireTagsModel] = Field(default_factory=list)
+
+
+class _WireShow(BaseModel):
+    capabilities: list[str] | None = None
+    model_info: dict[str, JsonValue] | None = None
+    details: _WireDetails | None = None
+
+
+class _WirePsModel(BaseModel):
+    name: str | None = None
+    size_vram: int | None = None
+    context_length: int | None = None
+
+
+class _WirePs(BaseModel):
+    models: list[_WirePsModel] = Field(default_factory=list)
+
+
+def _get[M: BaseModel](path: str, shape: type[M], timeout: float = _TIMEOUT) -> M:
     r = httpx.get(f"{config.ollama_host}{path}", timeout=timeout)
     r.raise_for_status()
-    return JSON_OBJECT.validate_json(r.content)
+    return shape.model_validate_json(r.content)
 
 
-def _post(path: str, body: dict, timeout: float = _TIMEOUT) -> JsonObject:
+def _post[M: BaseModel](
+    path: str, body: JsonObject, shape: type[M], timeout: float = _TIMEOUT
+) -> M:
     r = httpx.post(f"{config.ollama_host}{path}", json=body, timeout=timeout)
     r.raise_for_status()
-    return JSON_OBJECT.validate_json(r.content)
+    return shape.model_validate_json(r.content)
 
 
-def _context_length(model_info: dict) -> int | None:
+def _context_length(model_info: dict[str, JsonValue] | None) -> int | None:
     """Pull the "<arch>.context_length" value out of an /api/show model_info."""
     return next(
-        (v for k, v in (model_info or {}).items() if k.endswith(".context_length")),
+        (
+            v
+            for k, v in (model_info or {}).items()
+            if k.endswith(".context_length") and isinstance(v, int)
+        ),
         None,
     )
 
@@ -87,22 +129,20 @@ def list_ollama_models() -> ToolOutput[OllamaModelsData]:
     model's name, parameter size, quantization, and on-disk size.
     """
     try:
-        data = _get("/api/tags")
+        data = _get("/api/tags", _WireTags)
     except Exception as e:
         return fail(f"Failed to reach Ollama at {config.ollama_host}: {e}")
-    models = data.get("models", [])
-    if not models:
+    if not data.models:
         return ok("No models installed on Ollama.", OllamaModelsData(models=[]))
-    items = []
-    for m in models:
-        d = m.get("details", {}) or {}
-        size_gb = (m.get("size", 0) or 0) / 1e9
+    items: list[OllamaModelRow] = []
+    for m in data.models:
+        d = m.details or _WireDetails()
         items.append(
             OllamaModelRow(
-                name=m.get("name"),
-                parameter_size=d.get("parameter_size"),
-                quantization_level=d.get("quantization_level"),
-                size_gb=round(size_gb, 1),
+                name=m.name,
+                parameter_size=d.parameter_size,
+                quantization_level=d.quantization_level,
+                size_gb=round((m.size or 0) / 1e9, 1),
             )
         )
     return ok("Ollama models.", OllamaModelsData(models=items))
@@ -126,21 +166,19 @@ def show_ollama_model(
     window is.
     """
     try:
-        data = _post("/api/show", {"model": model})
+        data = _post("/api/show", {"model": model}, _WireShow)
     except Exception as e:
         return fail(f"Failed to show '{model}': {e}", OllamaModelErrorData(model=model))
-    caps = data.get("capabilities", []) or []
-    ctx = _context_length(data.get("model_info", {}))
-    d = data.get("details", {}) or {}
+    d = data.details or _WireDetails()
     return ok(
         f"Model {model}.",
         OllamaModelInfoData(
             model=model,
-            family=d.get("family"),
-            parameter_size=d.get("parameter_size"),
-            quantization_level=d.get("quantization_level"),
-            capabilities=caps,
-            native_context_length=ctx,
+            family=d.family,
+            parameter_size=d.parameter_size,
+            quantization_level=d.quantization_level,
+            capabilities=data.capabilities or [],
+            native_context_length=_context_length(data.model_info),
         ),
     )
 
@@ -157,17 +195,17 @@ def list_running_ollama_models() -> ToolOutput[RunningOllamaModelsData]:
     with — handy to confirm a model actually loaded at the expected num_ctx.
     """
     try:
-        data = _get("/api/ps")
+        data = _get("/api/ps", _WirePs)
     except Exception as e:
         return fail(f"Failed to reach Ollama at {config.ollama_host}: {e}")
-    models = data.get("models", [])
-    if not models:
+    if not data.models:
         return ok("No models currently loaded in Ollama.", RunningOllamaModelsData(models=[]))
-    items = []
-    for m in models:
-        vram_gb = (m.get("size_vram", 0) or 0) / 1e9
-        ctx = m.get("context_length")
-        items.append(
-            RunningOllamaModelRow(name=m.get("name"), loaded_context=ctx, vram_gb=round(vram_gb, 1))
+    items = [
+        RunningOllamaModelRow(
+            name=m.name,
+            loaded_context=m.context_length,
+            vram_gb=round((m.size_vram or 0) / 1e9, 1),
         )
+        for m in data.models
+    ]
     return ok("Loaded Ollama models.", RunningOllamaModelsData(models=items))

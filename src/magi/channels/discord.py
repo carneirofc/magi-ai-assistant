@@ -6,16 +6,14 @@ guidance prompt, the gateway client, and the `DiscordClient` presentation layer.
 Everything is injected — no globals, nothing constructed inside a constructor.
 """
 
-import asyncio
-
 from agno.db.base import BaseDb
 from agno.utils.log import log_info
 
 from clients.mydiscord import DiscordClient
 from magi.agent.model import lead_model_def
 from magi.channels.bootstrap import build_conversation_service
-from magi.channels.gateway import run_gateway
 from magi.core.config import config
+from magi.core.conversation import ConversationService
 from magi.core.prompts import load_prompt
 
 try:
@@ -26,18 +24,23 @@ except (ImportError, ModuleNotFoundError) as exc:
     ) from exc
 
 
-def build_discord_client(db: BaseDb | None = None) -> DiscordClient:
-    """Build the Discord bot backed by the multimodal agent team."""
-    if not config.DISCORD_BOT_TOKEN:
-        raise RuntimeError("DISCORD_BOT_TOKEN not set in environment")
-    log_info(f"building discord client (db={'injected' if db else 'default'})")
+def build_discord_client(
+    db: BaseDb | None = None, *, conversation: ConversationService | None = None
+) -> DiscordClient:
+    """Build the Discord bot backed by the multimodal agent team.
 
-    conversation = build_conversation_service(
-        # Discord-only output rules, kept out of the base prompt so it stays
-        # channel-agnostic (see prompts/channels/discord.md).
-        channel_guidance=load_prompt("channels/discord.md"),
-        db=db,
-    )
+    `conversation` is the gateway's shared brain when several channels run in
+    one process; None builds this channel's own."""
+    if not config.DISCORD_BOT_TOKEN:
+        raise RuntimeError("DISCORD_BOT_TOKEN not set (add it to $MAGI_HOME/.env)")
+    # Discord-only output rules, kept out of the base prompt so it stays
+    # channel-agnostic (see prompts/channels/discord.md).
+    guidance = load_prompt("channels/discord.md")
+    if conversation is None:
+        log_info(f"building discord client (db={'injected' if db else 'default'})")
+        conversation = build_conversation_service(channel_guidance=guidance, db=db)
+    else:
+        conversation = conversation.with_guidance(guidance)
 
     log_info("discord client: building with all intents")
     client = discord.Client(intents=discord.Intents.all())
@@ -53,30 +56,19 @@ def build_discord_client(db: BaseDb | None = None) -> DiscordClient:
 
 def serve_with_admin(client: DiscordClient) -> None:
     """Run the Discord gateway connection and the admin HTTP surface together in
-    one process (`config.admin_enabled`) — the alongside-admin alternative to
-    `client.serve()`.
-
-    Unlike the HTTP API channel (`channels/api.py`), Discord has no ASGI app to
-    mount the admin surface onto, so this instead starts a second uvicorn server
-    (bound to `admin_host`/`admin_port`, same as `python main.py admin` standalone) and
-    runs it concurrently with the gateway connection via `gateway.run_gateway`.
-    See ADR 0002, ADR 0003, and `admin_enabled` in `core/config.py`.
+    one process (`config.admin_enabled`) — a second uvicorn server on
+    `admin_host`/`admin_port` sharing this bot's memory orchestrator, so the
+    admin's summarize / curate / flush triggers run the real passes. The
+    general form is `channels.registry.serve(["discord", "admin"])` (ADR 0005).
     """
-    import uvicorn
+    import asyncio
 
-    from magi.channels.admin import build_admin_app
+    from magi.channels.admin import build_admin_adapter
+    from magi.channels.gateway import run_gateway
 
     log_info(
         f"discord: admin surface ALSO served at http://{config.admin_host}:{config.admin_port} "
         "(config.admin_enabled)"
     )
-    admin_server = uvicorn.Server(
-        uvicorn.Config(
-            # Share this bot's memory orchestrator so the admin operator triggers
-            # (summarize / curate / flush) run the real model-backed passes.
-            build_admin_app(memory_manager=client.conversation.memory),
-            host=config.admin_host,
-            port=config.admin_port,
-        )
-    )
-    asyncio.run(run_gateway(client.serve_async(), admin_server.serve()))
+    admin = build_admin_adapter(memory_manager=client.conversation.memory)
+    asyncio.run(run_gateway(client.serve_async(), admin.serve_async()))

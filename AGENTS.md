@@ -89,9 +89,13 @@ Default section order:
   bodies, `JSON.parse`/`json.loads`, files, localStorage, env, and LLM output go
   through **zod** in `web/` and **pydantic** (`BaseModel` / `TypeAdapter`) in
   Python. No `as T` on parsed data.
-- **Tooling:** Python uses **ruff** (lint + format), web uses **Biome** (lint +
-  format). Both gate CI and pre-commit; do not add ESLint, Prettier, black, or
-  isort.
+- **Tooling:** Python uses **ruff** (lint + format) and **basedpyright**
+  (types: `standard`, `strict` for `src/magi/core`), web uses **Biome** (lint +
+  format) and `tsc`. All gate CI and pre-commit; do not add ESLint, Prettier,
+  black, isort, or mypy.
+- **Type baseline only shrinks.** Pre-existing type errors live in
+  `.basedpyright/baseline.json` (recorded under `uv sync --dev --all-extras`).
+  New code must be clean; never regenerate the baseline to hide a new error.
 
 ## User Preferences
 
@@ -108,13 +112,18 @@ When the user requests a durable behavior change, record it here or in the relev
 
 Owned here at the root (no child doc):
 
-- `main.py` — the single entrypoint; picks a channel and sets all non-secret
-  config in code via `configure(...)`.
+- `main.py` — thin repo entrypoint (`python main.py <channel> [--docker]`) over
+  `magi.cli.run`; loads `magi.yaml` (+ `docker/magi.docker.yaml` with
+  `--docker`). Code-only extensions (persona registration) go here.
+- `magi.yaml` — this checkout's deployment config (validated `Config` keys);
+  `docker/magi.docker.yaml` — the container-only overlay.
 - `docs/` — human documentation: architecture, memory, channels, configuration,
   and ADRs (`docs/adr/`). Update alongside behavior changes they describe.
 - `clients/` — Discord presentation layer (`mydiscord.py`) driven by the injected
   `ConversationService`; constructed by `src/magi/channels/discord.py`.
-- `scripts/` — out-of-band operational scripts (e.g. `ingest_knowledge.py`).
+- `scripts/` — out-of-band operational scripts (`install.sh` — the bare-metal
+  installer, `ingest_knowledge.py`).
 - `examples/` — runnable persona/desktop examples of the extension points.
-- `.github/`, `Dockerfile`, `docker-compose*.yaml`, `pyproject.toml` — CI,
-  packaging, and container wiring.
+- `.github/`, `Dockerfile`, `docker-compose.yaml` (every service behind a
+  profile), `pyproject.toml` — CI, packaging, and container wiring. Bare-metal
+  (`magi gateway install`) is the default deployment; containers are optional.
